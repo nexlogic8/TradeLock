@@ -1,0 +1,57 @@
+// TradeLock for Android: the app runs TradeLock in its own built-in web view (no external browser).
+// The page comes from https://tradelock.in, so every web update reaches the app instantly.
+plugins { id 'com.android.application' }
+
+android {
+  namespace 'in.tradelock.app'
+  compileSdk 36
+
+  defaultConfig {
+    applicationId 'in.tradelock.app'
+    minSdk 24
+    targetSdk 36
+    versionCode 23
+    versionName '1.4.14'
+    buildConfigField 'String', 'HOME_URL', '"https://tradelock.in/overview"'
+    buildConfigField 'String', 'HOST', '"tradelock.in"'
+    // Google "web" OAuth client ID (public), from the original sign-in project, whose Android client is registered for
+    // this package and release key (the server accepts it via GOOGLE_APP_CLIENT_IDS). The native account picker asks Google for an ID token
+    // for this client.
+    buildConfigField 'String', 'GOOGLE_WEB_CLIENT_ID', '"577485329686-agp3sata8iome8susa3vdpt5dgpeu9db.apps.googleusercontent.com"'
+  }
+  buildFeatures { buildConfig true }
+
+  signingConfigs {
+    release {
+      def p = new Properties()
+      def f = rootProject.file('keystore.properties')
+      if (f.exists()) {
+        f.withInputStream { p.load(it) }
+        storeFile rootProject.file(p['storeFile'])
+        storePassword p['storePassword']
+        keyAlias p['keyAlias']
+        keyPassword p['keyPassword']
+      }
+    }
+  }
+  buildTypes {
+    release {
+      minifyEnabled true
+      shrinkResources true
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+      signingConfig signingConfigs.release
+    }
+  }
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies {
+  implementation 'androidx.activity:activity:1.9.3'
+  implementation 'androidx.core:core:1.13.1'
+  implementation 'androidx.credentials:credentials:1.3.0'
+  implementation 'androidx.credentials:credentials-play-services-auth:1.3.0'
+  implementation 'com.google.android.libraries.identity.googleid:googleid:1.1.1'
+}

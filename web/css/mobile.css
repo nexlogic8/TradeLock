@@ -1,0 +1,325 @@
+/* Sign-in extras (all widths) */
+.btn-google { background: #fff; color: #1F1F1F; border-color: #DADCE0; gap: 12px; font-weight: 600; margin-top: 24px; }
+.btn-google:hover { background: #F2F2F2; border-color: #DADCE0; }
+.or { display: flex; align-items: center; gap: 12px; color: var(--dim); font-size: 12px; margin-top: 18px; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
+.auth-form.tight { margin-top: 18px; }
+
+/* Bottom tab bar: hidden on desktop */
+.tabbar { display: none; }
+
+/* ---------- Tablet & phone ---------- */
+@media (max-width: 900px) {
+  .tabbar {
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 28;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--tabbar-bg); border-top: 1px solid var(--line);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  }
+  .tab {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    min-height: 52px; border-radius: 12px; border: 0; background: none; cursor: pointer;
+    color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .02em;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab:hover { text-decoration: none; }
+  .tab svg { width: 21px; height: 21px; }
+  .tab.danger svg { color: var(--red); }
+  .tab[aria-current] { color: var(--mint); background: var(--mint-soft); }
+  .tab[aria-current] svg { color: var(--mint); }
+
+  .main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .topbar { top: 0; padding-block: calc(12px + var(--top-inset)) 12px; gap: 12px; }
+  .toasts { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+  .side { padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ---------- Phone ---------- */
+@media (max-width: 620px) {
+  body { font-size: 15px; }
+  /* 16px+ stops iOS Safari zooming into focused fields */
+  .input, select.input { font-size: 16px; height: 48px; }
+  .btn { min-height: 44px; }
+  .btn-sm { height: 40px; min-height: 40px; }
+  .switch { width: 50px; height: 30px; }
+  .switch::after { width: 22px; height: 22px; }
+  .switch[aria-checked="true"]::after { transform: translateX(20px); }
+  .seg button { height: 40px; padding: 0 14px; }
+  .seg-sm button { height: 34px; padding: 0 10px; }
+
+  .pad { padding: 18px; }
+  .wrap { padding-inline: 16px; }
+  .topbar h1 { font-size: 20px; }
+  .topbar .t-sub { display: none; }
+  /* Title row, then the status chips on their own full-width row so nothing runs off-screen */
+  .topbar { flex-wrap: wrap; row-gap: 10px; }
+  .topbar .top-right { width: 100%; gap: 6px; }
+  .topbar .chip-btn, .topbar .agent-btn { padding: 0 8px; }
+  .topbar .top-right > .market-chip { margin-right: auto; }
+  .chip-btn { height: 34px; padding: 0 10px; }
+  .agent-btn { height: 34px; padding: 0 10px; }
+  .agent-btn .long { display: none; }
+  .agent-btn .short { display: inline; }
+
+  /* KPI tiles: 2 × 2 instead of four full-height cards */
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpis.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis.three > .kpi:last-child { grid-column: 1 / -1; }
+  .kpi { padding: 14px; }
+  .kpi .lbl { font-size: 11px; }
+  .kpi .val { font-size: 22px; margin-top: 6px; }
+  .kpi .val small { font-size: 14px; }
+  .kpi .foot { font-size: 11px; margin-top: 6px; }
+  .kpi .spark { height: 34px; }
+  .kpi.status .val { font-size: 15px; margin-top: 8px; gap: 8px; }
+  .chart { height: 220px; }
+  .chart-panel .chart { min-height: 220px; }
+
+  /* Tables become stacked cards; cells label themselves */
+  .tbl-wrap:has(.tbl.cards) { overflow: visible; margin: 0; padding: 0; }
+  .tbl.cards { min-width: 0; }
+  .tbl.cards thead { display: none; }
+  .tbl.cards, .tbl.cards tbody { display: block; }
+  .tbl.cards tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .tbl.cards tr:last-child { border-bottom: 0; }
+  .tbl.cards tr:hover { background: none; }
+  .tbl.cards td { display: block; padding: 0; border: 0; text-align: left; font-size: 14px; min-width: 0; }
+  .tbl.cards td.span { grid-column: 1 / -1; }
+  .tbl.cards td.r.span { text-align: right; }
+  .tbl.cards td.r.span .btn { width: 100%; }
+  .tbl.cards td.hide-card { display: none; }
+  .tbl.cards td[data-label]::before { content: attr(data-label); display: block; font-family: var(--font-ui); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-bottom: 3px; }
+
+  /* Order ticket: two columns, instrument and button full width */
+  .ticket { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ticket > .field:first-child, .ticket > button { grid-column: 1 / -1; }
+
+  .rule { padding: 18px; }
+  .savebar { padding: 10px; }
+  .savebar .msg { min-width: 100%; }
+  .savebar .btn { flex: 1; }
+  .plan .price .big { font-size: 44px; }
+  .estop h2 { font-size: 22px; }
+  .note { padding: 14px; gap: 12px; }
+  .auth-aside { display: none; }
+  .hero .row .btn { flex: 1; }
+}
+
+/* Broker card: kill switch and Stop agent get their own full-width row on phones */
+@media (max-width: 620px) {
+  .acct-head { flex-wrap: wrap; }
+  .acct-actions { width: 100%; justify-content: stretch; }
+  .acct-actions .ks-slot { flex: 1 1 100%; }
+  .acct-actions .ks-ctl { width: 100%; }
+  .acct-actions > .btn { flex: 1; }
+}
+
+/* Phones: the save bar only appears when there is something to save (it would cover the list) */
+@media (max-width: 620px) {
+
+  .savebar .msg { font-size: 12px; }
+  .cal-short { font-size: clamp(8.5px, 2.5vw, 10.5px) !important; }
+}
+@media (max-width: 620px) {
+  .aff-link { flex-direction: column; }
+  .aff-link .btn { width: 100%; }
+  .broker-opt { flex-wrap: wrap; gap: 12px; }
+  .broker-opt .grow { flex: 1 1 0; min-width: 0; }
+}
+@media (max-width: 620px) {
+  /* Top bar buttons wrap instead of running off narrow screens */
+  .topbar .top-right { flex-wrap: wrap; row-gap: 6px; }
+  .cal-short { font-size: clamp(8px, 2.35vw, 10.5px) !important; letter-spacing: -.05em; }
+}
+
+@media (max-width: 620px) {
+  /* Broker choices: logo | name + description, with the status badge underneath */
+  .broker-opt { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  .broker-opt > .pill { grid-column: 2; justify-self: start; }
+}
+
+/* ---------- Phone top bar: [menu] Title ........ (photo) / one slim row of status chips ---------- */
+@media (max-width: 620px) {
+  .topbar { flex-wrap: wrap; row-gap: 10px; padding-block: 10px 10px; }
+  .topbar .menu-btn { order: 1; width: 38px; height: 38px; }
+  .topbar .grow { order: 2; min-width: 0; }
+  .topbar h1 { font-size: 19px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .top-avatar { order: 3; }
+  .topbar .top-avatar .avatar { width: 36px; height: 36px; }
+  .topbar .top-right { order: 4; width: 100%; flex-wrap: nowrap !important; gap: 6px; overflow-x: auto; scrollbar-width: none; justify-content: flex-start; }
+  .topbar .top-right::-webkit-scrollbar { display: none; }
+  .topbar .top-right > .market-chip { margin-right: 0; }
+  .topbar .chip-btn, .topbar .agent-btn { height: 30px; padding: 0 10px; font-size: 11.5px; border-radius: 10px; flex: none; }
+  .topbar .theme-btn { display: none; }   /* theme lives in Settings on phones */
+  .topbar .b-mark { width: 16px; height: 16px; }
+  .topbar .chip-btn svg, .topbar .agent-btn svg { width: 14px; height: 14px; flex: none; }
+
+  /* Calendar: arrows and the month/year pickers on one line */
+  .cal-nav { flex-wrap: nowrap; gap: 6px; width: 100%; }
+  .cal-nav .icon-btn { width: 36px; height: 36px; flex: none; }
+  .cal-sel { flex: 1; min-width: 0; padding-left: 10px; }
+  .cal-sel.cal-year { flex: 0 0 100px; min-width: 0; padding-right: 28px; }
+
+  /* Profile header: badge under the name instead of squeezing it */
+  .profile-head { gap: 14px; }
+  .profile-head .pill { order: 3; }
+  .profile-who { flex: 1 1 calc(100% - 80px); min-width: 0; }
+  .profile-who span { word-break: break-all; }
+  .profile-avatar { width: 52px; height: 52px; }
+
+  /* Calmer heading sizes on phones */
+  .aff-hero h2 { font-size: 21px; }
+  .auth-card h1 { font-size: 26px; }
+  .panel-title { font-size: 15px; }
+}
+
+@media (max-width: 620px) {
+  /* Status chips: shorter labels so all four fit on one row */
+  .topbar .market-chip { height: 30px; padding: 0; border-radius: 0; }
+  .market-chip::before, .market-chip::after { top: -7px; height: 9px; }
+  .market-board-face { height: 30px; padding: 0 10px; }
+  .market-board-face::before { left: 15px; }
+  .market-board-face::after { right: 15px; }
+  .topbar .top-right { justify-content: space-between; }
+  .topbar .chip-btn, .topbar .agent-btn { padding: 0 9px; gap: 6px; }
+  /* P&L tile: the mini chart sits under the numbers instead of over them */
+  .kpi .spark { position: static; display: block; width: 100%; height: 30px; margin-top: 8px; }
+  /* Landing header: logo + one button, nothing wraps */
+  .nav { gap: 10px; }
+  .nav .logo span { font-size: 18px; }
+  .nav-links { gap: 12px; flex-wrap: nowrap; }
+  .nav-links a:not(.btn) { white-space: nowrap; }
+  .nav-links .btn { white-space: nowrap; padding: 0 14px; }
+}
+@media (max-width: 400px) { .nav-links a:not(.btn) { display: none; } }
+@media (max-width: 620px) {
+  #pg-title.brand { font-size: 20px; gap: 9px; }
+  #pg-title.brand .logo-mark { width: 28px; height: 28px; }
+  #pg-title.screen-title { gap: 9px; }
+  #pg-title.screen-title .logo-mark { width: 28px; height: 28px; }
+}
+
+/* Phones: no left menu (everything is in the right-hand profile panel) */
+@media (max-width: 900px) {
+  .menu-btn, .side, .scrim { display: none !important; }
+}
+.header-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.notification-btn { position: relative; }
+.notification-btn .badge { position: absolute; top: -5px; right: -5px; font-size: 10px; }
+#tab-avatar .avatar { width: 23px; height: 23px; font-size: 9px; }
+.tab[aria-expanded="true"] { color: var(--mint); background: var(--mint-soft); }
+@media (max-width: 620px) {
+  .topbar .header-actions { order: 3; }
+  .header-actions .wallet-btn { height: 36px; padding: 0 8px; }
+  .header-actions .wallet-pop { position: fixed; top: 78px; left: 16px; right: 16px; width: auto; }
+}
+
+@media (max-width: 900px) { .desktop-profile { display: none; } }
+
+@media (max-width: 620px) {
+  /* KPI label + badge: badge wraps under the label instead of being cut off */
+  .kpi .lbl { flex-wrap: wrap; row-gap: 4px; }
+  .kpi .lbl .pill { max-width: 100%; }
+}
+
+@media (max-width: 620px) {
+  .android-app .topbar { padding-top: calc(10px + var(--top-inset)); }
+  .android-app .nav { padding-top: calc(4px + var(--top-inset)); padding-bottom: 8px; }
+}
+
+/* Phones: keep the top status row and the broker strip within the screen. */
+@media (max-width: 620px) {
+  .broker-chip:has(.b-mark) span:last-child { display: none; }   /* logo + status dot say enough */
+  .broker-tab { flex: 0 0 auto; padding: 7px 8px; gap: 8px; }
+  .broker-tab .b-logo { width: 26px; height: 26px; }
+  .broker-tab:not([aria-selected="true"]) b { display: none; }   /* logos only, name on the selected one */
+  .broker-tab[aria-selected="true"] { flex: 1 1 auto; }
+  #page .panel.pad:has(> .broker-tabs), #page .panel.pad:has(> div > .broker-tabs) { padding: 18px 14px !important; }
+}
+
+/* Menu panel: every trading page as tiles (phones), then the account links. */
+.pd-phone { display: none; }
+.pd-section { padding: 14px 22px 6px; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.pd-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 2px 14px 6px; }
+.pd-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 76px; padding: 10px 6px;
+  border-radius: 14px; border: 1px solid var(--line); background: var(--well); color: var(--fg); font-size: 12px; font-weight: 600; text-align: center; line-height: 1.2;
+  -webkit-tap-highlight-color: transparent; transition: border-color .15s, background .15s; }
+.pd-tile:hover, .pd-tile:focus-visible { text-decoration: none; border-color: var(--line-2); outline: none; }
+.pd-tile svg { width: 20px; height: 20px; color: var(--mint); }
+.pd-tile[aria-current] { border-color: var(--mint); background: var(--mint-soft); }
+@media (max-width: 900px) {
+  .pd-phone { display: block; }
+  .pd-grid.pd-phone { display: grid; }
+  .pd-links.pd-desktop { display: none; }
+  .pd-logout { margin-top: 14px; }
+}
+
+/* Phones: the four status controls as a 2 × 2 grid (Market | Dhan, Algo | Protection) instead of a row
+   that runs off the screen; the trade-alarm banner puts its buttons under the text. */
+@media (max-width: 620px) {
+  .topbar .top-right { display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px; overflow: visible; }
+  .topbar .top-right > * { min-width: 0; width: 100%; }
+  .topbar .top-right > .wallet-wrap > .agent-btn { width: 100%; }
+  .topbar .top-right .chip-btn, .topbar .top-right .agent-btn { justify-content: center; }
+  .topbar .top-right > .market-chip { justify-self: stretch; margin: 0; padding: 0; }
+  .topbar .top-right .broker-chip:has(.b-mark) span:last-child { display: inline; }   /* room for "Dhan" in the grid */
+  .topbar .top-right .market-board-face { width: 100%; justify-content: center; }
+  .topbar .top-right > .market-chip { order: 1; } .topbar .top-right > #conn-chip { order: 2; }
+  .topbar .top-right > #algo-btn { order: 3; } .topbar .top-right > .wallet-wrap { order: 4; } .topbar .top-right > #theme-btn { order: 5; }
+  .alarm-banner { flex-wrap: wrap; }
+  .alarm-banner .grow { flex: 1 1 calc(100% - 34px); }
+  .alarm-banner .alarm-actions { width: 100%; padding-left: 30px; }
+  .alarm-banner .alarm-actions .btn { flex: 1; }
+}
+
+/* Strategy pictures (ⓘ) on phones: a card across the screen above the tab bar, not a popover hanging off the
+   left edge. The panel blur would pin a fixed box to the panel, so that panel drops it while the card is open. */
+@media (max-width: 620px) {
+  .sart-pop { position: fixed; left: 12px; right: 12px; top: auto; bottom: calc(86px + env(safe-area-inset-bottom, 0px)); width: auto; max-width: 460px; margin: 0 auto; z-index: 80; }
+  .panel:has(.sart-anchor:focus-within), .panel:has(.sart-anchor.open) { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+/* Overview on phones: the four top tiles are compact (about half height) so the intraday P&L chart sits
+   higher up. Tools float in the corner, one line each for label, amount and note, and a colour accent. */
+@media (max-width: 620px) {
+  .ov-kpis { gap: 8px; margin-bottom: 12px; }
+  .ov-kpis .kpi { padding: 9px 12px 9px 14px; border-radius: 14px; }
+  .ov-kpis .kpi::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--acc, var(--mint)); opacity: .9; }
+  .ov-kpis .acc-mint { --acc: var(--mint); } .ov-kpis .acc-red { --acc: var(--red); }
+  .ov-kpis .acc-amber { --acc: var(--amber); } .ov-kpis .acc-ice { --acc: var(--ice); }
+  .ov-kpis .kpi .lbl { flex-wrap: nowrap; min-height: 18px; padding-right: 0; font-size: 10.5px; letter-spacing: .02em; white-space: nowrap; }
+  .ov-kpis .kpi .lbl .pill { padding: 1px 7px; font-size: 9px; }
+  .ov-kpis .kpi-tools { position: absolute; top: 6px; right: 6px; gap: 4px; }
+  .ov-kpis .kpi-tools .icon-btn.sm { width: 22px; height: 22px; border-radius: 6px; }
+  .ov-kpis .kpi-tools .icon-btn.sm svg { width: 12px; height: 12px; }
+  .ov-kpis .kpi .val { margin-top: 3px; font-size: 18px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ov-kpis .kpi .foot { margin-top: 1px; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ov-kpis .kpi .spark { display: none; }
+  /* Intraday P&L right under them: tighter header, small one-line-ish legend, the chart keeps its height */
+  .ov-kpis ~ .split .chart-panel { padding: 14px 6px 8px; }
+  .ov-kpis ~ .split .chart-panel .panel-head { padding: 0 8px; }
+  .ov-kpis ~ .split .chart-panel .panel-head { margin-bottom: 8px; gap: 6px; }
+  .ov-kpis ~ .split .chart-panel .panel-title { font-size: 14px; }
+  .ov-kpis ~ .split .chart-panel .legend { gap: 4px 12px; font-size: 10.5px; }
+  .ov-kpis ~ .split .chart-panel .chart { min-height: 230px; }
+  /* the kill switch between them is a slim row */
+  .ov-kpis ~ .ks-top { margin-bottom: 12px; }
+  .ov-kpis ~ .ks-top .ks-ctl { padding: 7px 10px 7px 8px; gap: 10px; border-radius: 12px; }
+  .ov-kpis ~ .ks-top .ks-ico { width: 30px; height: 30px; border-radius: 8px; }
+  .ov-kpis ~ .ks-top .ks-ico.ks-brand { padding: 4px; }
+  .ov-kpis ~ .ks-top .ks-text b { font-size: 13px; }
+  .ov-kpis ~ .ks-top .ks-text span { font-size: 11px; }
+}
+
+/* Tab bar: Power Scalper as a raised round "bubble" in the middle */
+@media (max-width: 900px) {
+  .tab.tab-bubble { position: relative; overflow: visible; justify-content: flex-end; gap: 4px; color: var(--fg); }
+  .tab.tab-bubble svg { box-sizing: border-box; width: 58px; height: 58px; margin-top: -30px; padding: 16px; border-radius: 50%;
+    background: linear-gradient(150deg, #3ef0be, var(--mint) 55%, #0ea47f); color: #04150f;
+    box-shadow: 0 0 0 5px var(--bg), 0 12px 26px -8px var(--mint-glow), inset 0 1px 0 rgba(255, 255, 255, .35); transition: transform .15s ease; }
+  .tab.tab-bubble:active svg { transform: scale(.94); }
+  .tab.tab-bubble[aria-current] { background: none; color: var(--mint); }
+  .tab.tab-bubble[aria-current] svg { color: #04150f; box-shadow: 0 0 0 5px var(--bg), 0 0 0 7px var(--mint-soft), 0 14px 30px -8px var(--mint-glow), inset 0 1px 0 rgba(255, 255, 255, .35); }
+}
+

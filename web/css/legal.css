@@ -1,0 +1,15 @@
+/* Standalone legal pages: plain reading layout, no JavaScript. */
+.legal { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+.legal .nav { padding-block: 8px 28px; }
+.legal h1 { font-family: var(--font-display); font-weight: 500; font-size: clamp(28px, 5vw, 38px); letter-spacing: -.02em; margin: 0 0 8px; }
+.legal .meta { color: var(--muted); margin: 0 0 32px; font-size: 14px; }
+.legal h2 { font-size: 19px; margin: 36px 0 10px; letter-spacing: -.01em; }
+.legal p, .legal li { color: var(--text-soft); line-height: 1.7; font-size: 15.5px; }
+.legal ul { padding-left: 20px; }
+.legal li { margin-bottom: 6px; }
+.legal strong { color: var(--fg); }
+.legal .callout { margin: 24px 0; padding: 16px 18px; border-radius: 14px; background: var(--amber-soft); border: 1px solid rgba(255, 186, 82, .28); color: var(--amber-text); }
+.legal table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14.5px; }
+.legal th, .legal td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--text-soft); }
+.legal th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.legal-footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--dim); font-size: 13px; display: flex; gap: 18px; flex-wrap: wrap; }

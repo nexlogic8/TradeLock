@@ -1,0 +1,20 @@
+node_modules/
+data/
+.env
+*.db
+*.db-wal
+*.db-shm
+
+# Deploy bundles and one-off scripts (local only)
+.deploy-review/
+*.tar
+*.tar.gz
+
+# Android: build output, local SDK path, and the release signing key + its passwords (never commit)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore

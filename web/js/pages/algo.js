@@ -1,0 +1,207 @@
+// AI Algo Trading: live automatic NIFTY option entries on the user's Dhan account (server: scalper/autotrade.js).
+// One Start / Stop button, each strategy explained with its own on/off switch, today's SL budget and trades.
+import { html, $, on } from '../core/dom.js';
+import { get, post } from '../core/api.js';
+import { store } from '../core/store.js';
+import { icon } from '../ui/icons.js';
+import { toast, toastError } from '../ui/toast.js';
+import { BUILT_IN, SHARED_RULES } from './strategy-library.js';
+import { artInfo } from './strategy-art.js';
+import { confirmAlgoStart, noticeDialog } from '../ui/dialog.js';
+import { raw } from '../core/dom.js';
+
+const inr = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
+const price = n => (Number.isFinite(Number(n)) && n !== null ? Number(n).toFixed(2) : '—');
+const time = n => n ? new Date(n).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : '—';
+
+// The two strategies Algo Trading can run (descriptions shared with the Strategy page).
+const STRATEGIES = BUILT_IN.filter(s => s.auto);
+
+const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
+
+// Compact row: name, tag, ⓘ for the full rules, on/off switch.
+function strategyRow(s, a, open) {
+  const on_ = !!a?.[s.flag];
+  return html`
+    <div class="algo-strat ${on_ ? 'on' : ''}">
+      <div class="algo-strat-head">
+        <span class="algo-strat-name"><b>${s.name}</b><small>${s.tag} · ${s.timeframe}</small></span>
+        ${raw(artInfo(s.key, s.name))}
+        <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
+      </div>
+    </div>`;
+}
+
+export default {
+  title: 'AI Algo Trading',
+  sub: 'Automatic index option entries on your Dhan account',
+  layout: 'app',
+  auth: true,
+
+  load: () => get('/algo/live'),
+
+  view(ctx) {
+    const d = ctx.data, a = d.account, running = !!a?.algoOn;
+    const missing = d.readiness.filter(r => !r.ok);
+    const state = running ? (d.marketOpen ? ['Running', 'Watching every 5-minute close for signals'] : ['On', 'Starts watching at the next market open'])
+      : d.ready ? ['Stopped', 'No automatic orders are placed'] : ['Setup needed', `${missing.length} item${missing.length > 1 ? 's' : ''} below`];
+    const activeStrats = STRATEGIES.filter(s => a?.[s.flag]).map(s => s.name), index = (d.underlyings || []).filter(u => (a?.underlyings || ['NIFTY']).includes(u.key)).map(u => u.label).join(' + ') || 'NIFTY 50';
+    return html`
+      <section class="panel pad algo-control ${running ? 'running' : ''}">
+        <div class="algo-control-copy">
+          <span class="pill ${running ? '' : 'ice'}"><span class="dot ${running && d.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
+          <h2>Algo Trading</h2>
+          <p>${state[1]}. Trading <b>${index}</b> options · ${activeStrats.length ? html`strategies on: <b>${activeStrats.join(' + ')}</b>.` : html`<b>no strategy is on</b>: switch one on below.`}</p>
+        </div>
+        <button class="btn ${running ? 'btn-danger' : 'btn-primary'} algo-start" type="button" data-algo-start="${running ? 'stop' : 'start'}" ${!a || (!running && !d.ready) ? 'disabled' : ''}>
+          ${icon(running ? 'stop' : 'play')}${running ? 'Stop Algo Trading' : 'Start Algo Trading'}</button>
+      </section>
+
+      ${missing.length ? html`
+        <section class="panel pad algo-setup">
+          <h3 class="panel-title">Before it can start</h3>
+          ${d.readiness.map(r => html`<div class="algo-ready ${r.ok ? 'ok' : ''}">${icon(r.ok ? 'check' : 'alert')}<span><b>${r.label}</b><small>${r.detail}</small></span></div>`)}
+        </section>` : ''}
+
+      <div class="kpis algo-kpis">
+        <div class="panel kpi"><span class="lbl">Day stop-loss</span><b class="num">${d.budget.daily ? inr(d.budget.daily) : 'Off'}</b><small>${d.budget.lossLimitMode === 'percent' ? `${d.budget.lossLimitValue}% of ${inr(d.budget.capital)}` : 'Fixed amount'}</small></div>
+        <div class="panel kpi"><span class="lbl">SL left for the next trade</span><b class="num ${d.budget.left > 0 ? '' : 'neg'}">${inr(d.budget.left)}</b><small>Today’s P&L ${inr(d.budget.pnl)}</small></div>
+        <div class="panel kpi"><span class="lbl">Automatic trades today</span><b class="num">${d.trades.filter(t => t.entryPrice != null).length}</b><small>${d.rules.tradeCap ? `Trade cap ${d.rules.tradeCap}` : 'No trade cap'}</small></div>
+        <div class="panel kpi"><span class="lbl">Square-off</span><b class="num">${d.rules.squareOff}</b><small>${d.rules.locked ? 'Account locked for today' : d.rules.cutoff ? 'Your Risk rules cutoff' : 'Default (cutoff off)'}</small></div>
+      </div>
+
+      <div class="halves algo-setup-row">
+        <div class="algo-left">
+        <section class="panel pad">
+          <h3 class="panel-title">Indices to trade</h3>
+          <div class="algo-index" role="group" aria-label="Indices to trade">${(d.underlyings || []).map(u => { const on_ = (a?.underlyings || ['NIFTY']).includes(u.key); return html`
+            <label class="algo-index-item ${on_ ? 'on' : ''}"><input type="checkbox" data-algo-index="${u.key}" ${on_ ? 'checked' : ''} ${a ? '' : 'disabled'}><span>${u.label}</span></label>`; })}</div>
+          <p class="muted small algo-index-note">Each ticked index is watched on its own 5-minute chart; a signal buys that index’s ATM next-expiry option. Still one trade at a time, sharing the day’s stop-loss.</p>
+        </section>
+        <section class="panel pad algo-manual-card">
+          <div class="algo-strat algo-manual ${a?.manualOn ? 'on' : ''}">
+            <div class="algo-strat-head">
+              <span class="algo-strat-name"><b>Manual trades</b><small>${a?.manualOn ? 'Allowed alongside Algo Trading. A manual position still counts as the one trade at a time and uses the day’s stop-loss.' : 'Blocked while Algo Trading is on: manual orders are refused and manual positions closed.'} On or off at any time.</small></span>
+              <button class="switch" type="button" role="switch" aria-checked="${String(!!a?.manualOn)}" aria-label="Allow manual trades while Algo Trading is on" data-manual-toggle ${a ? '' : 'disabled'}></button>
+            </div>
+          </div>
+        </section>
+        </div>
+        <section class="panel pad">
+          <h3 class="panel-title">Strategies <a class="algo-strat-link" href="/strategy" data-nav="strategy">All strategies ${icon('arrow')}</a></h3>
+          <div class="algo-strat-list">${STRATEGIES.map(s => strategyRow(s, a, !!ctx.ui.info?.[s.key]))}</div>
+        </section>
+      </div>
+
+      <section class="panel pad algo-block algo-shared">
+        <h3 class="panel-title">Every automatic trade</h3>
+        <dl class="algo-rules">${SHARED_RULES.map(([k, v]) => html`<dt>${k}</dt><dd>${v}${k === 'Phone alarm' && window.TradeLockApp?.testTradeAlarm ? html` <button class="btn btn-sm" type="button" data-alarm-test-algo>Test alarm</button>` : ''}</dd>`)}</dl>
+      </section>
+
+      <section class="panel pad algo-block">
+        <h3 class="panel-title">Today</h3>
+        ${d.trades.length ? html`<div class="bt-table-wrap"><table class="bt-table algo-trades">
+          <thead><tr><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>SL</th><th>Exit</th><th>Status</th></tr></thead>
+          <tbody>${d.trades.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
+            <td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
+            <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
+          : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
+      </section>`;
+  },
+
+  // Follow the top-bar switch at once instead of waiting for the 15-second refresh.
+  onStore(ctx, patch) {
+    const b = patch.dash?.broker, a = ctx.data?.account;
+    if (!b || !a || b.id !== a.id || !!b.algoOn === !!a.algoOn) return;
+    ctx.data = { ...ctx.data, account: { ...a, algoOn: !!b.algoOn } };
+    ctx.paint();
+  },
+
+  mount(ctx) {
+    const { el, signal } = ctx;
+    // A repaint would close a strategy picture someone is looking at; that refresh waits for the next round.
+    const refresh = async () => { try { const d = await get('/algo/live'); if (el.querySelector('.sart-anchor.open, .sart-anchor:focus-within, .sart-anchor:hover')) return; ctx.data = d; ctx.paint(); } catch { /* keep the last view */ } };
+    const timer = setInterval(refresh, 15_000);
+    signal.addEventListener('abort', () => clearInterval(timer), { once: true });
+    const syncTopbar = account => {
+      const dash = store.get().dash;
+      if (dash && account) store.set({ dash: { ...dash, broker: account } });
+    };
+
+    on(el, 'click', '[data-algo-start]', async (_, b) => {
+      const start = b.dataset.algoStart === 'start', id = ctx.data.account?.id;
+      if (!id) return;
+      if (!start && store.get().dash?.algoLocked) {
+        await noticeDialog({ ic: 'lock', tone: 'warn', title: 'Algo Trading stays on until 15:30', confirm: 'Got it',
+          body: 'Algo Trading can’t be switched off during market hours (09:15–15:30 IST). Exits are always allowed: you can close an Algo trade yourself at any time.' });
+        return;
+      }
+      if (start && !(await confirmAlgoStart())) return;
+      // Flip the shared store first so this button and the top-bar switch change together; a refusal flips both back.
+      const setOn = v => { const dash = store.get().dash; if (dash?.broker) store.set({ dash: { ...dash, broker: { ...dash.broker, algoOn: v } } }); };
+      ctx.data = { ...ctx.data, account: { ...ctx.data.account, algoOn: start } };
+      setOn(start); ctx.paint();
+      try {
+        const { account } = await post(`/brokers/${id}/algo`, { on: start });
+        syncTopbar(account);
+        toast(start ? 'Algo Trading started.' : 'Algo Trading stopped. An open trade keeps its stop-loss.', start ? 'warn' : 'ok');
+        refresh();
+      } catch (err) {
+        ctx.data = { ...ctx.data, account: { ...ctx.data.account, algoOn: !start } };
+        setOn(!start); ctx.paint(); toastError(err);
+      }
+    }, signal);
+
+    // (i): the picture shows on hover; a tap (phones) pins it open, a tap elsewhere closes it.
+    on(el, 'click', '[data-art-info]', (e, b) => {
+      e.stopPropagation();
+      const anchor = b.closest('.sart-anchor'), open = !anchor.classList.contains('open');
+      el.querySelectorAll('.sart-anchor.open').forEach(a => a.classList.remove('open'));
+      anchor.classList.toggle('open', open);
+    }, signal);
+    document.addEventListener('click', e => { if (!e.target.closest('.sart-anchor')) el.querySelectorAll('.sart-anchor.open').forEach(a => a.classList.remove('open')); }, { signal });
+
+    on(el, 'change', '[data-algo-index]', async (_, box) => {
+      const id = ctx.data.account?.id;
+      if (!id) return;
+      const picked = [...el.querySelectorAll('[data-algo-index]')].filter(x => x.checked).map(x => x.dataset.algoIndex);
+      if (!picked.length) { box.checked = true; toast('Keep at least one index ticked.', 'warn'); return; }
+      el.querySelectorAll('[data-algo-index]').forEach(x => { x.disabled = true; });
+      try {
+        const { account } = await post(`/brokers/${id}/strategies`, { underlyings: picked });
+        syncTopbar(account);
+        const names = (ctx.data.underlyings || []).filter(u => picked.includes(u.key)).map(u => u.label);
+        toast(`Algo Trading watches ${names.join(' + ')}.`, 'ok');
+        await refresh();
+      } catch (err) { toastError(err); await refresh(); }
+    }, signal);
+
+    // Android app: ring the real trade alarm once, to check sound, vibration and the full-screen alert.
+    on(el, 'click', '[data-alarm-test-algo]', () => window.TradeLockApp?.testTradeAlarm?.(), signal);
+    on(el, 'click', '[data-manual-toggle]', async (_, b) => {
+      const id = ctx.data.account?.id, next = b.getAttribute('aria-checked') !== 'true';
+      if (!id) return;
+      b.disabled = true;
+      try {
+        const { account } = await post(`/brokers/${id}/strategies`, { manual: next });
+        syncTopbar(account);
+        toast(next ? 'Manual trades allowed alongside Algo Trading.' : 'Manual trades blocked while Algo Trading is on.', 'ok');
+        await refresh();
+      } catch (err) { toastError(err); b.disabled = false; }
+    }, signal);
+
+    on(el, 'click', '[data-strategy-toggle]', async (_, b) => {
+      const id = ctx.data.account?.id, key = b.dataset.strategyToggle, next = b.getAttribute('aria-checked') !== 'true';
+      if (!id) return;
+      b.disabled = true;
+      try {
+        const { account } = await post(`/brokers/${id}/strategies`, { [key]: next });
+        syncTopbar(account);
+        const s = STRATEGIES.find(x => x.key === key);
+        toast(`${s.name} ${next ? 'on' : 'off'}.`, 'ok');
+        await refresh();
+      } catch (err) { toastError(err); b.disabled = false; }
+    }, signal);
+  },
+};

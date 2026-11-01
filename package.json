@@ -1,0 +1,22 @@
+{
+  "name": "tradelock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Risk-first trading discipline platform: Node API + vanilla ES-module web client",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/src/index.js",
+    "dev": "node --watch server/src/index.js",
+    "tokens:renew": "node server/src/workers/token-renewer.js --once",
+    "seed": "node server/src/db/seed.js",
+    "test": "node --test server/test/"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "lightweight-charts": "^5.2.1",
+    "ws": "^8.18.3"
+  }
+}

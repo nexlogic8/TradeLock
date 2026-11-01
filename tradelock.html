@@ -1,0 +1,1201 @@
+<title>TradeLock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Layout: instrument-panel glass on deep ink. Fixed sidebar + scanning grid; numbers in mono, display face only for brand + hero. */
+:root{
+  --bg:#05090F; --bg-2:#08101A;
+  --panel:rgba(15,23,36,.72); --panel-2:rgba(20,30,46,.78); --raise:#121B29; --field:#0B1320;
+  --line:rgba(142,172,214,.11); --line-2:rgba(142,172,214,.2); --hi:rgba(255,255,255,.05);
+  --fg:#E7EEF8; --muted:#8C99AD; --dim:#5D697C;
+  --mint:#38EBB4; --mint-2:#1FC995; --mint-ink:#02150F; --mint-soft:rgba(56,235,180,.11); --mint-glow:rgba(56,235,180,.35);
+  --ice:#7CC8FF; --ice-soft:rgba(124,200,255,.12);
+  --amber:#FFBA52; --amber-soft:rgba(255,186,82,.12);
+  --red:#FF5E7B; --red-soft:rgba(255,94,123,.12); --red-deep:#3A1220;
+  --font-display:'Unbounded','Geist',system-ui,sans-serif;
+  --font-ui:'Geist',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:'Geist Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;
+  --r-lg:20px; --r-md:14px; --r-sm:10px;
+  --ease:cubic-bezier(.2,.7,.2,1);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,input,select{font:inherit;color:inherit}
+a{color:var(--mint);text-decoration:none}
+:focus-visible{outline:2px solid var(--ice);outline-offset:2px;border-radius:6px}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.pos{color:var(--mint)} .neg{color:var(--red)} .warn{color:var(--amber)} .muted{color:var(--muted)}
+
+/* ambient backdrop */
+.ambient{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(900px 520px at 78% -10%, rgba(56,235,180,.10), transparent 60%),
+    radial-gradient(700px 500px at -5% 105%, rgba(124,200,255,.07), transparent 60%),
+    var(--bg)}
+.ambient::after{content:"";position:absolute;inset:0;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:56px 56px;opacity:.35;
+  -webkit-mask-image:radial-gradient(ellipse at 60% 0%,#000 0%,transparent 70%);mask-image:radial-gradient(ellipse at 60% 0%,#000 0%,transparent 70%)}
+.view{position:relative;z-index:1}
+
+/* primitives */
+.logo{font-family:var(--font-display);font-weight:700;letter-spacing:.02em;font-size:20px;display:inline-flex;align-items:center;gap:10px;color:var(--fg)}
+.logo b{color:var(--mint);font-weight:700}
+.logo-mark{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+  background:linear-gradient(140deg,var(--mint),#0FA57A);box-shadow:0 0 18px var(--mint-glow), inset 0 1px 0 rgba(255,255,255,.4)}
+.logo-mark svg{width:14px;height:14px;stroke:var(--mint-ink)}
+.panel{background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:inset 0 1px 0 var(--hi),0 20px 40px -24px rgba(0,0,0,.6);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);min-width:0}
+.panel-pad{padding:22px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.panel-title{font-size:15px;font-weight:600;margin:0;letter-spacing:-.005em}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;padding:0 18px;border-radius:12px;border:1px solid var(--line-2);
+  background:var(--raise);font-weight:600;cursor:pointer;transition:transform .16s var(--ease),background .16s,border-color .16s,box-shadow .2s;white-space:nowrap}
+.btn:hover{border-color:rgba(142,172,214,.35);background:#172234}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:16px;height:16px}
+.btn-primary{background:linear-gradient(180deg,#4DF3C0,var(--mint-2));color:var(--mint-ink);border-color:transparent;
+  box-shadow:0 0 0 1px rgba(56,235,180,.4),0 8px 24px -8px var(--mint-glow),inset 0 1px 0 rgba(255,255,255,.45)}
+.btn-primary:hover{background:linear-gradient(180deg,#6BF7CC,#2BD8A3);box-shadow:0 0 0 1px rgba(56,235,180,.6),0 10px 30px -6px var(--mint-glow),inset 0 1px 0 rgba(255,255,255,.5)}
+.btn-ghost{background:transparent}
+.btn-danger{background:linear-gradient(180deg,#FF6F89,#E23E5E);color:#fff;border-color:transparent;box-shadow:0 8px 24px -10px rgba(255,94,123,.6),inset 0 1px 0 rgba(255,255,255,.3)}
+.btn-danger:hover{background:linear-gradient(180deg,#FF8299,#EC4A69)}
+.btn[disabled]{opacity:.42;cursor:not-allowed;box-shadow:none}
+.btn-sm{height:34px;padding:0 12px;font-size:13px;border-radius:10px}
+.btn-block{width:100%}
+.pill{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;
+  background:var(--mint-soft);color:var(--mint);border:1px solid rgba(56,235,180,.22)}
+.pill.amber{background:var(--amber-soft);color:var(--amber);border-color:rgba(255,186,82,.25)}
+.pill.red{background:var(--red-soft);color:var(--red);border-color:rgba(255,94,123,.25)}
+.pill.ice{background:var(--ice-soft);color:var(--ice);border-color:rgba(124,200,255,.25)}
+.pill.grey{background:rgba(142,172,214,.08);color:var(--muted);border-color:var(--line-2)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor;flex:none}
+.pulse{animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.field{display:flex;flex-direction:column;gap:7px}
+.field label{font-size:12px;color:var(--muted);font-weight:500}
+.input{height:46px;border-radius:12px;border:1px solid var(--line-2);background:var(--field);padding:0 14px;width:100%;outline:none;transition:border-color .16s,box-shadow .16s}
+.input:focus{border-color:rgba(56,235,180,.55);box-shadow:0 0 0 4px rgba(56,235,180,.10)}
+select.input{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 20px,calc(100% - 13px) 20px;background-size:5px 5px;background-repeat:no-repeat;padding-right:36px}
+.input-wrap{position:relative;display:flex;align-items:center}
+.input-wrap .affix{position:absolute;left:14px;color:var(--muted);font-family:var(--font-mono);pointer-events:none}
+.input-wrap .suffix{position:absolute;right:14px;color:var(--dim);font-size:12px;pointer-events:none}
+.input-wrap .input{padding-left:32px;font-family:var(--font-mono);font-size:17px;font-weight:500}
+.switch{position:relative;width:46px;height:26px;border-radius:999px;border:1px solid var(--line-2);background:#1A2433;cursor:pointer;flex:none;transition:background .2s,border-color .2s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#93A1B5;transition:transform .2s var(--ease),background .2s}
+.switch[aria-checked="true"]{background:rgba(56,235,180,.22);border-color:rgba(56,235,180,.5)}
+.switch[aria-checked="true"]::after{transform:translateX(20px);background:var(--mint);box-shadow:0 0 12px var(--mint-glow)}
+.meter{height:6px;border-radius:99px;background:rgba(142,172,214,.12);overflow:hidden}
+.meter i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--mint-2),var(--mint));box-shadow:0 0 12px var(--mint-glow);transition:width .5s var(--ease)}
+.meter.amber i{background:linear-gradient(90deg,#E59A2F,var(--amber));box-shadow:0 0 12px rgba(255,186,82,.4)}
+.meter.red i{background:linear-gradient(90deg,#D93E5C,var(--red))}
+.seg{display:inline-flex;padding:3px;border-radius:12px;background:var(--field);border:1px solid var(--line);gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;height:30px;padding:0 12px;border-radius:9px;color:var(--muted);font-size:13px;font-weight:500;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--raise);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line-2)}
+.grid{display:grid;gap:18px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);opacity:0;z-index:60;
+  background:#0F1A27;border:1px solid rgba(56,235,180,.35);color:var(--fg);padding:12px 16px;border-radius:12px;display:flex;gap:10px;align-items:center;
+  box-shadow:0 20px 40px -10px rgba(0,0,0,.7),0 0 30px -10px var(--mint-glow);transition:opacity .2s,transform .2s var(--ease);pointer-events:none;max-width:calc(100vw - 32px)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast svg{width:16px;height:16px;stroke:var(--mint);flex:none}
+
+/* ---------- LANDING ---------- */
+.wrap{max-width:1200px;margin:0 auto;padding-inline:clamp(16px,4vw,40px)}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-block:22px}
+.nav-links{display:flex;align-items:center;gap:28px;color:var(--muted);font-weight:500}
+.nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--fg)}
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center;padding-block:56px 40px}
+.hero h1{font-family:var(--font-display);font-weight:700;font-size:clamp(38px,5.6vw,68px);line-height:1.02;letter-spacing:-.03em;margin:22px 0 22px;text-wrap:balance}
+.hero h1 span{display:block;background:linear-gradient(95deg,var(--mint) 10%,#9CF7DA 55%,var(--ice));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p.lead{font-size:18px;color:var(--muted);max-width:46ch;margin:0 0 30px}
+.hero-cta{display:flex;gap:12px;flex-wrap:wrap}
+.hero-cta .btn{height:50px;padding:0 24px;font-size:15px}
+.fineprint{margin-top:26px;font-size:13px;color:var(--dim);display:flex;align-items:center;gap:8px}
+.demo-card{position:relative;padding:26px;border-radius:24px}
+.demo-card::before{content:"";position:absolute;inset:-1px;border-radius:25px;padding:1px;pointer-events:none;
+  background:linear-gradient(140deg,rgba(56,235,180,.55),transparent 40%,transparent 60%,rgba(124,200,255,.4));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
+.demo-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:22px;flex-wrap:wrap}
+.demo-stats{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:center}
+.big{font-family:var(--font-mono);font-size:40px;font-weight:600;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.ring{position:relative;width:96px;height:96px;flex:none}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .ring-label{position:absolute;inset:0;display:grid;place-items:center;text-align:center;line-height:1.1}
+.ring .ring-label b{font-family:var(--font-mono);font-size:20px}
+.ring .ring-label small{display:block;font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.demo-spark{height:110px;margin:18px -6px 6px}
+.risk-box{margin-top:14px;padding:16px;border-radius:14px;background:rgba(5,10,16,.5);border:1px solid var(--line)}
+.risk-row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:10px;gap:10px}
+.section{padding-block:56px}
+.section h2{font-family:var(--font-display);font-weight:500;font-size:clamp(24px,3vw,34px);letter-spacing:-.02em;margin:10px 0 12px;text-wrap:balance}
+.section .sub{color:var(--muted);max-width:60ch;margin:0 0 32px;font-size:16px}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.feature{padding:24px}
+.feature .ico{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:var(--mint-soft);border:1px solid rgba(56,235,180,.22);margin-bottom:18px}
+.feature .ico svg{width:20px;height:20px;stroke:var(--mint)}
+.feature h3{margin:0 0 6px;font-size:17px}
+.feature p{margin:0;color:var(--muted)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:s}
+.step{padding:24px;position:relative}
+.step .n{font-family:var(--font-mono);color:var(--mint);font-size:12px;letter-spacing:.1em}
+.step h3{margin:10px 0 6px;font-size:17px}
+.step p{margin:0;color:var(--muted)}
+.truth{overflow-x:auto}
+.truth table{width:100%;border-collapse:collapse;min-width:560px}
+.truth th,.truth td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--line);font-size:14px}
+.truth th{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.truth tr:last-child td{border-bottom:0}
+.price-strip{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:30px;flex-wrap:wrap}
+.price-strip .big{font-size:44px}
+.footer{padding-block:40px 60px;color:var(--dim);font-size:13px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line)}
+
+/* ---------- AUTH / ONBOARD ---------- */
+.auth{min-height:100%;display:flex;flex-direction:column}
+.auth-main{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:stretch;padding-block:24px 48px}
+.auth-card{padding:40px}
+.auth-card h1{font-family:var(--font-display);font-weight:500;font-size:32px;letter-spacing:-.02em;margin:0 0 6px}
+.auth-form{display:flex;flex-direction:column;gap:18px;margin-top:28px}
+.auth-links{display:flex;gap:16px;font-size:13px;flex-wrap:wrap}
+.sec-list{display:flex;flex-direction:column;gap:22px;margin-top:28px}
+.sec-item{display:flex;gap:14px;align-items:flex-start}
+.sec-item .ico{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;background:var(--mint-soft);border:1px solid rgba(56,235,180,.2)}
+.sec-item .ico svg{width:18px;height:18px;stroke:var(--mint)}
+.sec-item b{display:block;margin-bottom:2px}
+.sec-item span{color:var(--muted);font-size:13px}
+.stepper{display:flex;gap:10px;align-items:center;margin:4px 0 28px;flex-wrap:wrap}
+.stepper .st{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;font-weight:500}
+.stepper .st i{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-family:var(--font-mono);font-size:11px;border:1px solid var(--line-2)}
+.stepper .st.done i{background:var(--mint);color:var(--mint-ink);border-color:transparent}
+.stepper .st.cur{color:var(--fg)} .stepper .st.cur i{border-color:var(--mint);color:var(--mint);box-shadow:0 0 12px var(--mint-glow)}
+.stepper .bar{width:34px;height:1px;background:var(--line-2)}
+.broker-opt{display:flex;align-items:center;gap:16px;padding:18px;border-radius:16px;border:1px solid var(--line-2);background:rgba(5,10,16,.4);cursor:pointer;transition:border-color .16s,background .16s;text-align:left;width:100%}
+.broker-opt[aria-checked="true"]{border-color:rgba(56,235,180,.6);background:rgba(56,235,180,.06);box-shadow:0 0 0 4px rgba(56,235,180,.07)}
+.broker-opt[disabled]{cursor:not-allowed;opacity:.65}
+.b-logo{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-family:var(--font-display);font-weight:700;font-size:13px;flex:none;background:linear-gradient(140deg,#16314A,#0E1C2C);border:1px solid var(--line-2);color:var(--ice)}
+.broker-opt .grow{flex:1;min-width:0}
+.broker-opt b{display:block;font-size:15px}
+.broker-opt span{font-size:13px;color:var(--muted)}
+.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.checklist li{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;color:var(--muted);font-size:14px}
+.checklist li i{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;font-style:normal;font-family:var(--font-mono);font-size:11px;border:1px solid var(--line-2)}
+.checklist li.done{color:var(--fg)} .checklist li.done i{background:var(--mint);border-color:transparent;color:var(--mint-ink)}
+.checklist li.run{color:var(--fg);background:rgba(124,200,255,.06)} .checklist li.run i{border-color:var(--ice);color:var(--ice)}
+.checklist li i svg{width:12px;height:12px;stroke:currentColor}
+
+/* ---------- APP SHELL ---------- */
+.app{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100%}
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px;padding:22px 14px;border-right:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(9,15,24,.92),rgba(6,10,16,.92));backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);z-index:30;overflow-y:auto}
+.side .logo{padding:0 10px 18px}
+.nav-group{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:600;padding:14px 12px 6px}
+.nav-item{display:flex;align-items:center;gap:12px;height:40px;padding:0 12px;border-radius:11px;color:var(--muted);font-weight:500;cursor:pointer;border:1px solid transparent;background:transparent;width:100%;text-align:left;transition:background .16s,color .16s}
+.nav-item svg{width:17px;height:17px;flex:none}
+.nav-item:hover{background:rgba(142,172,214,.06);color:var(--fg)}
+.nav-item[aria-current="page"]{color:var(--fg);background:linear-gradient(90deg,rgba(56,235,180,.14),rgba(56,235,180,.03));border-color:rgba(56,235,180,.18)}
+.nav-item[aria-current="page"] svg{stroke:var(--mint);filter:drop-shadow(0 0 6px var(--mint-glow))}
+.nav-item.danger svg{stroke:var(--red)}
+.nav-item .badge{margin-left:auto;font-family:var(--font-mono);font-size:11px;min-width:20px;height:20px;padding:0 6px;border-radius:99px;display:grid;place-items:center;background:var(--red-soft);color:var(--red)}
+.side-foot{margin-top:auto;padding-top:14px}
+.status-card{padding:14px;border-radius:14px;border:1px solid var(--line);background:rgba(5,10,16,.55)}
+.status-card .row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.status-card p{margin:6px 0 12px;font-size:12px;color:var(--muted)}
+.status-card .seg{width:100%;display:flex}
+.status-card .seg button{flex:1;font-size:12px;height:28px}
+.main{min-width:0;padding:0 clamp(16px,3vw,36px) 48px}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;align-items:center;gap:16px;padding-block:20px;margin-inline:calc(clamp(16px,3vw,36px) * -1);padding-inline:clamp(16px,3vw,36px);
+  background:linear-gradient(180deg,rgba(5,9,15,.92) 60%,rgba(5,9,15,0));backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.topbar h1{margin:0;font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.2}
+.topbar .t-sub{margin:2px 0 0;font-size:13px;color:var(--muted)}
+.topbar .grow{flex:1;min-width:0}
+.top-right{display:flex;align-items:center;gap:10px}
+.chip-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border-radius:11px;border:1px solid var(--line-2);background:rgba(15,23,36,.7);font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip-btn.ok{color:var(--mint);border-color:rgba(56,235,180,.28)}
+.chip-btn.deg{color:var(--amber);border-color:rgba(255,186,82,.3)}
+.clock{font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:linear-gradient(140deg,#1D3A55,#13243A);border:1px solid var(--line-2)}
+.menu-btn{display:none;width:40px;height:40px;border-radius:11px;border:1px solid var(--line-2);background:var(--raise);place-items:center;cursor:pointer;flex:none}
+.menu-btn svg{width:18px;height:18px}
+.scrim{display:none}
+.banner{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-radius:14px;font-size:13px;line-height:1.5;margin-bottom:18px}
+.banner svg{width:18px;height:18px;flex:none;margin-top:1px}
+.banner.amber{background:var(--amber-soft);border:1px solid rgba(255,186,82,.28);color:#FFD596}
+.banner.amber svg{stroke:var(--amber)}
+.banner.info{background:rgba(124,200,255,.06);border:1px solid rgba(124,200,255,.2);color:#BFE2FF}
+.banner.info svg{stroke:var(--ice)}
+.banner b{color:var(--fg)}
+.page{animation:fade .24s var(--ease)}
+@keyframes fade{from{opacity:.0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* KPI tiles */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.kpis.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.kpi{padding:18px 20px;position:relative;overflow:hidden}
+.kpi .lbl{font-size:12px;color:var(--muted);font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.kpi .val{font-family:var(--font-mono);font-size:30px;font-weight:600;letter-spacing:-.03em;margin-top:8px;font-variant-numeric:tabular-nums;line-height:1.15}
+.kpi .foot{font-size:12px;color:var(--muted);margin-top:8px;display:flex;gap:6px;align-items:center}
+.kpi .spark{position:absolute;right:0;bottom:0;width:55%;height:46px;opacity:.9}
+.kpi.status .val{font-family:var(--font-ui);font-size:22px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:10px;margin-top:12px}
+
+.two-col{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.chart{width:100%;height:260px;display:block}
+.chart text{fill:var(--dim);font-family:var(--font-mono);font-size:10.5px}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:2px;border-radius:2px;display:inline-block}
+
+.prot{display:flex;flex-direction:column;gap:18px}
+.prot .item .top{display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px;gap:8px}
+.prot .item .top span:first-child{color:var(--muted)}
+.prot-ring{display:flex;align-items:center;gap:18px}
+.mini-list{display:flex;flex-direction:column}
+.mini-list .r{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line);font-size:13px}
+.mini-list .r:last-child{border-bottom:0}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;margin:0 -22px -22px;padding:0 22px 8px}
+table.tbl{width:100%;border-collapse:collapse;min-width:640px}
+.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+.tbl td{padding:15px 12px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr{transition:background .16s}
+.tbl tbody tr:hover{background:rgba(142,172,214,.04)}
+.tbl .r{text-align:right}
+.side-tag{font-family:var(--font-mono);font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px}
+.side-tag.buy{background:var(--ice-soft);color:var(--ice)}
+.side-tag.sell{background:rgba(255,186,82,.1);color:var(--amber)}
+.side-tag.evt{background:var(--red-soft);color:var(--red)}
+.inst b{display:block;font-weight:600}
+.inst span{font-size:12px;color:var(--dim)}
+.sum-strip{display:flex;gap:28px;flex-wrap:wrap;padding:16px 0 0;margin-top:6px;border-top:1px solid var(--line)}
+.sum-strip div{display:flex;flex-direction:column;gap:2px}
+.sum-strip span{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.sum-strip b{font-family:var(--font-mono);font-size:16px}
+
+/* rules */
+.rules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.rule{padding:22px;display:flex;flex-direction:column;gap:16px;transition:opacity .2s,border-color .2s}
+.rule.off{opacity:.55}
+.rule-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.rule-head h3{margin:0 0 4px;font-size:16px}
+.rule-head p{margin:0;color:var(--muted);font-size:13px}
+.rule-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rule-live{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:12px;background:rgba(5,10,16,.5);border:1px solid var(--line)}
+.rule-live .top{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);gap:8px}
+.rule-live .top b{color:var(--fg);font-family:var(--font-mono);font-weight:500}
+.enf{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:6px}
+.enf svg{width:13px;height:13px}
+.savebar{position:sticky;bottom:16px;margin-top:22px;display:flex;align-items:center;gap:16px;padding:12px 12px 12px 18px;border-radius:16px;flex-wrap:wrap;z-index:10}
+.savebar .msg{flex:1;min-width:200px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+
+/* emergency */
+.estop{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.estop h2{font-size:26px;letter-spacing:-.02em;margin:18px 0 6px}
+.act{position:relative;display:flex;gap:14px;align-items:flex-start;padding:16px;border-radius:14px;border:1px solid var(--line-2);background:rgba(5,10,16,.4);cursor:pointer;transition:border-color .16s,background .16s}
+.act:hover{border-color:rgba(142,172,214,.32)}
+.act input{position:absolute;opacity:0;pointer-events:none}
+.act .box{width:22px;height:22px;border-radius:7px;border:1.5px solid var(--line-2);flex:none;display:grid;place-items:center;margin-top:1px;transition:all .16s}
+.act .box svg{width:13px;height:13px;stroke:#fff;opacity:0}
+.act:has(input:checked){border-color:rgba(255,94,123,.5);background:rgba(255,94,123,.06)}
+.act:has(input:checked) .box{background:var(--red);border-color:var(--red)}
+.act:has(input:checked) .box svg{opacity:1}
+.act:has(input:focus-visible){outline:2px solid var(--ice);outline-offset:2px}
+.act b{display:block;font-weight:600}
+.act span{font-size:13px;color:var(--muted)}
+.acts{display:flex;flex-direction:column;gap:10px;margin:22px 0}
+.caveats{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.caveats li{display:flex;gap:10px;font-size:14px;color:var(--muted)}
+.caveats li svg{width:16px;height:16px;flex:none;margin-top:2px;stroke:var(--amber)}
+.caveats li.key{color:#FFD596}
+.confirm{margin-top:4px;padding:20px;border-radius:16px;border:1px solid rgba(255,94,123,.35);background:linear-gradient(180deg,rgba(58,18,32,.5),rgba(20,10,16,.4))}
+.confirm h3{margin:0 0 4px;font-size:16px}
+.confirm ul{margin:12px 0 16px;padding-left:18px;color:var(--fg)}
+.confirm ul li{margin-bottom:4px}
+.confirm .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.results{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+.res{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:12px;border:1px solid var(--line);background:rgba(5,10,16,.45)}
+.res .grow{flex:1;min-width:0}
+.res b{display:block;font-size:14px}
+.res span{font-size:13px;color:var(--muted)}
+
+/* broker page */
+.cap{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:16px 0;border-bottom:1px solid var(--line);align-items:center}
+.cap:last-child{border-bottom:0}
+.cap b{font-weight:600}
+.cap p{grid-column:1/-1;margin:0;font-size:13px;color:var(--muted)}
+.acct-head{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.acct-head .grow{flex:1;min-width:0}
+.acct-head h2{margin:0;font-size:20px}
+.perm{margin-top:16px;padding:16px;border-radius:12px;background:rgba(5,10,16,.5);border:1px solid var(--line);font-size:13px}
+.perm code{font-family:var(--font-mono);font-size:12px;color:var(--ice)}
+.perm ul{margin:8px 0 0;padding-left:18px;color:var(--muted)}
+
+/* plan */
+.plan{padding:30px;position:relative;overflow:hidden}
+.plan::after{content:"";position:absolute;right:-80px;top:-80px;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(56,235,180,.18),transparent 70%);pointer-events:none}
+.plan .price{display:flex;align-items:baseline;gap:10px;margin:18px 0 6px}
+.plan .price .big{font-size:56px}
+.feat-list{list-style:none;margin:22px 0 26px;padding:0;display:flex;flex-direction:column;gap:12px}
+.feat-list li{display:flex;gap:12px;align-items:center}
+.feat-list li svg{width:18px;height:18px;stroke:var(--mint);flex:none}
+.bill-row{display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--line);gap:12px}
+
+/* affiliate */
+.ref{display:flex;gap:12px;flex-wrap:wrap}
+.ref .input{flex:1;min-width:220px;font-family:var(--font-mono);font-size:14px}
+
+/* notifications */
+.notes{display:flex;flex-direction:column;gap:10px}
+.note{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:16px;border-radius:14px;border:1px solid var(--line);background:rgba(5,10,16,.4)}
+.note.unread{background:rgba(20,30,46,.6);border-color:var(--line-2)}
+.note .n-ico{width:38px;height:38px;border-radius:11px;display:grid;place-items:center}
+.note .n-ico svg{width:18px;height:18px}
+.note b{display:block;font-weight:600}
+.note span{font-size:13px;color:var(--muted)}
+.note time{font-family:var(--font-mono);font-size:12px;color:var(--dim);white-space:nowrap}
+.note .unread-dot{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 8px var(--mint-glow);display:inline-block;margin-left:8px;vertical-align:middle}
+
+/* settings */
+.set-list{display:flex;flex-direction:column}
+.set-row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}
+.set-row:last-child{border-bottom:0}
+.set-row b{display:block;font-weight:600}
+.set-row span{font-size:13px;color:var(--muted)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+/* states page */
+.states{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.state-card{padding:22px;display:flex;flex-direction:column;gap:14px}
+.state-card p{margin:0;color:var(--muted)}
+.state-demo{padding:14px;border-radius:12px;border:1px dashed var(--line-2);font-size:13px;display:flex;gap:10px;align-items:center}
+.principles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}
+.principles ul{margin:0;padding-left:18px;color:var(--muted)}
+.principles li{margin-bottom:6px}
+
+/* responsive */
+@media (max-width:1100px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .two-col,.estop{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .side{position:fixed;left:0;top:0;bottom:0;width:276px;transform:translateX(-100%);transition:transform .24s var(--ease);height:100%;padding-top:calc(22px + env(safe-area-inset-top,0px))}
+  .app.open .side{transform:none}
+  .app.open .scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:25}
+  .menu-btn{display:grid}
+  .clock{display:none}
+  .hero{grid-template-columns:1fr;gap:36px;padding-block:28px}
+  .features,.steps{grid-template-columns:1fr}
+  .nav-links .hide-sm{display:none}
+  .auth-main{grid-template-columns:1fr}
+  .rules,.states,.principles{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:620px){
+  .kpis,.kpis.three{grid-template-columns:minmax(0,1fr)}
+  .topbar h1{font-size:21px}
+  .chip-btn .lbl-long{display:none}
+  .avatar{display:none}
+  .auth-card{padding:26px}
+  .rule-row,.form-grid{grid-template-columns:1fr}
+  .demo-stats{grid-template-columns:1fr}
+  .big{font-size:34px}
+  .note{grid-template-columns:auto minmax(0,1fr)}
+  .note time{grid-column:2}
+  .nav-links{gap:14px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+
+<div class="ambient" aria-hidden="true"></div>
+
+<!-- ================= LANDING ================= -->
+<div class="view" id="v-landing">
+  <div class="wrap">
+    <nav class="nav">
+      <a class="logo" href="#landing" aria-label="TradeLock home"><span class="logo-mark" data-icon="lock"></span><span>TRADE<b>LOCK</b></span></a>
+      <div class="nav-links">
+        <a class="hide-sm" href="#features">Features</a>
+        <a class="hide-sm" href="#how">How it works</a>
+        <a class="hide-sm" href="#pricing">Pricing</a>
+        <a href="#login" data-go="login">Log in</a>
+        <a class="btn btn-primary btn-sm" href="#login" data-go="login">Start free trial</a>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div>
+        <span class="pill"><span class="dot"></span>Risk-first trading platform</span>
+        <h1>Trade with rules.<span>Not emotions.</span></h1>
+        <p class="lead">Daily loss limits, trade caps and live position monitoring for your Dhan account. You always see what your broker connection can and cannot enforce.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#login" data-go="login">Get started <span data-icon="arrow"></span></a>
+          <a class="btn" href="#overview" data-go="overview">See live demo</a>
+        </div>
+        <p class="fineprint"><span data-icon="shield"></span>Built for discipline. Not a promise of profit.</p>
+      </div>
+
+      <div class="panel demo-card">
+        <div class="demo-top">
+          <span class="pill ice"><span class="dot pulse"></span>Live demo · sample data</span>
+          <span class="clock">NSE · 12:48 IST</span>
+        </div>
+        <div class="demo-stats">
+          <div>
+            <div class="eyebrow">Today's P&amp;L</div>
+            <div class="big pos" id="heroPnl">+₹3,450</div>
+            <div class="muted" style="font-size:13px;margin-top:4px">Realized ₹3,480 · Open −₹30</div>
+          </div>
+          <div class="ring" id="heroRing" data-pct="66.7">
+            <svg viewBox="0 0 100 100"></svg>
+            <div class="ring-label"><div><b>2/3</b><small>Trades</small></div></div>
+          </div>
+        </div>
+        <svg class="demo-spark" id="heroSpark"></svg>
+        <div class="risk-box">
+          <div class="risk-row"><span>Worst drawdown today</span><span class="num"><span style="color:var(--fg)">₹1,180</span> / ₹5,000</span></div>
+          <div class="meter"><i style="width:23.6%"></i></div>
+          <div class="risk-row" style="margin:10px 0 0"><span>Profit lock at ₹8,000</span><span class="num pos">43%</span></div>
+        </div>
+      </div>
+    </header>
+
+    <section class="section" id="features">
+      <span class="eyebrow">What it does</span>
+      <h2>Your rules, checked on every sync</h2>
+      <p class="sub">Set your limits before the market opens. TradeLock watches your positions and P&amp;L during the session and acts when a rule is crossed.</p>
+      <div class="features">
+        <div class="panel feature"><div class="ico" data-icon="gauge"></div><h3>Daily limits</h3><p>Maximum loss on realized plus open P&amp;L, a cap on entries per day, and a profit lock that protects a good session.</p></div>
+        <div class="panel feature"><div class="ico" data-icon="radar"></div><h3>Position monitoring</h3><p>Orders and positions sync from your broker every few seconds. If sync slows down, you see it straight away.</p></div>
+        <div class="panel feature"><div class="ico" data-icon="bell"></div><h3>Risk alerts</h3><p>Warnings before a limit is reached, alerts when it is crossed, and an audit trail of every action taken.</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="how">
+      <span class="eyebrow">How it works</span>
+      <h2>Three steps before your first session</h2>
+      <div class="steps">
+        <div class="panel step"><span class="n">STEP 1</span><h3>Create your account</h3><p>Sign up and turn on multi-factor authentication for sensitive actions.</p></div>
+        <div class="panel step"><span class="n">STEP 2</span><h3>Connect Dhan</h3><p>Authorize through Dhan's own login. TradeLock never sees your broker password.</p></div>
+        <div class="panel step"><span class="n">STEP 3</span><h3>Set your rules</h3><p>Pick your loss limit, trade cap, profit lock and cutoff time. Change them any time before the session.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <span class="eyebrow">Clear about limits</span>
+      <h2>What your connection can enforce</h2>
+      <p class="sub">TradeLock monitors your account through the broker's API. Some actions depend on broker permissions, so we label each one.</p>
+      <div class="panel truth">
+        <table>
+          <thead><tr><th>Action</th><th>How it works</th><th>Status on Dhan</th></tr></thead>
+          <tbody>
+            <tr><td>Track positions and orders</td><td class="muted">Read from the broker every few seconds</td><td><span class="pill">Available</span></td></tr>
+            <tr><td>Block orders placed in TradeLock</td><td class="muted">Stopped before they reach the broker</td><td><span class="pill">Available</span></td></tr>
+            <tr><td>Square off open positions</td><td class="muted">Exit orders sent on your behalf</td><td><span class="pill amber">Needs permission</span></td></tr>
+            <tr><td>Lock the whole broker account</td><td class="muted">Would stop orders from any app</td><td><span class="pill grey">Not verified</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="pricing">
+      <div class="panel price-strip">
+        <div>
+          <span class="eyebrow">TradeLock Pro</span>
+          <div style="display:flex;align-items:baseline;gap:10px;margin-top:6px"><span class="big">₹499</span><span class="muted">/ month + GST</span></div>
+          <p class="muted" style="margin:6px 0 0">7-day free trial. Cancel renewal any time.</p>
+        </div>
+        <a class="btn btn-primary" style="height:50px;padding:0 26px" href="#login" data-go="login">Start free trial</a>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span class="logo" style="font-size:15px">TRADE<b>LOCK</b></span>
+      <span>Trading in derivatives carries risk. TradeLock is a discipline tool, not investment advice.</span>
+      <a href="#states" data-go="states">Interaction states</a>
+    </footer>
+  </div>
+</div>
+
+<!-- ================= LOGIN ================= -->
+<div class="view auth" id="v-login" hidden>
+  <div class="wrap" style="width:100%">
+    <nav class="nav"><a class="logo" href="#landing" data-go="landing"><span class="logo-mark" data-icon="lock"></span><span>TRADE<b>LOCK</b></span></a></nav>
+    <div class="auth-main">
+      <div class="panel auth-card">
+        <h1>Welcome back</h1>
+        <p class="muted" style="margin:0">Sign in to your risk dashboard.</p>
+        <form class="auth-form" id="loginForm">
+          <div class="field"><label for="em">Email address</label><input class="input" id="em" type="email" placeholder="you@example.com" value="jordan@example.com" autocomplete="email"></div>
+          <div class="field"><label for="pw">Password</label><input class="input" id="pw" type="password" value="demo-password" autocomplete="current-password"></div>
+          <button class="btn btn-primary btn-block" style="height:48px" type="submit"><span data-icon="lock"></span>Sign in securely</button>
+          <div class="auth-links"><a href="#login">Forgot password?</a><span class="muted">·</span><a href="#login">Create an account</a></div>
+        </form>
+      </div>
+      <div class="panel auth-card">
+        <span class="eyebrow">Security</span>
+        <h1 style="font-size:24px;margin-top:8px">Security comes first</h1>
+        <div class="sec-list">
+          <div class="sec-item"><div class="ico" data-icon="key"></div><div><b>Protected sign-in</b><span>Turn on multi-factor authentication for sensitive actions like emergency stop.</span></div></div>
+          <div class="sec-item"><div class="ico" data-icon="link"></div><div><b>Broker credentials stay with the broker</b><span>You connect through the broker's own authorization flow. We never store your broker password.</span></div></div>
+          <div class="sec-item"><div class="ico" data-icon="radar"></div><div><b>Clear system status</b><span>When monitoring is delayed or degraded, the dashboard tells you right away.</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ONBOARD ================= -->
+<div class="view auth" id="v-connect" hidden>
+  <div class="wrap" style="width:100%">
+    <nav class="nav"><a class="logo" href="#landing" data-go="landing"><span class="logo-mark" data-icon="lock"></span><span>TRADE<b>LOCK</b></span></a><span class="muted" style="font-size:13px">Signed in as jordan@example.com</span></nav>
+    <div class="stepper" aria-label="Onboarding progress">
+      <span class="st done"><i data-icon="check"></i>Account</span><span class="bar"></span>
+      <span class="st cur"><i>2</i>Connect broker</span><span class="bar"></span>
+      <span class="st"><i>3</i>Set risk rules</span>
+    </div>
+    <div class="two-col" style="padding-bottom:48px">
+      <div class="panel panel-pad" style="padding:30px">
+        <h1 style="font-size:28px;margin:0 0 4px;letter-spacing:-.02em">Connect your trading account</h1>
+        <p class="muted" style="margin:0 0 24px">Choose your broker. You'll sign in on the broker's own page.</p>
+        <div style="display:flex;flex-direction:column;gap:12px" role="radiogroup" aria-label="Broker">
+          <button class="broker-opt" role="radio" aria-checked="true"><span class="b-logo">DH</span><span class="grow"><b>Dhan</b><span>Orders, positions and P&amp;L via Dhan API</span></span><span class="pill">Available</span></button>
+          <button class="broker-opt" role="radio" aria-checked="false" disabled><span class="b-logo" style="color:var(--muted)">ZU</span><span class="grow"><b>Zerodha · Upstox · Angel One</b><span>Planned for a later release</span></span><span class="pill amber">Coming later</span></button>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:26px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="connectBtn" style="height:48px;padding:0 24px"><span data-icon="link"></span>Connect Dhan account</button>
+          <button class="btn btn-ghost" data-go="overview">Skip, explore demo</button>
+        </div>
+      </div>
+      <div class="panel panel-pad">
+        <h3 class="panel-title" style="margin-bottom:10px">Connection checklist</h3>
+        <ol class="checklist" id="checklist">
+          <li><i>1</i>Review requested permissions</li>
+          <li><i>2</i>Authorize via Dhan login</li>
+          <li><i>3</i>Verify order and P&amp;L access</li>
+          <li><i>4</i>Test the monitoring connection</li>
+        </ol>
+        <button class="btn btn-primary btn-block" id="toRules" style="margin-top:14px" hidden data-go="rules">Continue to risk rules <span data-icon="arrow"></span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div class="view app" id="v-app" hidden>
+  <div class="scrim" id="scrim"></div>
+  <aside class="side" id="side" aria-label="Main navigation">
+    <a class="logo" href="#landing" data-go="landing"><span class="logo-mark" data-icon="lock"></span><span>TRADE<b>LOCK</b></span></a>
+    <div class="nav-group">Session</div>
+    <button class="nav-item" data-go="overview"><span data-icon="grid"></span>Overview</button>
+    <button class="nav-item" data-go="rules"><span data-icon="sliders"></span>Risk rules</button>
+    <button class="nav-item danger" data-go="stop"><span data-icon="octagon"></span>Emergency stop</button>
+    <button class="nav-item" data-go="trades"><span data-icon="list"></span>Trades</button>
+    <button class="nav-item" data-go="analytics"><span data-icon="chart"></span>Analytics</button>
+    <div class="nav-group">Account</div>
+    <button class="nav-item" data-go="brokers"><span data-icon="link"></span>Broker accounts</button>
+    <button class="nav-item" data-go="billing"><span data-icon="card"></span>Subscription</button>
+    <button class="nav-item" data-go="affiliate"><span data-icon="share"></span>Affiliate hub</button>
+    <button class="nav-item" data-go="alerts"><span data-icon="bell"></span>Notifications<span class="badge" id="notifBadge">2</span></button>
+    <button class="nav-item" data-go="settings"><span data-icon="gear"></span>Settings</button>
+    <div class="side-foot">
+      <div class="status-card">
+        <div class="row" id="sideStatus"><span class="dot pulse" style="color:var(--mint)"></span><span style="color:var(--mint)">Monitoring active</span></div>
+        <p id="sideStatusSub">Dhan synced 2s ago</p>
+        <div class="seg" role="group" aria-label="Simulate connection state">
+          <button aria-pressed="true" data-conn="ok">Healthy</button>
+          <button aria-pressed="false" data-conn="degraded">Degraded</button>
+        </div>
+        <p style="margin:10px 0 0;font-size:11px;color:var(--dim)">Demo control: preview a delayed sync. <a href="#states" data-go="states">All states</a></p>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <button class="menu-btn" id="menuBtn" aria-label="Open menu"><span data-icon="menu"></span></button>
+      <div class="grow"><h1 id="pgTitle">Overview</h1><p class="t-sub" id="pgSub">Friday, 09 Oct 2026 · Demo account data</p></div>
+      <div class="top-right">
+        <span class="clock">NSE open · 12:48 IST</span>
+        <button class="chip-btn ok" id="connChip" data-go="brokers"><span class="dot pulse"></span><span>Dhan</span><span class="lbl-long" id="connChipTxt">connected</span></button>
+        <span class="avatar" aria-label="Jordan Demo">JD</span>
+      </div>
+    </div>
+
+    <div class="banner amber" id="degBanner" hidden role="status">
+      <span data-icon="alert"></span>
+      <div><b>Broker data is delayed (last sync 48 seconds ago).</b> Risk rules cannot be checked against current positions until sync recovers. Do not rely on automatic protection right now.</div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <section class="page" data-page="overview">
+      <div class="kpis">
+        <div class="panel kpi"><div class="lbl">Today's P&amp;L <span class="pill" style="height:20px;font-size:10px">Live</span></div><div class="val pos">+₹3,450</div><div class="foot">Realized ₹3,480 · Open −₹30</div><svg class="spark" id="sp1"></svg></div>
+        <div class="panel kpi"><div class="lbl">Daily loss budget</div><div class="val">₹5,000</div><div class="foot">Worst today −₹1,180 <span class="muted">(24%)</span></div></div>
+        <div class="panel kpi"><div class="lbl">Trades today</div><div class="val warn">2 <span class="muted" style="font-size:18px">of 3</span></div><div class="foot">1 entry left before the cap</div></div>
+        <div class="panel kpi status" id="sysTile"><div class="lbl">System status</div><div class="val pos" id="sysVal"><span class="dot pulse"></span>MONITORING</div><div class="foot" id="sysFoot">Synced 2s ago · 99.8% uptime today</div></div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel panel-pad">
+          <div class="panel-head">
+            <h3 class="panel-title">Intraday P&amp;L</h3>
+            <div class="legend"><span><i style="background:var(--mint)"></i>P&amp;L</span><span><i style="background:var(--amber)"></i>Cutoff 3:00 PM</span><span><i style="background:var(--dim)"></i>Trade entry</span></div>
+          </div>
+          <svg class="chart" id="intraday" role="img" aria-label="Intraday P&L from 09:15 to 12:48, low of minus 1,180 at 10:44, now plus 3,450"></svg>
+        </div>
+        <div class="panel panel-pad">
+          <div class="panel-head"><h3 class="panel-title">Risk protection</h3><span class="pill" id="protPill"><span class="dot pulse"></span>Active</span></div>
+          <div class="prot">
+            <div class="prot-ring">
+              <div class="ring" id="tradeRing" data-pct="66.7"><svg viewBox="0 0 100 100"></svg><div class="ring-label"><div><b>2/3</b><small>Entries</small></div></div></div>
+              <div><b style="display:block">Trade cap</b><span class="muted" style="font-size:13px">One more entry allowed. New orders through TradeLock pause at 3.</span></div>
+            </div>
+            <div class="item"><div class="top"><span>Daily loss used (worst point)</span><span class="num">₹1,180 / ₹5,000</span></div><div class="meter"><i style="width:23.6%"></i></div></div>
+            <div class="item"><div class="top"><span>Profit lock progress</span><span class="num">₹3,450 / ₹8,000</span></div><div class="meter"><i style="width:43%"></i></div></div>
+            <div class="item"><div class="top"><span>Time to cutoff</span><span class="num">2h 12m</span></div><div class="meter amber"><i style="width:63%"></i></div></div>
+            <button class="btn btn-block" data-go="stop" style="border-color:rgba(255,94,123,.35);color:#FFB3C1"><span data-icon="octagon"></span>Emergency controls</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel panel-pad" style="margin-top:18px">
+        <div class="panel-head"><h3 class="panel-title">Open position</h3><button class="btn btn-sm" data-go="trades">All trades <span data-icon="arrow"></span></button></div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Instrument</th><th>Qty</th><th class="r">Avg</th><th class="r">LTP</th><th class="r">Open P&amp;L</th><th>Exit rule</th></tr></thead>
+          <tbody><tr><td class="inst"><b>NIFTY 24950 PE</b><span>Weekly · 13 Oct expiry</span></td><td class="num">75</td><td class="r num">96.20</td><td class="r num">95.80</td><td class="r num neg">−₹30</td><td><span class="pill grey">Square-off at loss limit</span></td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div class="banner info" style="margin-top:18px;margin-bottom:0"><span data-icon="info"></span><div><b>Protection type: app monitoring.</b> TradeLock checks your rules on every sync and can pause orders placed through TradeLock. A broker-side account lock is not verified for Dhan, so orders placed directly in the Dhan app may still go through.</div></div>
+    </section>
+
+    <!-- RULES -->
+    <section class="page" data-page="rules" hidden>
+      <div class="rules" id="rulesGrid">
+        <div class="panel rule" data-rule>
+          <div class="rule-head"><div><h3>Daily maximum loss</h3><p>Triggers on realized + open P&amp;L for the day.</p></div><button class="switch" role="switch" aria-checked="true" aria-label="Daily maximum loss"></button></div>
+          <div class="rule-row">
+            <div class="field"><label for="r1">Limit</label><div class="input-wrap"><span class="affix">₹</span><input class="input" id="r1" inputmode="numeric" value="5,000"></div></div>
+            <div class="field"><label for="r1a">When reached</label><select class="input" id="r1a"><option>Alert + attempt exit</option><option>Alert + pause orders</option><option>Alert only</option></select></div>
+          </div>
+          <div class="rule-live"><div class="top"><span>Today's worst point</span><b>−₹1,180 · 24%</b></div><div class="meter"><i style="width:24%"></i></div></div>
+          <div class="enf"><span data-icon="info"></span>Exit depends on square-off permission</div>
+        </div>
+        <div class="panel rule" data-rule>
+          <div class="rule-head"><div><h3>Maximum trades per day</h3><p>Counts executed entries. Exits don't count.</p></div><button class="switch" role="switch" aria-checked="true" aria-label="Maximum trades per day"></button></div>
+          <div class="rule-row">
+            <div class="field"><label for="r2">Entries</label><div class="input-wrap"><span class="affix">#</span><input class="input" id="r2" inputmode="numeric" value="3"><span class="suffix">trades</span></div></div>
+            <div class="field"><label for="r2a">When reached</label><select class="input" id="r2a"><option>Pause new orders</option><option>Alert only</option></select></div>
+          </div>
+          <div class="rule-live"><div class="top"><span>Used today</span><b>2 of 3</b></div><div class="meter amber"><i style="width:66.7%"></i></div></div>
+          <div class="enf"><span data-icon="check"></span>Enforced for orders placed through TradeLock</div>
+        </div>
+        <div class="panel rule" data-rule>
+          <div class="rule-head"><div><h3>Profit lock</h3><p>Protects a good day once the target is reached.</p></div><button class="switch" role="switch" aria-checked="true" aria-label="Profit lock"></button></div>
+          <div class="rule-row">
+            <div class="field"><label for="r3">Target</label><div class="input-wrap"><span class="affix">₹</span><input class="input" id="r3" inputmode="numeric" value="8,000"></div></div>
+            <div class="field"><label for="r3a">When reached</label><select class="input" id="r3a"><option>Alert + pause orders</option><option>Alert + attempt exit</option><option>Alert only</option></select></div>
+          </div>
+          <div class="rule-live"><div class="top"><span>Progress</span><b>₹3,450 · 43%</b></div><div class="meter"><i style="width:43%"></i></div></div>
+          <div class="enf"><span data-icon="check"></span>Enforced for orders placed through TradeLock</div>
+        </div>
+        <div class="panel rule" data-rule>
+          <div class="rule-head"><div><h3>Trading cutoff</h3><p>Stops new orders through TradeLock after this time.</p></div><button class="switch" role="switch" aria-checked="true" aria-label="Trading cutoff"></button></div>
+          <div class="rule-row">
+            <div class="field"><label for="r4">Cutoff time (IST)</label><select class="input num" id="r4"><option>2:30 PM</option><option selected>3:00 PM</option><option>3:15 PM</option></select></div>
+            <div class="field"><label for="r4a">Open positions</label><select class="input" id="r4a"><option>Keep open</option><option>Attempt exit at cutoff</option></select></div>
+          </div>
+          <div class="rule-live"><div class="top"><span>Session elapsed · market closes 3:30 PM</span><b>2h 12m left</b></div><div class="meter amber"><i style="width:63%"></i></div></div>
+          <div class="enf"><span data-icon="check"></span>Enforced for orders placed through TradeLock</div>
+        </div>
+      </div>
+      <div class="panel savebar">
+        <div class="msg" id="saveMsg"><span data-icon="clock"></span>All changes are audited. New limits apply from the next sync.</div>
+        <button class="btn btn-ghost btn-sm" id="resetRules" disabled>Discard</button>
+        <button class="btn btn-primary" id="saveRules" disabled>Save risk rules</button>
+      </div>
+    </section>
+
+    <!-- EMERGENCY STOP -->
+    <section class="page" data-page="stop" hidden>
+      <div class="estop">
+        <div class="panel panel-pad" style="padding:28px">
+          <span class="pill" id="stopState"><span class="dot pulse"></span>Current state: monitoring</span>
+          <div id="stopChoose">
+            <h2>Emergency actions</h2>
+            <p class="muted" style="margin:0">Choose exactly what TradeLock should attempt. Nothing happens until you confirm on the next step.</p>
+            <div class="acts">
+              <label class="act"><input type="checkbox" id="a1" value="Pause new orders sent through TradeLock"><span class="box" data-icon="check"></span><div><b>Pause new orders sent through TradeLock</b><span>Blocks orders placed in TradeLock for the rest of the session.</span></div></label>
+              <label class="act"><input type="checkbox" id="a2" value="Cancel eligible open orders"><span class="box" data-icon="check"></span><div><b>Cancel eligible open orders</b><span>1 pending order: NIFTY 25100 CE limit buy, 75 qty.</span></div></label>
+              <label class="act"><input type="checkbox" id="a3" value="Attempt to exit eligible positions"><span class="box" data-icon="check"></span><div><b>Attempt to exit eligible positions</b><span>1 open position: NIFTY 24950 PE, 75 qty, at market.</span></div></label>
+            </div>
+            <button class="btn btn-danger btn-block" id="reviewStop" style="height:54px;font-size:15px;letter-spacing:.04em" disabled><span data-icon="octagon"></span>REVIEW AND ACTIVATE STOP</button>
+          </div>
+          <div id="stopConfirm" hidden>
+            <h2>Confirm emergency stop</h2>
+            <div class="confirm">
+              <h3>TradeLock will attempt:</h3>
+              <ul id="confirmList"></ul>
+              <div class="field"><label for="stopType">Type <b class="num" style="color:var(--fg)">STOP</b> to confirm</label><input class="input num" id="stopType" autocomplete="off" placeholder="STOP"></div>
+              <div class="row"><button class="btn btn-danger" id="doStop" disabled>Activate stop</button><button class="btn btn-ghost" id="cancelStop">Go back</button></div>
+            </div>
+          </div>
+          <div id="stopResult" hidden>
+            <h2>Action results</h2>
+            <p class="muted" style="margin:0 0 16px">Broker responses appear here as they arrive. Review each result before you trade again.</p>
+            <div class="results" id="results"></div>
+            <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap"><button class="btn" id="ackStop" disabled>Acknowledge results</button><button class="btn btn-ghost" id="resetStop">Reset demo</button></div>
+          </div>
+        </div>
+        <div class="panel panel-pad">
+          <h3 class="panel-title" style="margin-bottom:16px">Before you proceed</h3>
+          <ul class="caveats">
+            <li class="key"><span data-icon="alert"></span>This is not a broker-level account lock.</li>
+            <li><span data-icon="alert"></span>Orders placed directly in the Dhan app may still execute.</li>
+            <li><span data-icon="alert"></span>Exits can fail or be delayed in fast markets or at freeze limits.</li>
+            <li><span data-icon="alert"></span>You need to review and acknowledge each result.</li>
+          </ul>
+          <div class="mini-list" style="margin-top:18px;border-top:1px solid var(--line);padding-top:6px">
+            <div class="r"><span class="muted">Open positions</span><span class="num">1</span></div>
+            <div class="r"><span class="muted">Pending orders</span><span class="num">1</span></div>
+            <div class="r"><span class="muted">Square-off permission</span><span class="pill amber" style="height:22px;font-size:10px">Unverified</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRADES -->
+    <section class="page" data-page="trades" hidden>
+      <div class="panel panel-pad">
+        <div class="panel-head">
+          <h3 class="panel-title">Today · 09 Oct 2026</h3>
+          <div class="seg" role="group" aria-label="Filter" id="tradeFilter">
+            <button aria-pressed="true" data-f="all">All</button><button aria-pressed="false" data-f="exec">Executions</button><button aria-pressed="false" data-f="evt">Risk events</button>
+          </div>
+        </div>
+        <div class="tbl-wrap"><table class="tbl" id="tradeTbl">
+          <thead><tr><th>Time</th><th>Instrument</th><th>Side</th><th class="r">Qty</th><th class="r">Price</th><th class="r">P&amp;L</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr data-k="exec"><td class="num">10:23:41</td><td class="inst"><b>NIFTY 25000 CE</b><span>Entry 1 of 3</span></td><td><span class="side-tag buy">BUY</span></td><td class="r num">75</td><td class="r num">112.40</td><td class="r num muted">–</td><td><span class="pill">Complete</span></td></tr>
+            <tr data-k="evt"><td class="num">10:44:05</td><td class="inst"><b>Drawdown warning</b><span>−₹1,180 reached 24% of loss limit</span></td><td><span class="side-tag evt">ALERT</span></td><td class="r num muted">–</td><td class="r num muted">–</td><td class="r num muted">–</td><td><span class="pill grey">Logged</span></td></tr>
+            <tr data-k="exec"><td class="num">11:08:12</td><td class="inst"><b>NIFTY 25000 CE</b><span>Exit · held 44m</span></td><td><span class="side-tag sell">SELL</span></td><td class="r num">75</td><td class="r num">158.80</td><td class="r num pos">+₹3,480</td><td><span class="pill">Complete</span></td></tr>
+            <tr data-k="exec"><td class="num">12:15:27</td><td class="inst"><b>NIFTY 24950 PE</b><span>Entry 2 of 3 · open</span></td><td><span class="side-tag buy">BUY</span></td><td class="r num">75</td><td class="r num">96.20</td><td class="r num neg">−₹30</td><td><span class="pill ice">Open</span></td></tr>
+            <tr data-k="evt"><td class="num">12:15:28</td><td class="inst"><b>Trade cap warning</b><span>2 of 3 entries used</span></td><td><span class="side-tag evt">LIMIT</span></td><td class="r num muted">–</td><td class="r num muted">–</td><td class="r num muted">–</td><td><span class="pill grey">Logged</span></td></tr>
+          </tbody>
+        </table></div>
+        <div class="sum-strip">
+          <div><span>Realized</span><b class="pos">+₹3,480</b></div>
+          <div><span>Open</span><b class="neg">−₹30</b></div>
+          <div><span>Charges (est.)</span><b>₹61.40</b></div>
+          <div><span>Net</span><b class="pos">+₹3,388.60</b></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ANALYTICS -->
+    <section class="page" data-page="analytics" hidden>
+      <div class="kpis three">
+        <div class="panel kpi"><div class="lbl">Win rate</div><div class="val">58.3%</div><div class="foot">35 of 60 trades · last 20 sessions</div></div>
+        <div class="panel kpi"><div class="lbl">Rule adherence</div><div class="val">92%</div><div class="foot">Sessions with no rule overridden</div></div>
+        <div class="panel kpi"><div class="lbl">Net P&amp;L</div><div class="val pos">+₹14,280</div><div class="foot">11 Sep – 09 Oct 2026</div></div>
+      </div>
+      <div class="two-col">
+        <div class="panel panel-pad">
+          <div class="panel-head"><h3 class="panel-title">Equity curve</h3><div class="legend"><span><i style="background:var(--mint)"></i>Cumulative P&amp;L</span><span><i style="background:var(--red)"></i>Loss day</span></div></div>
+          <svg class="chart" id="equity" style="height:220px" role="img" aria-label="Cumulative P&L over 20 sessions rising to 14,280"></svg>
+          <svg class="chart" id="daily" style="height:120px;margin-top:8px" role="img" aria-label="Daily P&L bars for 20 sessions"></svg>
+        </div>
+        <div class="panel panel-pad">
+          <h3 class="panel-title" style="margin-bottom:6px">Discipline insights</h3>
+          <div class="mini-list">
+            <div class="r"><span><b class="num pos" style="font-size:24px;margin-right:10px">3</b><span class="muted">Risk limits triggered</span></span></div>
+            <div class="r"><span><b class="num pos" style="font-size:24px;margin-right:10px">1</b><span class="muted">Overtrading day avoided</span></span></div>
+            <div class="r"><span><b class="num pos" style="font-size:24px;margin-right:10px">97%</b><span class="muted">Connection uptime</span></span></div>
+            <div class="r"><span><b class="num warn" style="font-size:24px;margin-right:10px">−₹2,100</b><span class="muted">Worst day · 25 Sep</span></span></div>
+          </div>
+          <div class="banner info" style="margin:14px 0 0"><span data-icon="info"></span><div>Your losing days average ₹1,083. That is well inside your ₹5,000 limit.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BROKERS -->
+    <section class="page" data-page="brokers" hidden>
+      <div class="two-col">
+        <div class="panel panel-pad" style="padding:26px">
+          <div class="acct-head">
+            <span class="b-logo">DH</span>
+            <div class="grow"><h2>Dhan <span class="num muted" style="font-size:15px;font-weight:500">···· 2841</span></h2><span class="muted" style="font-size:13px" id="syncTxt">Last successful sync: 2 seconds ago</span></div>
+            <span class="pill" id="brokerPill"><span class="dot pulse"></span>Connected</span>
+          </div>
+          <div style="margin-top:18px">
+            <div class="cap"><b>Positions and orders</b><span class="pill">Available</span><p>Read every 2 seconds during market hours.</p></div>
+            <div class="cap"><b>Automated square-off</b><span class="pill amber">Subject to permissions</span><p>Needs order placement permission on your Dhan API token.</p></div>
+            <div class="cap"><b>Native account-wide lock</b><span class="pill grey">Not verified</span><p>Orders placed directly in the Dhan app are not blocked by TradeLock.</p></div>
+            <div class="cap"><b>Token expiry</b><span class="num muted">in 23h 12m</span><p>Dhan access tokens expire daily. We'll remind you to reconnect.</p></div>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+            <button class="btn" id="reconnect"><span data-icon="refresh"></span>Reconnect broker</button>
+            <button class="btn btn-ghost" id="permBtn" aria-expanded="false"><span data-icon="key"></span>View permissions</button>
+          </div>
+          <div class="perm" id="perm" hidden>
+            <b>Granted scopes</b>
+            <ul><li><code>orders.read</code> · order book and trade book</li><li><code>positions.read</code> · positions and holdings</li><li><code>funds.read</code> · margin and P&amp;L</li><li><code>orders.write</code> · <span class="warn">requested, not yet confirmed by Dhan</span></li></ul>
+          </div>
+        </div>
+        <div class="panel panel-pad">
+          <h3 class="panel-title" style="margin-bottom:14px">Add a broker</h3>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="broker-opt" style="cursor:default"><span class="b-logo" style="color:var(--muted)">ZE</span><span class="grow"><b>Zerodha</b><span>Coming later</span></span></div>
+            <div class="broker-opt" style="cursor:default"><span class="b-logo" style="color:var(--muted)">UP</span><span class="grow"><b>Upstox</b><span>Coming later</span></span></div>
+            <div class="broker-opt" style="cursor:default"><span class="b-logo" style="color:var(--muted)">AO</span><span class="grow"><b>Angel One</b><span>Coming later</span></span></div>
+          </div>
+          <button class="btn btn-block" style="margin-top:14px" data-toast="We'll email you when new brokers launch."><span data-icon="bell"></span>Notify me</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- BILLING -->
+    <section class="page" data-page="billing" hidden>
+      <div class="two-col">
+        <div class="panel plan">
+          <span class="pill">TradeLock Pro</span>
+          <div class="price"><span class="big">₹499</span><span class="muted" style="font-size:16px">/ month</span></div>
+          <span class="pill ice"><span class="dot"></span>Free trial · 6 days left</span>
+          <ul class="feat-list">
+            <li><span data-icon="check"></span>Dhan account monitoring</li>
+            <li><span data-icon="check"></span>Configurable risk rules</li>
+            <li><span data-icon="check"></span>Supported automated actions</li>
+            <li><span data-icon="check"></span>Risk alerts and audit history</li>
+            <li><span data-icon="check"></span>Trading performance analytics</li>
+          </ul>
+          <button class="btn btn-primary" style="height:50px;padding:0 28px" data-toast="Checkout would open here.">Subscribe now</button>
+        </div>
+        <div class="panel panel-pad">
+          <h3 class="panel-title">Billing summary</h3>
+          <div class="bill-row"><span>Monthly plan</span><b class="num">₹499.00</b></div>
+          <div class="bill-row"><span class="muted">GST (18%)</span><span class="warn">Added at checkout</span></div>
+          <div class="bill-row" style="border-bottom:0"><span class="muted">First charge</span><span class="num">15 Oct 2026</span></div>
+          <p class="muted" style="font-size:13px;margin:6px 0 0">Cancel renewal any time from this page. You keep access until the end of the paid month.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- AFFILIATE -->
+    <section class="page" data-page="affiliate" hidden>
+      <div class="kpis three">
+        <div class="panel kpi"><div class="lbl">Referral clicks</div><div class="val">12,480</div><div class="foot">All time</div><svg class="spark" id="sp2"></svg></div>
+        <div class="panel kpi"><div class="lbl">Active subscribers</div><div class="val">126</div><div class="foot">Paying this month</div></div>
+        <div class="panel kpi"><div class="lbl">Estimated commission</div><div class="val pos">₹12,574</div><div class="foot">126 × ₹499 × 20%, payable 31 Oct</div></div>
+      </div>
+      <div class="panel panel-pad" style="margin-bottom:18px">
+        <div class="panel-head"><h3 class="panel-title">Your referral link</h3><span class="muted" style="font-size:13px">20% recurring on eligible paid renewals</span></div>
+        <div class="ref"><input class="input" id="refLink" readonly value="tradelock.example/ref/CREATOR123"><button class="btn btn-primary" id="copyRef"><span data-icon="copy"></span>Copy link</button></div>
+      </div>
+      <div class="two-col">
+        <div class="panel panel-pad">
+          <div class="panel-head"><h3 class="panel-title">Payouts</h3><button class="btn btn-sm" data-toast="Payout settings would open here."><span data-icon="gear"></span>Payout settings</button></div>
+          <div class="tbl-wrap"><table class="tbl" style="min-width:420px">
+            <thead><tr><th>Period</th><th class="r">Amount</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td>October 2026</td><td class="r num">₹12,574</td><td><span class="pill ice">Accruing</span></td></tr>
+              <tr><td>30 Sep 2026</td><td class="r num pos">₹8,981</td><td><span class="pill">Paid</span></td></tr>
+              <tr><td>31 Aug 2026</td><td class="r num pos">₹6,240</td><td><span class="pill">Paid</span></td></tr>
+              <tr><td>31 Jul 2026</td><td class="r num pos">₹3,993</td><td><span class="pill">Paid</span></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div class="panel panel-pad">
+          <h3 class="panel-title" style="margin-bottom:12px">Commission rules</h3>
+          <ul class="caveats">
+            <li><span data-icon="check" style="stroke:var(--mint)"></span>20% of each eligible paid renewal</li>
+            <li><span data-icon="check" style="stroke:var(--mint)"></span>Excludes refunds and taxes</li>
+            <li class="key"><span data-icon="alert"></span>Disclose paid affiliate relationships in every post and follow applicable rules.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- NOTIFICATIONS -->
+    <section class="page" data-page="alerts" hidden>
+      <div class="panel panel-pad">
+        <div class="panel-head">
+          <div class="seg" role="group" aria-label="Filter notifications" id="noteFilter">
+            <button aria-pressed="true" data-f="all">All</button><button aria-pressed="false" data-f="risk">Risk</button><button aria-pressed="false" data-f="broker">Broker</button><button aria-pressed="false" data-f="billing">Billing</button>
+          </div>
+          <button class="btn btn-sm" id="markRead"><span data-icon="check"></span>Mark all read</button>
+        </div>
+        <div class="notes" id="notes">
+          <div class="note unread" data-k="risk"><span class="n-ico" style="background:var(--amber-soft)"><span data-icon="alert" style="stroke:var(--amber)"></span></span><div><b>2 of 3 trades used today<span class="unread-dot"></span></b><span>Risk warning · One more entry allowed before new orders pause.</span></div><time>12:15</time></div>
+          <div class="note unread" data-k="risk"><span class="n-ico" style="background:var(--red-soft)"><span data-icon="gauge" style="stroke:var(--red)"></span></span><div><b>Drawdown reached 24% of daily loss limit<span class="unread-dot"></span></b><span>Risk event · −₹1,180 against a ₹5,000 limit.</span></div><time>10:44</time></div>
+          <div class="note" data-k="broker"><span class="n-ico" style="background:var(--mint-soft)"><span data-icon="link" style="stroke:var(--mint)"></span></span><div><b>Dhan data sync restored</b><span>Broker connected · Sync was delayed for 41 seconds.</span></div><time>09:16</time></div>
+          <div class="note" data-k="billing"><span class="n-ico" style="background:var(--ice-soft)"><span data-icon="card" style="stroke:var(--ice)"></span></span><div><b>Your free trial ends in 6 days</b><span>Billing · Subscribe to keep monitoring after 15 Oct.</span></div><time>Yesterday</time></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="page" data-page="settings" hidden>
+      <div class="two-col" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+        <div class="panel panel-pad">
+          <h3 class="panel-title" style="margin-bottom:18px">Account</h3>
+          <div class="form-grid">
+            <div class="field" style="grid-column:1/-1"><label for="sName">Display name</label><input class="input" id="sName" value="Jordan Demo"></div>
+            <div class="field"><label for="sTz">Timezone</label><select class="input" id="sTz"><option>Asia/Kolkata (IST)</option></select></div>
+            <div class="field"><label for="sCur">Currency</label><select class="input" id="sCur"><option>INR (₹)</option></select></div>
+            <div class="field" style="grid-column:1/-1"><label for="sTheme">Theme</label><select class="input" id="sTheme"><option>Dark (default)</option></select></div>
+          </div>
+          <button class="btn btn-primary" style="margin-top:20px" data-toast="Account settings saved.">Save changes</button>
+        </div>
+        <div class="panel panel-pad">
+          <h3 class="panel-title" style="margin-bottom:6px">Security and alerts</h3>
+          <div class="set-list">
+            <div class="set-row"><div><b>Multi-factor authentication</b><span>Recommended. Required for emergency stop.</span></div><button class="btn btn-sm btn-primary" data-toast="MFA setup would open here.">Set up</button></div>
+            <div class="set-row"><div><b>Emergency action confirmation</b><span>Type STOP before actions run</span></div><button class="switch" role="switch" aria-checked="true" aria-label="Emergency action confirmation"></button></div>
+            <div class="set-row"><div><b>Push notifications</b><span>Risk warnings and events</span></div><button class="switch" role="switch" aria-checked="true" aria-label="Push notifications"></button></div>
+            <div class="set-row"><div><b>Broker disconnect alerts</b><span>When sync is delayed for more than 30s</span></div><button class="switch" role="switch" aria-checked="true" aria-label="Broker disconnect alerts"></button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATES -->
+    <section class="page" data-page="states" hidden>
+      <div class="states">
+        <div class="panel state-card"><span class="pill"><span class="dot"></span>Connected</span><p>Fresh broker data and healthy monitoring. Rules are checked on every sync.</p><div class="state-demo"><span data-icon="check" style="stroke:var(--mint)"></span>Dhan synced 2s ago · Monitoring active</div></div>
+        <div class="panel state-card"><span class="pill amber"><span class="dot"></span>Degraded</span><p>Delayed sync or missing data. The UI must not imply that protection is active.</p><div class="state-demo"><span data-icon="alert" style="stroke:var(--amber)"></span>Last sync 48s ago · Rules cannot be checked</div></div>
+        <div class="panel state-card"><span class="pill ice"><span class="dot pulse"></span>Action pending</span><p>A broker command was sent and TradeLock is waiting for confirmation.</p><div class="state-demo"><span data-icon="clock" style="stroke:var(--ice)"></span>Exit order sent · waiting for Dhan</div></div>
+        <div class="panel state-card"><span class="pill red"><span class="dot"></span>Action failed</span><p>An exit or cancel failed. Show what happened and the next step clearly.</p><div class="state-demo"><span data-icon="x" style="stroke:var(--red)"></span>Exit rejected: freeze quantity. Exit manually in Dhan.</div></div>
+      </div>
+      <div class="principles">
+        <div class="panel panel-pad"><h3 class="panel-title" style="margin-bottom:10px">Motion</h3><ul><li>160–240ms transitions on hover, page and panel changes</li><li>Reduced-motion setting turns all animation off</li><li>No animation on critical confirmations or action results</li></ul></div>
+        <div class="panel panel-pad"><h3 class="panel-title" style="margin-bottom:10px">Accessibility</h3><ul><li>Full keyboard navigation with visible focus rings</li><li>State shown by label and icon, never colour alone</li><li>Switches, radios and charts carry screen-reader labels</li></ul></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"><span data-icon="check"></span><span id="toastTxt"></span></div>
+
+<script>
+(function(){
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const NS='http://www.w3.org/2000/svg';
+
+/* ---------- icons ---------- */
+const P={
+ lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+ arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+ shield:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+ gauge:'<path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.2"/>',
+ radar:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/>',
+ bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+ key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l2 2M15 8l2 2"/>',
+ link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+ check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+ grid:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+ sliders:'<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+ octagon:'<path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z"/><path d="M12 8v5M12 16h.01"/>',
+ list:'<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>',
+ chart:'<path d="M4 20V4M4 20h16"/><path d="M7 15l4-4 3 3 5-6"/>',
+ card:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/>',
+ share:'<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+ menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
+ alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
+ info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+ clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ refresh:'<path d="M20 11a8 8 0 0 0-14.8-4M4 4v4h4M4 13a8 8 0 0 0 14.8 4M20 20v-4h-4"/>',
+ copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+ x:'<path d="M6 6l12 12M18 6L6 18"/>'
+};
+function icon(name){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(P[name]||'')+'</svg>'}
+function paintIcons(root){$$('[data-icon]',root).forEach(el=>{if(el.dataset.painted)return;const n=el.dataset.icon;const isWrap=el.classList.contains('ico')||el.classList.contains('logo-mark')||el.classList.contains('box')||el.tagName==='I';
+  if(isWrap){el.insertAdjacentHTML('beforeend',icon(n))}else{const svg=document.createRange().createContextualFragment(icon(n)).firstChild;
+   if(el.getAttribute('style'))svg.setAttribute('style',el.getAttribute('style'));svg.style.width=svg.style.width||'16px';svg.style.height=svg.style.height||'16px';svg.style.flex='none';el.replaceWith(svg);return}
+  el.dataset.painted=1})}
+paintIcons(document);
+
+/* ---------- toast ---------- */
+let tT;function toast(msg){$('#toastTxt').textContent=msg;const t=$('#toast');t.classList.add('show');clearTimeout(tT);tT=setTimeout(()=>t.classList.remove('show'),2600)}
+$$('[data-toast]').forEach(b=>b.addEventListener('click',()=>toast(b.dataset.toast)));
+
+/* ---------- charts ---------- */
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);parent&&parent.appendChild(e);return e}
+let gid=0;
+function lineChart(svg,pts,o){
+  svg.innerHTML='';const W=svg.clientWidth||600,H=svg.clientHeight||240;svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const m=o.bare?{l:2,r:2,t:4,b:2}:{l:48,r:14,t:12,b:26};
+  const [x0,x1]=o.xDomain||[pts[0][0],pts[pts.length-1][0]], [y0,y1]=o.yDomain;
+  const X=v=>m.l+(v-x0)/(x1-x0)*(W-m.l-m.r), Y=v=>m.t+(1-(v-y0)/(y1-y0))*(H-m.t-m.b);
+  const id='g'+(++gid);const defs=el('defs',{},svg);const lg=el('linearGradient',{id,x1:0,y1:0,x2:0,y2:1},defs);
+  el('stop',{offset:'0%','stop-color':'#38EBB4','stop-opacity':o.bare?.28:.22},lg);el('stop',{offset:'100%','stop-color':'#38EBB4','stop-opacity':0},lg);
+  if(!o.bare){(o.yTicks||[]).forEach(t=>{el('line',{x1:m.l,x2:W-m.r,y1:Y(t),y2:Y(t),stroke:t===0?'rgba(142,172,214,.28)':'rgba(142,172,214,.08)','stroke-dasharray':t===0?'':'2 4'},svg);
+      const tx=el('text',{x:m.l-10,y:Y(t)+3.5,'text-anchor':'end'},svg);tx.textContent=o.fmtY(t)});
+    (o.xTicks||[]).forEach(([v,l])=>{const tx=el('text',{x:X(v),y:H-6,'text-anchor':'middle'},svg);tx.textContent=l});
+    (o.vlines||[]).forEach(v=>{el('line',{x1:X(v.x),x2:X(v.x),y1:m.t,y2:H-m.b,stroke:v.color,'stroke-dasharray':v.dash||'4 4','stroke-opacity':v.op||.8},svg);
+      if(v.label){const tx=el('text',{x:X(v.x)-6,y:m.t+10,'text-anchor':'end'},svg);tx.textContent=v.label;tx.style.fill=v.color}})}
+  const d=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join(' ');
+  const base=Y(Math.max(y0,Math.min(0,y1)));
+  el('path',{d:d+` L${X(pts[pts.length-1][0]).toFixed(1)} ${o.bare?H:base} L${X(pts[0][0]).toFixed(1)} ${o.bare?H:base} Z`,fill:`url(#${id})`},svg);
+  const line=el('path',{d,fill:'none',stroke:'#38EBB4','stroke-width':o.bare?1.6:2.2,'stroke-linejoin':'round','stroke-linecap':'round'},svg);
+  if(!o.bare)line.setAttribute('style','filter:drop-shadow(0 0 6px rgba(56,235,180,.45))');
+  (o.marks||[]).forEach(mk=>{el('circle',{cx:X(mk[0]),cy:Y(mk[1]),r:3.5,fill:'#05090F',stroke:'#8C99AD','stroke-width':1.5},svg)});
+  if(o.low){const [lx,ly,lt]=o.low;el('circle',{cx:X(lx),cy:Y(ly),r:3.5,fill:'#FF5E7B'},svg);const tx=el('text',{x:X(lx)+8,y:Y(ly)+4},svg);tx.textContent=lt;tx.style.fill='#FF5E7B'}
+  const e=pts[pts.length-1];el('circle',{cx:X(e[0]),cy:Y(e[1]),r:o.bare?3:8,fill:'#38EBB4','fill-opacity':o.bare?1:.18},svg);
+  if(!o.bare){el('circle',{cx:X(e[0]),cy:Y(e[1]),r:4,fill:'#38EBB4'},svg);if(o.endLabel){const tx=el('text',{x:X(e[0])+12,y:Y(e[1])+4},svg);tx.textContent=o.endLabel;tx.style.fill='#38EBB4';tx.style.fontWeight=600}}
+}
+function barChart(svg,vals,o){
+  svg.innerHTML='';const W=svg.clientWidth||600,H=svg.clientHeight||120;svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const m={l:48,r:14,t:6,b:22};const [y0,y1]=o.yDomain;const Y=v=>m.t+(1-(v-y0)/(y1-y0))*(H-m.t-m.b);
+  const n=vals.length,bw=(W-m.l-m.r)/n;
+  el('line',{x1:m.l,x2:W-m.r,y1:Y(0),y2:Y(0),stroke:'rgba(142,172,214,.28)'},svg);
+  [y1,y0].forEach(t=>{const tx=el('text',{x:m.l-10,y:Y(t)+3.5,'text-anchor':'end'},svg);tx.textContent=o.fmtY(t)});
+  vals.forEach((v,i)=>{const x=m.l+i*bw+bw*.2,w=bw*.6,y=Math.min(Y(v),Y(0)),h=Math.abs(Y(v)-Y(0));
+    const r=el('rect',{x,y,width:w,height:Math.max(h,1),rx:2,fill:v>=0?'#38EBB4':'#FF5E7B','fill-opacity':i===n-1?1:.7},svg);
+    const t=el('title',{},r);t.textContent=o.labels[i]+': '+(v>=0?'+':'−')+'₹'+Math.abs(v).toLocaleString('en-IN')});
+  o.xTicks.forEach(i=>{const tx=el('text',{x:m.l+i*bw+bw/2,y:H-6,'text-anchor':'middle'},svg);tx.textContent=o.labels[i]});
+}
+function ring(box){const svg=$('svg',box),pct=+box.dataset.pct;const c=2*Math.PI*42;
+  svg.innerHTML=`<circle cx="50" cy="50" r="42" fill="none" stroke="rgba(142,172,214,.12)" stroke-width="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="#FFBA52" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c*pct/100} ${c}" style="filter:drop-shadow(0 0 6px rgba(255,186,82,.5))"/>`}
+$$('.ring').forEach(ring);
+
+/* data */
+const T=s=>{const [h,mm]=s.split(':').map(Number);return (h-9)*60+mm-15};
+const intraday=[['09:15',0],['10:23',0],['10:30',-420],['10:37',-860],['10:44',-1180],['10:52',-300],['10:58',1400],['11:03',2650],['11:08',3480],['11:40',3480],['12:15',3480],['12:22',3210],['12:30',3620],['12:38',3390],['12:48',3450]].map(([t,v])=>[T(t),v]);
+const daily=[1200,-800,2100,650,-1500,900,1800,-400,1250,700,-2100,1600,950,-600,2300,1100,-900,1480,1100,3450];
+const days=(()=>{const out=[],d=new Date(2026,8,11);while(out.length<20){const w=d.getDay();const hol=d.getMonth()===9&&d.getDate()===2;if(w&&w<6&&!hol)out.push(d.getDate()+' '+d.toLocaleString('en-GB',{month:'short'}));d.setDate(d.getDate()+1)}return out})();
+let cum=0;const equity=daily.map((v,i)=>[i,cum+=v]);equity.unshift([-1,0]);
+const fmtK=v=>v===0?'0':(v<0?'−':'')+'₹'+Math.abs(v/1000)+'k';
+
+function drawCharts(page){
+  if(page==='landing'){lineChart($('#heroSpark'),intraday,{bare:1,yDomain:[-1500,4000]})}
+  if(page==='overview'){
+    lineChart($('#intraday'),intraday,{xDomain:[0,375],yDomain:[-2000,4000],yTicks:[-2000,0,2000,4000],fmtY:fmtK,
+      xTicks:[[0,'09:15'],[T('10:30'),'10:30'],[T('11:45'),'11:45'],[T('13:00'),'13:00'],[T('14:15'),'14:15'],[375,'15:30']],
+      vlines:[{x:T('15:00'),color:'#FFBA52',label:'Cutoff'}],marks:[[T('10:23'),0],[T('12:15'),3480]],low:[T('10:44'),-1180,'−₹1,180'],endLabel:'+₹3,450'});
+    lineChart($('#sp1'),intraday,{bare:1,yDomain:[-1500,4200]});
+  }
+  if(page==='analytics'){
+    lineChart($('#equity'),equity,{xDomain:[-1,19],yDomain:[0,16000],yTicks:[0,4000,8000,12000,16000],fmtY:fmtK,xTicks:[[0,days[0]],[5,days[5]],[10,days[10]],[15,days[15]],[19,days[19]]],endLabel:''});
+    barChart($('#daily'),daily,{yDomain:[-2500,3500],fmtY:fmtK,labels:days,xTicks:[0,5,10,15,19]});
+  }
+  if(page==='affiliate'){lineChart($('#sp2'),[[0,200],[1,340],[2,310],[3,520],[4,610],[5,580],[6,790],[7,880],[8,1010],[9,1180]],{bare:1,yDomain:[0,1300]})}
+}
+
+/* ---------- routing ---------- */
+const META={overview:['Overview','Friday, 09 Oct 2026 · Demo account data'],rules:['Risk rules','Set clear limits before your trading session begins'],stop:['Emergency stop','Safety-critical controls with explicit confirmation and feedback'],
+ trades:['Trade history','Fills, prices and risk events for the session'],analytics:['Performance analytics','Understand trading behaviour, not just returns'],brokers:['Broker accounts','Connection health and what your broker allows'],
+ billing:['Subscription','Simple pricing, transparent billing'],affiliate:['Affiliate hub','Earn 20% recurring commission on eligible subscriptions'],alerts:['Notifications','Risk alerts, broker issues and billing updates'],
+ settings:['Settings & security','Account preferences and protection for sensitive actions'],states:['Interaction states','How TradeLock communicates system health and action results']};
+let current='landing';
+function go(r){
+  if(!r)r='landing';
+  const view=['landing','login','connect'].includes(r)?r:'app';
+  $$('.view').forEach(v=>v.hidden=v.id!=='v-'+view);
+  if(view==='app'){
+    if(!META[r])r='overview';
+    $$('.page').forEach(p=>p.hidden=p.dataset.page!==r);
+    $$('.nav-item').forEach(n=>n.dataset.go===r?n.setAttribute('aria-current','page'):n.removeAttribute('aria-current'));
+    $('#pgTitle').textContent=META[r][0];$('#pgSub').textContent=META[r][1];
+    $('#v-app').classList.remove('open');
+  }
+  current=r;
+  if(location.hash.slice(1)!==r)history.replaceState(null,'','#'+r);
+  window.scrollTo(0,0);
+  requestAnimationFrame(()=>drawCharts(r));
+}
+document.addEventListener('click',e=>{const a=e.target.closest('[data-go]');if(!a)return;e.preventDefault();go(a.dataset.go)});
+$$('a[href^="#"]:not([data-go])').forEach(a=>a.addEventListener('click',e=>{const id=a.getAttribute('href').slice(1);const t=document.getElementById(id);if(t){e.preventDefault();t.scrollIntoView({behavior:'smooth'})}}));
+window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(h!==current&&(META[h]||['landing','login','connect'].includes(h)))go(h)});
+let rz;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>drawCharts(current),120)});
+$('#menuBtn').addEventListener('click',()=>$('#v-app').classList.add('open'));
+$('#scrim').addEventListener('click',()=>$('#v-app').classList.remove('open'));
+
+/* login + onboarding */
+$('#loginForm').addEventListener('submit',e=>{e.preventDefault();go('connect')});
+$('#connectBtn').addEventListener('click',function(){
+  this.disabled=true;const lis=$$('#checklist li');let i=0;
+  (function step(){if(i>0){lis[i-1].className='done';lis[i-1].querySelector('i').innerHTML=icon('check')}
+    if(i<lis.length){lis[i].className='run';i++;setTimeout(step,650)}else{$('#toRules').hidden=false;toast('Dhan connected. Monitoring test passed.')}})();
+});
+
+/* connection state */
+function setConn(s){
+  const ok=s==='ok';
+  $$('[data-conn]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.conn===s));
+  $('#degBanner').hidden=ok;
+  const chip=$('#connChip');chip.className='chip-btn '+(ok?'ok':'deg');$('#connChipTxt').textContent=ok?'connected':'sync delayed';
+  $('#sideStatus').innerHTML=ok?'<span class="dot pulse" style="color:var(--mint)"></span><span style="color:var(--mint)">Monitoring active</span>':'<span class="dot" style="color:var(--amber)"></span><span style="color:var(--amber)">Monitoring degraded</span>';
+  $('#sideStatusSub').textContent=ok?'Dhan synced 2s ago':'Last Dhan sync 48s ago';
+  const sv=$('#sysVal');sv.className='val '+(ok?'pos':'warn');sv.innerHTML=ok?'<span class="dot pulse"></span>MONITORING':'<span class="dot"></span>DEGRADED';
+  $('#sysFoot').textContent=ok?'Synced 2s ago · 99.8% uptime today':'Rules not being checked';
+  const pp=$('#protPill');pp.className='pill'+(ok?'':' amber');pp.innerHTML=ok?'<span class="dot pulse"></span>Active':'<span class="dot"></span>Not guaranteed';
+  const bp=$('#brokerPill');bp.className='pill'+(ok?'':' amber');bp.innerHTML=ok?'<span class="dot pulse"></span>Connected':'<span class="dot"></span>Sync delayed';
+  $('#syncTxt').textContent=ok?'Last successful sync: 2 seconds ago':'Last successful sync: 48 seconds ago';
+}
+$$('[data-conn]').forEach(b=>b.addEventListener('click',()=>setConn(b.dataset.conn)));
+$('#reconnect').addEventListener('click',()=>{setConn('ok');toast('Dhan reconnected. Sync is live.')});
+$('#permBtn').addEventListener('click',function(){const p=$('#perm');p.hidden=!p.hidden;this.setAttribute('aria-expanded',!p.hidden)});
+
+/* switches */
+$$('.switch').forEach(s=>s.addEventListener('click',()=>{const on=s.getAttribute('aria-checked')!=='true';s.setAttribute('aria-checked',on);
+  const r=s.closest('[data-rule]');if(r){r.classList.toggle('off',!on);dirty()}}));
+
+/* rules dirty state */
+const rulesGrid=$('#rulesGrid');const snapshot=()=>$$('input,select,.switch',rulesGrid).map(x=>x.value||x.getAttribute('aria-checked')).join('|');let saved=snapshot();
+function dirty(){const d=snapshot()!==saved;$('#saveRules').disabled=!d;$('#resetRules').disabled=!d;
+  $('#saveMsg').innerHTML=d?icon('alert').replace('<svg','<svg style="width:16px;height:16px;stroke:var(--amber);flex:none"')+'<span style="color:#FFD596">Unsaved changes. Rules in effect are unchanged until you save.</span>'
+   :icon('clock').replace('<svg','<svg style="width:16px;height:16px;flex:none"')+'All changes are audited. New limits apply from the next sync.'}
+rulesGrid.addEventListener('input',dirty);rulesGrid.addEventListener('change',dirty);
+$$('.input-wrap input',rulesGrid).forEach(i=>i.addEventListener('blur',()=>{const n=parseInt(i.value.replace(/\D/g,''),10);if(!isNaN(n)){i.value=n.toLocaleString('en-IN')}dirty()}));
+$('#saveRules').addEventListener('click',()=>{saved=snapshot();dirty();toast('Risk rules saved · audit entry A-2291')});
+$('#resetRules').addEventListener('click',()=>{const els=$$('input,select,.switch',rulesGrid);const cur=saved.split('|');
+  els.forEach((x,i)=>{if(x.classList.contains('switch')){x.setAttribute('aria-checked',cur[i]);x.closest('[data-rule]').classList.toggle('off',cur[i]!=='true')}else x.value=cur[i]});dirty()});
+
+/* emergency stop */
+const acts=$$('.act input');
+acts.forEach(c=>c.addEventListener('change',()=>{$('#reviewStop').disabled=!acts.some(a=>a.checked)}));
+$('#reviewStop').addEventListener('click',()=>{$('#confirmList').innerHTML=acts.filter(a=>a.checked).map(a=>'<li>'+a.value+'</li>').join('');
+  $('#stopChoose').hidden=true;$('#stopConfirm').hidden=false;$('#stopType').value='';$('#doStop').disabled=true;$('#stopType').focus()});
+$('#stopType').addEventListener('input',e=>{$('#doStop').disabled=e.target.value.trim().toUpperCase()!=='STOP'});
+$('#cancelStop').addEventListener('click',()=>{$('#stopConfirm').hidden=true;$('#stopChoose').hidden=false});
+$('#doStop').addEventListener('click',()=>{
+  const chosen=acts.filter(a=>a.checked).map(a=>a.id);$('#stopConfirm').hidden=true;$('#stopResult').hidden=false;
+  const st=$('#stopState');st.className='pill red';st.innerHTML='<span class="dot"></span>Current state: stop active';
+  const R={a1:['Pause new orders sent through TradeLock','Done. Orders placed in TradeLock are blocked until you resume.','done'],
+           a2:['Cancel eligible open orders','NIFTY 25100 CE limit buy cancelled (Dhan ref 5520918).','done'],
+           a3:['Exit NIFTY 24950 PE · 75 qty','Exit order sent. Waiting for Dhan confirmation…','pending']};
+  const pill={done:'<span class="pill">Done</span>',pending:'<span class="pill ice"><span class="dot pulse"></span>Pending</span>',fail:'<span class="pill red">Failed</span>'};
+  $('#results').innerHTML=chosen.map(k=>`<div class="res" id="res-${k}"><div class="grow"><b>${R[k][0]}</b><span>${R[k][1]}</span></div>${pill[R[k][2]]}</div>`).join('');
+  $('#ackStop').disabled=chosen.includes('a3');
+  if(chosen.includes('a3'))setTimeout(()=>{const r=$('#res-a3');if(!r)return;r.innerHTML='<div class="grow"><b>Exit NIFTY 24950 PE · 75 qty</b><span>Filled at 95.65 · realized −₹41.25 (Dhan ref 5520934).</span></div>'+pill.done;$('#ackStop').disabled=false},2400);
+});
+$('#ackStop').addEventListener('click',()=>toast('Results acknowledged and logged.'));
+$('#resetStop').addEventListener('click',()=>{acts.forEach(a=>a.checked=false);$('#reviewStop').disabled=true;$('#stopResult').hidden=true;$('#stopChoose').hidden=false;
+  const st=$('#stopState');st.className='pill';st.innerHTML='<span class="dot pulse"></span>Current state: monitoring'});
+
+/* filters */
+function seg(id,fn){$$('#'+id+' button').forEach(b=>b.addEventListener('click',()=>{$$('#'+id+' button').forEach(x=>x.setAttribute('aria-pressed',x===b));fn(b.dataset.f)}))}
+seg('tradeFilter',f=>$$('#tradeTbl tbody tr').forEach(r=>r.hidden=f!=='all'&&r.dataset.k!==f));
+seg('noteFilter',f=>$$('#notes .note').forEach(n=>n.hidden=f!=='all'&&n.dataset.k!==f));
+$('#markRead').addEventListener('click',()=>{$$('.note.unread').forEach(n=>n.classList.remove('unread'));$$('.unread-dot').forEach(d=>d.remove());$('#notifBadge').hidden=true;toast('All notifications marked as read.')});
+
+/* copy */
+$('#copyRef').addEventListener('click',()=>{const v='https://'+$('#refLink').value;
+  const fallback=()=>{const i=$('#refLink');i.focus();i.select();toast('Link selected. Press Ctrl+C to copy.')};
+  try{navigator.clipboard.writeText(v).then(()=>toast('Referral link copied.'),fallback)}catch(e){fallback()}});
+
+/* hero ticker (sample data) */
+if(!matchMedia('(prefers-reduced-motion: reduce)').matches){let base=3450;setInterval(()=>{if(current!=='landing')return;const v=base+Math.round((Math.random()-.5)*60/5)*5;$('#heroPnl').textContent='+₹'+v.toLocaleString('en-IN')},2200)}
+
+go(location.hash.slice(1)||'landing');
+})();
+</script>

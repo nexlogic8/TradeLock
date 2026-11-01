@@ -1,0 +1,5 @@
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-keep class androidx.credentials.playservices.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-if class androidx.credentials.CredentialManager
+-keep class androidx.credentials.playservices.** { *; }

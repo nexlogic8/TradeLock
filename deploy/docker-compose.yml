@@ -1,0 +1,54 @@
+# Production stack: the app behind Caddy, which gets and renews HTTPS certificates automatically.
+services:
+  app:
+    build: ..
+    image: tradelock:latest
+    restart: unless-stopped
+    env_file: .env
+    # Host networking: each user's broker calls leave from their own static IP (an address of the server's IPv6
+    # block, routed to this host), which a bridged container cannot use. Caddy reaches the app on 127.0.0.1.
+    network_mode: host
+    environment:
+      HOST: 127.0.0.1
+    volumes:
+      - tradelock-data:/app/data
+      # Host backups (deploy/backup.sh), read-only: the admin console shows when the last one ran.
+      - ${BACKUP_HOST_DIR:-/home/ubuntu/backups}:/backups:ro
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  # Microservice: renews every user's Dhan access token at 06:00 and 18:00 IST (shares the database).
+  tokenkeeper:
+    image: tradelock:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Kolkata
+    command: ["node", "server/src/workers/token-renewer.js"]
+    network_mode: host
+    healthcheck:
+      disable: true   # no web server in this service
+    depends_on: [app]
+    volumes:
+      - tradelock-data:/app/data
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    network_mode: host   # listens on 80/443 of the server (IPv4 and IPv6) and proxies to the app on 127.0.0.1
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  tradelock-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "in.tradelock.app",
+    "sha256_cert_fingerprints": ["96:E6:42:86:48:12:AF:23:06:10:22:FC:E7:01:60:6C:98:19:14:A9:A7:4F:8C:25:ED:0F:E0:15:B8:DF:9E:05"]
+  }
+}]

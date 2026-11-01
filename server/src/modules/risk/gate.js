@@ -1,0 +1,45 @@
+// Pure pre-trade check for orders routed through TradeLock.
+import { toMinutes } from '../../lib/time.js';
+import { RULE_NAMES } from '../rules/service.js';
+import { limitAmount } from '../rules/limits.js';
+
+const block = (code, reason) => ({ ok: false, code, reason });
+
+/**
+ * @param order { symbol, side: 'BUY'|'SELL', qty }
+ * @param s     { rules, positions, orders, entryInFlight, entries, pnl, minutes, capital, paused, pauseReason, killSwitchActive, subscriptionActive }
+ */
+export function checkOrder(order, s) {
+  const pos = s.positions.find(p => p.symbol === order.symbol && p.qty !== 0);
+  const signed = order.side === 'BUY' ? order.qty : -order.qty;
+  // Reducing an open position is always allowed: blocking exits makes risk worse, not better.
+  if (pos && Math.sign(signed) !== Math.sign(pos.qty) && Math.abs(signed) <= Math.abs(pos.qty)) {
+    return { ok: true, reducing: true };
+  }
+  if (s.killSwitchActive) return block('KILL_SWITCH', 'Your broker kill switch is active. Trading is locked for the rest of the day.');
+  if (!s.subscriptionActive) return block('SUBSCRIPTION_REQUIRED', 'Your trial has ended. Subscribe to place orders through TradeLock.');
+  if (s.algoOnly) return block('ALGO_ONLY', 'Algo Trading is on, so only automatic entries are placed. Exits are allowed; to trade by hand, allow manual trades on the AI Algo Trading page.');
+  if (s.paused) {
+    const rule = s.pauseReason?.startsWith('rule:') ? RULE_NAMES[s.pauseReason.slice(5)] : null;
+    return block('PAUSED', rule
+      ? `New orders are paused by your ${rule} until the next session. Exits are still allowed.`
+      : 'New orders are paused by the kill switch. Exits are still allowed.');
+  }
+  const { rules } = s;
+  if (rules.cutoff.on && s.minutes != null && s.minutes >= toMinutes(rules.cutoff.value)) {
+    return block('CUTOFF', `Your ${rules.cutoff.value} IST cutoff has passed. Only exits are allowed.`);
+  }
+  if (rules.maxTrades.on && s.entries >= rules.maxTrades.value) {
+    return block('TRADE_CAP', `You have used all ${rules.maxTrades.value} entries for today. Only exits are allowed.`);
+  }
+  const lossLimit = limitAmount(rules.maxLoss, s.capital);
+  if (rules.maxLoss.on && lossLimit && -s.pnl >= lossLimit) {
+    return block('LOSS_LIMIT', 'Your daily loss limit is reached. Only exits are allowed.');
+  }
+  // One trade at a time: no new entry while a position is open, an order is pending, or one is being placed.
+  const open = s.positions.find(p => p.qty !== 0);
+  if (open) return block('TRADE_RUNNING', `A trade is already running (${open.symbol}). Exit it before taking the next one.`);
+  if ((s.orders || []).length) return block('ORDER_PENDING', 'An order is pending at the broker. Cancel it or let it fill before the next trade.');
+  if (s.entryInFlight) return block('ORDER_IN_FLIGHT', 'Your previous order is still being placed. Wait for it to confirm.');
+  return { ok: true, reducing: false };
+}

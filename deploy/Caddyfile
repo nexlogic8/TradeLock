@@ -1,0 +1,15 @@
+{$DOMAIN} {
+	# Compress everything except the live Server-Sent Events feed: compression buffers it,
+	# and the dashboard would never receive updates.
+	@compressible not path /api/stream
+	encode @compressible zstd gzip
+
+	reverse_proxy 127.0.0.1:3000 {
+		# Stream Server-Sent Events immediately instead of buffering them.
+		flush_interval -1
+	}
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}

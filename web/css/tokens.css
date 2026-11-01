@@ -1,0 +1,113 @@
+/* Instrument-panel glass on deep ink. Mono for numbers; the display face only for brand and hero. */
+:root {
+  --bg: #05090F;
+  --panel: rgba(15, 23, 36, .72);
+  --panel-2: rgba(20, 30, 46, .78);
+  --raise: #121B29;
+  --field: #0B1320;
+  --well: rgba(5, 10, 16, .5);
+  --line: rgba(142, 172, 214, .11);
+  --line-2: rgba(142, 172, 214, .2);
+  --hi: rgba(255, 255, 255, .05);
+
+  --fg: #E7EEF8;
+  --muted: #8C99AD;
+  --dim: #5D697C;
+
+  --mint: #38EBB4;
+  --mint-2: #1FC995;
+  --mint-ink: #02150F;
+  --mint-soft: rgba(56, 235, 180, .11);
+  --mint-glow: rgba(56, 235, 180, .35);
+  --ice: #7CC8FF;
+  --ice-soft: rgba(124, 200, 255, .12);
+  --amber: #FFBA52;
+  --amber-soft: rgba(255, 186, 82, .12);
+  --amber-text: #FFD596;
+  --red: #FF5E7B;
+  --red-soft: rgba(255, 94, 123, .12);
+  --red-text: #FFB3C1;
+
+  --font-display: 'Unbounded', 'Geist', system-ui, sans-serif;
+  --font-ui: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  --r-lg: 20px;
+  --r-md: 14px;
+  --r-sm: 10px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --gutter: clamp(16px, 3vw, 36px);
+
+  /* Surfaces that differ between themes */
+  --surface-hover: #172234;
+  --switch-off: #1A2433;
+  --info-text: #BFE2FF;
+  --text-soft: #C9D3E1;
+  --toast-bg: #0F1A27;
+  --pop-bg: #0E1622;
+  --chip-bg: rgba(15, 23, 36, .7);
+  --side-bg: linear-gradient(180deg, rgba(9, 15, 24, .94), rgba(6, 10, 16, .94));
+  --topbar-bg: linear-gradient(180deg, rgba(5, 9, 15, .94) 60%, rgba(5, 9, 15, 0));
+  --tabbar-bg: rgba(6, 10, 16, .94);
+  --tile-bg: linear-gradient(140deg, #16314A, #0E1C2C);
+  --avatar-bg: linear-gradient(140deg, #1D3A55, #13243A);
+  --danger-panel: rgba(58, 18, 32, .35);
+  --danger-panel-2: rgba(20, 10, 16, .4);
+  --unread-bg: rgba(20, 30, 46, .6);
+  --hero-mid: #9CF7DA;
+  --shadow: rgba(0, 0, 0, .6);
+  --grid-opacity: .35;
+
+  color-scheme: dark;
+}
+
+/* Light theme: set by /js/theme-init.js (Dark, Light, or follow the system) */
+:root[data-theme="light"] {
+  --bg: #F3F6FA;
+  --panel: rgba(255, 255, 255, .88);
+  --panel-2: rgba(255, 255, 255, .97);
+  --raise: #FFFFFF;
+  --field: #F2F5F9;
+  --well: rgba(16, 32, 56, .035);
+  --line: rgba(18, 38, 66, .10);
+  --line-2: rgba(18, 38, 66, .18);
+  --hi: rgba(255, 255, 255, .9);
+
+  --fg: #0C1626;
+  --muted: #52627A;
+  --dim: #7F8CA0;
+
+  --mint: #0B9E72;
+  --mint-2: #19C08D;
+  --mint-soft: rgba(11, 158, 114, .10);
+  --mint-glow: rgba(11, 158, 114, .22);
+  --ice: #1570C9;
+  --ice-soft: rgba(21, 112, 201, .10);
+  --amber: #B26B0A;
+  --amber-soft: rgba(214, 140, 30, .12);
+  --amber-text: #7E4D08;
+  --red: #D1304D;
+  --red-soft: rgba(209, 48, 77, .09);
+  --red-text: #A8213A;
+
+  --surface-hover: #EEF3F9;
+  --switch-off: #D3DCE8;
+  --info-text: #18568F;
+  --text-soft: #2C3A4F;
+  --toast-bg: #FFFFFF;
+  --pop-bg: #FFFFFF;
+  --chip-bg: rgba(255, 255, 255, .85);
+  --side-bg: linear-gradient(180deg, rgba(255, 255, 255, .95), rgba(247, 250, 253, .95));
+  --topbar-bg: linear-gradient(180deg, rgba(243, 246, 250, .95) 60%, rgba(243, 246, 250, 0));
+  --tabbar-bg: rgba(255, 255, 255, .95);
+  --tile-bg: linear-gradient(140deg, #E5EFF9, #D6E4F3);
+  --avatar-bg: linear-gradient(140deg, #DCE8F5, #C9DAEE);
+  --danger-panel: rgba(209, 48, 77, .06);
+  --danger-panel-2: rgba(209, 48, 77, .02);
+  --unread-bg: #EDF4FC;
+  --hero-mid: #12B884;
+  --shadow: rgba(16, 32, 56, .12);
+  --grid-opacity: .6;
+
+  color-scheme: light;
+}
