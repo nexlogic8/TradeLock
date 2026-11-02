@@ -1,6 +1,6 @@
 import { config } from '../../config.js';
 import { accountFor, adapterFor } from '../broker/registry.js';
-import { sharedSource } from '../broker/market-data.js';
+import { sharedSource, withSharedData } from '../broker/market-data.js';
 import { getPermissions } from '../broker/book.js';
 import { bad, conflict, HttpError } from '../../lib/errors.js';
 import { limit } from '../../lib/ratelimit.js';
@@ -67,6 +67,17 @@ function requireDhan(userId) {
     throw conflict('DHAN_REQUIRED', 'Connect or reconnect Dhan to open Power Scalper.');
   }
   return adapterFor(acct);
+}
+
+/**
+ * Read-only market data (charts, option chain, candles): the user's own Dhan when connected, else the shared
+ * market-data account (MARKET_DATA_USER_ID), so Power Scalper opens without a broker. Orders still need their own.
+ */
+const hasOwnDhan = userId => { const a = accountFor(userId); return !!(a?.status === 'connected' && a.broker === 'dhan' && a.token_enc); };
+function marketData(userId) {
+  if (hasOwnDhan(userId)) return adapterFor(accountFor(userId));
+  if (sharedSource()) return withSharedData({});
+  return requireDhan(userId);
 }
 
 const TRANSIENT = new Set(['NETWORK', 'BROKER', 'DH-904', 'DH-908']);
@@ -305,7 +316,7 @@ async function runOrb5Backtest(ctx) {
   finally { store?.close(); }
 }
 async function runOrb5(ctx, { startDate, endDate, now, today, settings, store }) {
-  const adapter = requireDhan(ctx.user.id);
+  const adapter = marketData(ctx.user.id);
   const history = await loadBacktestCandles(adapter, startDate, endDate, 'openingRange', now, 'horizon');
   const run = orb5Backtest(history.oneMinute, { startDay:startDate, endDay:endDate, now, ...settings });
   const metrics = { orb5:true, mode:settings.mode, settings, summary:run.summary, days:run.days, trades:run.trades,
@@ -487,7 +498,7 @@ async function runCustomBacktest(ctx) {
 /** Whether historical option data can be read for this account (actual-options mode). */
 async function optionDataAvailability(userId) {
   let adapter;
-  try { adapter = requireDhan(userId); } catch (e) { return { available:false, reason:e.message }; }
+  try { adapter = marketData(userId); } catch (e) { return { available:false, reason:e.message }; }
   let probe = new Date(Date.now() + 19_800_000 - 7 * 86_400_000);
   while ([0, 6].includes(probe.getUTCDay())) probe = new Date(probe.getTime() - 86_400_000);
   const day = probe.toISOString().slice(0, 10);
@@ -561,7 +572,7 @@ export function scalperRoutes(r) {
   r.get('/api/scalper/signal-risk', ctx => scalperSignalRisk(ctx.user.id));
   r.get('/api/scalper/backtest-candles', async ctx => {
     limit(`scalper-backtest:${ctx.user.id}`, 12, 60_000);
-    const adapter = requireDhan(ctx.user.id);
+    const adapter = marketData(ctx.user.id);
     const now=Date.now();
     const startDate=ctx.query.startDate, endDate=ctx.query.endDate;
     const {oneMinute,fiveMinute,asOf,cached}=await loadBacktestCandles(adapter,startDate,endDate,ctx.query.strategy,now,ctx.query.exitLogic||'horizon');
@@ -596,7 +607,7 @@ export function scalperRoutes(r) {
       const days=(Date.parse(`${endDate}T00:00:00Z`)-Date.parse(`${startDate}T00:00:00Z`))/86_400_000+1;
       if(days>OPTION_BACKTEST.maxDays) throw bad('BACKTEST_RANGE_TOO_LARGE',`Option backtests load expired-option candles for every trade; choose up to ${OPTION_BACKTEST.maxDays} days.`);
     }
-    const history=await loadBacktestCandles(requireDhan(ctx.user.id),startDate,endDate,strategy,now,exitLogic);
+    const history=await loadBacktestCandles(marketData(ctx.user.id),startDate,endDate,strategy,now,exitLogic);
     const candidates=strategy==='previousDay' ? previousDayBreakoutSignals(history.oneMinute,{now})
       : strategy==='ema45' ? ema45HammerSignals(history.oneMinute,{now})
         : openingRangeFirstTradeSignals(history.oneMinute,history.fiveMinute,{now});
@@ -606,7 +617,7 @@ export function scalperRoutes(r) {
     const metrics=backtestSignals(signals,history.oneMinute,{horizonBars:Number(horizon),exitLogic:resultMode==='option'&&exitLogic!=='horizon'?'horizon':exitLogic,stopLogic:resultMode==='option'?'none':stopLogic});
     let optionCandles=null;
     if(resultMode==='option') {
-      const adapter=requireDhan(ctx.user.id), today=ist(now).day;
+      const adapter=marketData(ctx.user.id), today=ist(now).day;
       const loadDay=async(day,option,offset)=>{
         const strike=offset===0?'ATM':`ATM${offset>0?'+':''}${offset}`;
         try {
@@ -660,7 +671,7 @@ export function scalperRoutes(r) {
     if((row.exit_logic||'horizon')==='emaZone'&&candles.length&&!candles.some(candle=>Number.isFinite(candle.ema45)&&Number.isFinite(candle.ema105))) {
       let values;
       try {
-        const history=await loadBacktestCandles(requireDhan(ctx.user.id),day,day,row.strategy,Date.now(),'emaZone');
+        const history=await loadBacktestCandles(marketData(ctx.user.id),day,day,row.strategy,Date.now(),'emaZone');
         values=emaIndicatorRows(history.oneMinute);
       } catch {
         values=emaIndicatorRows(candles);emaApproximate=true;
@@ -677,14 +688,14 @@ export function scalperRoutes(r) {
   });
   r.post('/api/scalper/signal', async ctx => {
     return scanScalperSignal(ctx.user.id, ctx.ip, {
-      adapter: requireDhan(ctx.user.id),
+      adapter: marketData(ctx.user.id),
       optionRequest: fn => optionRequest(ctx.user.id, fn),
       normalizeCandles: normalizeScalperCandles,
     });
   });
   r.get('/api/scalper', scalperPage = async ctx => {
     if (!ctx.warm) limit(`scalper:${ctx.user.id}`, 15, 60_000);
-    const adapter = requireDhan(ctx.user.id);
+    const adapter = marketData(ctx.user.id);
     const interval = ['1', '5', '15', '25', '60'].includes(ctx.query.interval) ? ctx.query.interval : '5';
     const fresh = ctx.query.fresh === '1';
     // charts=0 returns only the chain (expiry switch); the page loads the option charts separately
@@ -733,7 +744,7 @@ export function scalperRoutes(r) {
         openingRange: null, expiry, expiries, strikes,
         selectedCharts: { atm: atm?.strike ?? null, ce: null, pe: null }, selectedOpeningRanges: {},
         marketOpen: marketOpen(), asOf: chainSnapshot.asOf, stale: !!chainSnapshot.stale, historyWarning: staleWarning,
-        broker: { label: 'Dhan', connected: true, ordersAllowed: getPermissions(ctx.user.id)?.ordersAllowed ?? null },
+        broker: { label: 'Dhan', connected: hasOwnDhan(ctx.user.id), ordersAllowed: getPermissions(ctx.user.id)?.ordersAllowed ?? null },
         feed: { source: 'Dhan Data APIs', mode: 'live websocket', timeframe: `${interval}m` },
       };
     }
@@ -772,7 +783,7 @@ export function scalperRoutes(r) {
       lotSize,
       stale: !!chainSnapshot.stale,
       historyWarning: staleWarning || (failures.length ? 'Some chart history did not load from Dhan. It will retry automatically.' : null),
-      broker: { label: 'Dhan', connected: true, ordersAllowed: getPermissions(ctx.user.id)?.ordersAllowed ?? null },
+      broker: { label: 'Dhan', connected: hasOwnDhan(ctx.user.id), ordersAllowed: getPermissions(ctx.user.id)?.ordersAllowed ?? null },
       feed: { source: 'Dhan Data APIs', mode: 'live websocket', timeframe: `${interval}m` },
     };
   });
@@ -780,7 +791,7 @@ export function scalperRoutes(r) {
   // Funds each order ticket would need, from Dhan's margin calculator. Read-only: places no order.
   r.get('/api/scalper/margin', async ctx => {
     limit(`scalper-margin:${ctx.user.id}`, 40, 60_000);
-    const adapter = requireDhan(ctx.user.id);
+    const adapter = requireDhan(ctx.user.id);   // the user's own account: margin is per account
     const securityId = String(ctx.query.securityId || ''), lots = Number(ctx.query.lots), price = Number(ctx.query.price);
     const allowed = allowedFor(ctx.user.id, securityId, ctx.query.underlying);
     if (!allowed) throw bad('INVALID_INSTRUMENT', 'Reload the option chain before checking margin.');
@@ -798,7 +809,7 @@ export function scalperRoutes(r) {
 
   r.get('/api/scalper/candles', async ctx => {
     limit(`scalper-candles:${ctx.user.id}`, 60, 60_000);
-    const adapter = requireDhan(ctx.user.id);
+    const adapter = marketData(ctx.user.id);
     const securityId = String(ctx.query.securityId || '');
     const interval = ['1', '5', '15', '25', '60'].includes(ctx.query.interval) ? ctx.query.interval : '5';
     const index = isIndexId(securityId);
