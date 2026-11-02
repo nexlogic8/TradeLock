@@ -235,20 +235,10 @@ async function loadBacktestCandles(adapter, startDate, endDate, strategy, now, e
   return {oneMinute:oneMinute.value,fiveMinute:fiveMinute.value,asOf:Math.min(oneMinute.asOf,fiveMinute.asOf),cached:oneMinute.cached&&fiveMinute.cached};
 }
 
-function savedBacktest(row, admin = true) {
-  const metrics = JSON.parse(row.metrics_json);
+function savedBacktest(row) {
   return {id:row.id,strategy:row.strategy,startDate:row.start_date,endDate:row.end_date,horizon:row.horizon_bars,exitLogic:row.exit_logic||'horizon',stopLogic:row.stop_logic||'none',
     createdAt:row.created_at,asOf:row.as_of,oneMinuteBars:row.one_minute_bars,rangeSessions:row.range_sessions,
-    signalCount:row.signal_count,metrics:admin || row.strategy !== 'gap' ? metrics : publicGapMetrics(metrics)};
-}
-/**
- * A Gap run as users get it (lib/access.js): their settings, totals, months and the equity curve, without what would
- * show the rules (each trade's times, prices and exit reason, the days without a trade and why).
- */
-function publicGapMetrics(m) {
-  const plain = c => c && { summary: c.summary, months: c.months, equityCurve: c.equityCurve, trades: [] };
-  return { gap: true, coverage: m.coverage, sessions: m.sessions, signals: m.signals, oneMinuteBars: m.oneMinuteBars, days: [], public: true,
-    settings: m.settings, best: plain(m.best), worst: plain(m.worst) };
+    signalCount:row.signal_count,metrics:JSON.parse(row.metrics_json)};
 }
 
 // --- Nifty 5-Minute ORB backtest (historical data only; never places orders) ---
@@ -411,7 +401,7 @@ async function runGapBacktest(ctx) {
       (SELECT id FROM backtest_runs WHERE user_id=? ORDER BY id DESC LIMIT 20)`).run(ctx.user.id, ctx.user.id);
     return stmt('SELECT * FROM backtest_runs WHERE id=? AND user_id=?').get(Number(inserted.lastInsertRowid), ctx.user.id);
   })();
-  return savedBacktest(saved, isAdminEmail(ctx.user.email));
+  return savedBacktest(saved);
 }
 // --- EMA 9/15 5m · 30° angle backtest (the live Algo strategy) on the local 1-minute history; no Dhan calls ---
 /** Square-off follows the account's Risk rules cutoff, as live. */
@@ -588,12 +578,11 @@ export function scalperRoutes(r) {
     const {oneMinute,fiveMinute,asOf,cached}=await loadBacktestCandles(adapter,startDate,endDate,ctx.query.strategy,now,ctx.query.exitLogic||'horizon');
     return {oneMinute:oneMinute.map(candle=>({...candle,time:candle.time*1000})),fiveMinute:fiveMinute.map(candle=>({...candle,time:candle.time*1000})),startDate,endDate,asOf,cached};
   });
-  r.get('/api/scalper/backtest-runs', ctx => { const admin = isAdminEmail(ctx.user.email);
-    return stmt('SELECT * FROM backtest_runs WHERE user_id=? ORDER BY id DESC LIMIT 20').all(ctx.user.id).map(row => savedBacktest(row, admin)); });
+  r.get('/api/scalper/backtest-runs', ctx => stmt('SELECT * FROM backtest_runs WHERE user_id=? ORDER BY id DESC LIMIT 20').all(ctx.user.id).map(savedBacktest));
   r.post('/api/scalper/backtest-runs', async ctx => {
     limit(`scalper-backtest-save:${ctx.user.id}`,6,60_000);
     const {strategy,startDate,endDate,horizon}=ctx.body;
-    // Users (lib/access.js): the Gap open 09:15 backtest only (same inputs as administrators; results without the trade list).
+    // Users (lib/access.js): the Gap open 09:15 backtest only, with the same inputs and results as administrators.
     if(!isAdminEmail(ctx.user.email) && strategy!=='gap') throw bad('VALIDATION','Only the Gap open 09:15 backtest is available on your account.');
     if(strategy==='orb5') return runOrb5Backtest(ctx);
     if(strategy==='gap') return runGapBacktest(ctx);

@@ -13,8 +13,8 @@ const LATE = [0, 2, 3, 4, 5, 7, 9, 10, 12, 15];
 /** The first result's title and subtitle: the 09:15 open, or that % above it. */
 const firstMode = late => (late ? ['Late entry', `fill ${late}% above the 09:15 open`] : ['Best case', 'fill at the option’s 09:15 open']);
 const modesFor = late => [['best', ...firstMode(late)], MODES[1]];
-// Users (not administrators) get the same form but totals only, without the trade list or the rules text (server:
-// lib/access.js, scalper/routes.js publicGapMetrics); `metrics.public` marks such a run.
+// Users (not administrators) get the same form and results, with a short description instead of the rules text
+// (server: lib/access.js).
 const isUser = ui => ui?.caps?.admin === false;
 const modesOf = m => modesFor(m.settings.lateEntryPct);
 
@@ -110,9 +110,9 @@ export function gapResults(ui, result) {
   return html`
     <div class="bt-result-head"><div><span class="eyebrow">${GAP_LABEL}</span><h3>Backtest results</h3><small>${result.oneMinuteBars.toLocaleString('en-IN')} one-minute bars | ${result.startDate} to ${result.endDate} IST | ${m.sessions} sessions, ${m.signals} signal days | SL ${m.settings.dailySlPct}% of capital | ${m.settings.lotCap ? `max ${m.settings.lotCap} lots` : 'no lot cap'} | saved ${stamp(result.createdAt / 1000)}</small></div><span class="pill sm ${m.signals ? '' : 'grey'}">${m.signals} SIGNAL${m.signals === 1 ? '' : 'S'}</span></div>
     <div class="bt-gap-bounds">${modesOf(m).map(([k, t, s]) => boundCard(k, t, s, m[k]))}</div>
-    ${m.public ? '' : html`<p class="bt-muted">Live trading buys at 09:15:02, between these two. The fill price versus the option's 09:15 open decides which side it lands on.</p>
-    <div class="bt-orb-actions"><button class="btn bt-chart-btn" data-gap-csv>${icon('chart')} Export trades CSV</button></div>`}
-    ${(m.public ? m.best.summary.trades || m.worst.summary.trades : m.best.trades.length || m.worst.trades.length) ? html`<h4 class="bt-orb-title">Capital after each trade <small class="bt-muted">· green: ${modesOf(m)[0][1].toLowerCase()} · amber: ${modesOf(m)[1][1].toLowerCase()}</small></h4><div id="bt-gap-equity" class="bt-chart-host bt-orb-equity" role="img" aria-label="Capital after each trade, both results"></div>` : html`<div class="bt-empty">${icon('radar')}<b>No trades.</b><span>${m.public ? 'The strategy found no trade in this range.' : 'No day in this range had exactly one ATM premium gap up and stay green.'}</span></div>`}
+    <p class="bt-muted">Live trading buys at 09:15:02, between these two. The fill price versus the option's 09:15 open decides which side it lands on.</p>
+    <div class="bt-orb-actions"><button class="btn bt-chart-btn" data-gap-csv>${icon('chart')} Export trades CSV</button></div>
+    ${m.best.trades.length || m.worst.trades.length ? html`<h4 class="bt-orb-title">Capital after each trade <small class="bt-muted">· green: ${modesOf(m)[0][1].toLowerCase()} · amber: ${modesOf(m)[1][1].toLowerCase()}</small></h4><div id="bt-gap-equity" class="bt-chart-host bt-orb-equity" role="img" aria-label="Capital after each trade, both results"></div>` : html`<div class="bt-empty">${icon('radar')}<b>No trades.</b><span>${isUser(ui) ? 'The strategy found no trade in this range.' : 'No day in this range had exactly one ATM premium gap up and stay green.'}</span></div>`}
     ${months.length ? html`<h4 class="bt-orb-title">Month by month</h4><div class="bt-table-wrap"><table class="bt-table"><thead><tr><th rowspan="2">Month</th><th colspan="3">${modesOf(m)[0][1]}</th><th colspan="3">${modesOf(m)[1][1]}</th></tr><tr><th>Trades / won / stops</th><th>P&amp;L</th><th>Capital</th><th>Trades / won / stops</th><th>P&amp;L</th><th>Capital</th></tr></thead><tbody>${months.map(k => html`<tr><td>${monthLabel(k)}</td>${monthCell(mb[k])}${monthCell(mw[k])}</tr>`)}</tbody></table></div>` : ''}
     ${m[view].trades.length ? html`<div class="bt-gap-tabs" role="tablist">${modesFor(m.settings.lateEntryPct).map(([k, t]) => html`<button class="btn bt-chart-btn ${view === k ? 'active' : ''}" role="tab" aria-selected="${view === k}" data-gap-view="${k}">${t} trades (${m[k].trades.length})</button>`)}</div>${tradeTable(m[view])}` : ''}
     ${noTrade.length ? html`<details class="bt-orb-days"><summary>Days without a trade (${noTrade.length})</summary><div class="bt-table-wrap"><table class="bt-table"><thead><tr><th>Date</th><th>CE: prev → open → 09:15 close</th><th>PE: prev → open → 09:15 close</th><th>Why</th></tr></thead><tbody>${noTrade.slice().reverse().map(d => html`<tr><td>${dayLabel(d.day)}</td><td>${side(d.ce)}</td><td>${side(d.pe)}</td><td>${d.reason}</td></tr>`)}</tbody></table></div></details>` : ''}`;

@@ -57,7 +57,7 @@ test('users can switch Gap but not the private strategies; the Gap backtest is a
   assert.ok('strike' in caps.gap.defaults && 'exitCandle' in caps.gap.defaults, 'the same form as administrators');
 });
 
-test('a user\'s saved Gap run carries their settings and totals only: no trades or no-trade days', async () => {
+test('a user\'s saved Gap run comes back in full, each trade included, as for administrators', async () => {
   const user = await signup('user3@example.com');
   const metrics = { gap: true, sessions: 20, signals: 9, oneMinuteBars: 7500, coverage: { from: '2025-11-01', to: '2026-10-30' },
     settings: { capital: 20000, compound: true, fundsUse: 80, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:00', strike: 2, exitCandle: '0916', lateEntryPct: 5 },
@@ -68,8 +68,7 @@ test('a user\'s saved Gap run carries their settings and totals only: no trades 
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(user.id, 'gap', '2026-10-01', '2026-10-30', 0, Date.now(), Date.now(), 7500, 20, 9, JSON.stringify(metrics), Buffer.from(''), 'horizon', 'none');
   const [run] = await (await fetch(`${base}/api/scalper/backtest-runs`, { headers: { Cookie: user.cookie } })).json();
   const m = run.metrics;
-  assert.equal(m.public, true);
-  assert.deepEqual([m.best.trades, m.worst.trades, m.days], [[], [], []]);
+  assert.deepEqual([m.best.trades.length, m.worst.trades.length, m.days.length], [1, 1, 1], 'each trade and the no-trade days');
   assert.equal(m.best.summary.net, 1000);
   assert.equal(m.best.equityCurve.length, 1);
   assert.deepEqual([m.settings.strike, m.settings.exitCandle, m.settings.lateEntryPct], [2, '0916', 5], 'their own settings, to restore the form');
