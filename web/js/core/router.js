@@ -96,7 +96,6 @@ export async function show(requested) {
   shown = requested;
   if (requested === 'landing' && window.TradeLockApp) requested = 'login';   // Android app: no marketing page
   let name = PAGES[requested] ? requested : user ? 'overview' : 'landing';
-  if (name === 'scalper' && user && !user.admin) name = 'overview';   // Power Scalper: administrators only
   shown = name;
   document.body.dataset.page = name;
   const mod = (await PAGES[name]()).default;
