@@ -13,11 +13,10 @@ const LATE = [0, 2, 3, 4, 5, 7, 9, 10, 12, 15];
 /** The first result's title and subtitle: the 09:15 open, or that % above it. */
 const firstMode = late => (late ? ['Late entry', `fill ${late}% above the 09:15 open`] : ['Best case', 'fill at the option’s 09:15 open']);
 const modesFor = late => [['best', ...firstMode(late)], MODES[1]];
-// Users (not administrators) run Gap with the live strategy's own settings and see totals only (server: lib/access.js,
-// scalper/routes.js publicGapMetrics); `metrics.public` marks such a run.
+// Users (not administrators) get the same form but totals only, without the trade list or the rules text (server:
+// lib/access.js, scalper/routes.js publicGapMetrics); `metrics.public` marks such a run.
 const isUser = ui => ui?.caps?.admin === false;
-const PUBLIC_MODES = [['best', 'Good fills', 'entry close to the open'], ['worst', 'Late fills', 'a slower entry']];
-const modesOf = m => (m.public ? PUBLIC_MODES : modesFor(m.settings.lateEntryPct));
+const modesOf = m => modesFor(m.settings.lateEntryPct);
 
 const clock = s => new Intl.DateTimeFormat('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).format(new Date(s * 1000));
 const dayLabel = day => new Intl.DateTimeFormat('en-IN', { day:'numeric', month:'short', year:'numeric', timeZone:'UTC' }).format(new Date(`${day}T00:00:00Z`));
@@ -55,7 +54,7 @@ export function gapFieldChange(ui, field) {
 }
 export function gapRunLabel(run) {
   const m = run.metrics, s = m.settings || {}, b = m.best?.summary, w = m.worst?.summary;
-  const first = m.public ? 'good fills' : s.lateEntryPct ? `+${s.lateEntryPct}% entry` : 'best', second = m.public ? 'late fills' : 'worst';
+  const first = s.lateEntryPct ? `+${s.lateEntryPct}% entry` : 'best', second = 'worst';
   return `${GAP_LABEL} | ${run.startDate} to ${run.endDate} | ${inr(s.capital)}${s.compound ? ' compounded' : ''}, SL ${s.dailySlPct}% of capital${s.lotCap ? `, max ${s.lotCap} lots` : ''} | ${first} ${inr(b?.endCapital)} · ${second} ${inr(w?.endCapital)}`;
 }
 
@@ -63,9 +62,6 @@ export function gapRunLabel(run) {
 export function gapRunFacts(run) {
   const m = run.metrics, s = m.settings || {};
   const bound = (label, x) => ({ label, value: `${inr(x?.net, true)} (${pct(x?.returnPct)})`, sub: `${inr(x?.startCapital)} → ${inr(x?.endCapital)}`, tone: x?.net });
-  if (m.public) return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, `${s.fundsUse}% per trade`, `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`],
-    trades: `${m.best?.summary.trades ?? 0} (good fills) · ${m.worst?.summary.trades ?? 0} (late fills)`, signals: m.signals, sessions: m.sessions,
-    results: [bound('Good fills', m.best?.summary), bound('Late fills', m.worst?.summary)] };
   return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : [])],
     trades: `${m.best?.summary.trades ?? 0} (${s.lateEntryPct ? 'late' : 'best'}) · ${m.worst?.summary.trades ?? 0} (worst)`, signals: m.signals, sessions: m.sessions,
     results: [bound(firstMode(s.lateEntryPct)[0], m.best?.summary), bound('Worst case', m.worst?.summary)] };
@@ -81,16 +77,16 @@ export function gapFields(ui) {
     ${field('Lot cap (0 = none)', html`<input class="input" type="number" min="0" step="1" data-gap-field="lotCap" value="${g.lotCap}" aria-label="Maximum lots per trade, 0 for no cap">`)}
     ${field('Slippage ₹ / unit (entry)', html`<input class="input" type="number" min="0" max="50" step="0.25" data-gap-field="slippage" value="${g.slippage}" aria-label="Entry slippage in rupees per unit">`)}
     ${field('Square-off (IST)', html`<input class="input" type="time" min="09:20" max="15:29" data-gap-field="squareOff" value="${g.squareOff}" aria-label="Square-off time">`)}
-    ${isUser(ui) ? '' : html`${field('Late entry % (above 09:15 open)', html`<select class="input" data-gap-field="lateEntryPct" aria-label="How far above the option's 09:15 open the entry fills">${LATE.map(p => html`<option value="${p}" ${Number(g.lateEntryPct || 0) === p ? 'selected' : ''}>${p ? `+${p}%` : '0% (at the open)'}</option>`)}</select>`)}
+    ${field('Late entry % (above 09:15 open)', html`<select class="input" data-gap-field="lateEntryPct" aria-label="How far above the option's 09:15 open the entry fills">${LATE.map(p => html`<option value="${p}" ${Number(g.lateEntryPct || 0) === p ? 'selected' : ''}>${p ? `+${p}%` : '0% (at the open)'}</option>`)}</select>`)}
     ${field('Strike', html`<select class="input" data-gap-field="strike" aria-label="Strike to trade">${STRIKES.map(k => html`<option value="${k}" ${Number(g.strike || 0) === k ? 'selected' : ''}>${strikeLabel(k)}${k === 2 ? ' (live)' : ''}</option>`)}</select>`)}
     ${field('Exit', html`<select class="input" data-gap-field="exitCandle" aria-label="Exit rule"><option value="1m" ${g.exitCandle === '1m' || !g.exitCandle ? 'selected' : ''}>Opposite 1-minute candle</option><option value="5m" ${g.exitCandle === '5m' ? 'selected' : ''}>Opposite 5-minute candle</option><option value="0916" ${g.exitCandle === '0916' ? 'selected' : ''}>At 09:16, any colour (live)</option></select>`)}
-    ${field('Cost to cost at R (0 = off)', html`<input class="input" type="number" min="0" max="5" step="0.25" data-gap-field="costToCostR" value="${g.costToCostR}" aria-label="Move the stop to the entry price at this multiple of the risk; 0 for off">`)}`}`;
+    ${field('Cost to cost at R (0 = off)', html`<input class="input" type="number" min="0" max="5" step="0.25" data-gap-field="costToCostR" value="${g.costToCostR}" aria-label="Move the stop to the entry price at this multiple of the risk; 0 for off">`)}`;
 }
 
 export function gapNotes(ui, caps) {
   const g = ui.gap, cov = caps?.gap?.coverage;
   const history = html`<p class="bt-muted">${cov ? `Uses the stored 1-minute option history on this server: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}. Runs in seconds and places no orders.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
-  if (isUser(ui)) return html`<p class="bt-muted"><b>Gap open 09:15 — the strategy Algo Trading runs live</b>, replayed with its own live settings and your capital, sizing and stop-loss. Two results: <b>good fills</b> (an entry close to the open) and <b>late fills</b> (a slower entry); real trading lands in between. Charges as on each date.</p>${history}`;
+  if (isUser(ui)) return html`<p class="bt-muted"><b>Gap open 09:15 — the strategy Algo Trading runs live</b>, replayed with the settings above. Two results: <b>${g.lateEntryPct ? 'late entry' : 'best case'}</b> and <b>worst case</b> (a fill one minute later); real trading lands in between. Charges as on each date.</p>${history}`;
   return html`<p class="bt-muted"><b>Gap open 09:15 — the strategy Algo Trading runs live.</b> Each day the ATM CE and PE of the nearest weekly expiry are checked at 09:15 (the side is chosen from the ATM; the trade uses the ${strikeLabel(g.strike)} strike of that side${g.strike ? ', fixed at 09:15' : ''}): the side whose premium opened above its previous close (gap up) and closed its first minute green is bought; both or neither → no trade. Size: ${g.fundsUse}% of ${g.compound ? 'the running' : 'the starting'} capital in whole lots${g.lotCap ? `, at most ${g.lotCap}` : ', no lot cap'}. Stop-loss: ${g.dailySlPct}% of capital ÷ the quantity, below the entry (your daily stop-loss, as live); hit when the option's 1-minute low reaches it. Exit: ${g.exitCandle === '0916' ? 'at the 09:16 open, whatever the colour of the 09:15 candle (worst case: one minute after its 09:16 fill, at the 09:17 open), or the stop inside that minute' : `the next minute's open after the first opposite-colour NIFTY ${g.exitCandle === '5m' ? '5-minute candle (09:15–09:19, 09:20–09:24, …; the one the entry is in counts)' : '1-minute candle'}, the stop, or ${g.squareOff}`}. Charges as on each date, ₹${g.slippage} slippage a unit on the entry.${g.costToCostR > 0 ? ` Cost to cost: after a minute whose option high reaches entry + ${g.costToCostR} × the risk, the stop is the entry price (as live).` : ''}</p>
     <p class="bt-muted"><b>Two results, because 1-minute candles cannot show the first 2 seconds.</b> Live buys at 09:15:02; the backtest gives the range it falls in: <b>${g.lateEntryPct ? `late entry` : 'best case'}</b> = filled ${g.lateEntryPct ? `${g.lateEntryPct}% above the option's 09:15 open (a market order fills during the 09:15 spike: live fills so far were 2.1% and 8.9% above it)` : "at the option's 09:15 open"} with the whole first minute's colour known; <b>worst case</b> = filled at the 09:16 open, after that minute. Real results land in between. Without a lot cap, sizes far beyond what the option trades at 09:15 are possible on paper; treat totals past about ₹1 crore as unreachable.</p>
     <p class="bt-muted">${cov ? `Uses the stored 1-minute option history on this server: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}. Runs in seconds and places no orders.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
@@ -131,7 +127,7 @@ export function drawGapEquity(host, result, theme) {
   const m = result.metrics, chart = createChart(host, theme);
   for (const [k, color] of [['best', '#21d3a3'], ['worst', '#ffbf47']]) {
     const pts = []; for (const p of m[k].equityCurve || []) if (!pts.length || p.time > pts.at(-1).time) pts.push(p);
-    if (pts.length) chart.addSeries(LineSeries, { color, lineWidth:2, priceLineVisible:false, lastValueVisible:true, title:m.public ? (k === 'best' ? 'Good' : 'Late') : k === 'best' ? (m.settings.lateEntryPct ? `+${m.settings.lateEntryPct}%` : 'Best') : 'Worst' }).setData(pts);
+    if (pts.length) chart.addSeries(LineSeries, { color, lineWidth:2, priceLineVisible:false, lastValueVisible:true, title:k === 'best' ? (m.settings.lateEntryPct ? `+${m.settings.lateEntryPct}%` : 'Best') : 'Worst' }).setData(pts);
   }
   chart.timeScale().fitContent();
   return chart;

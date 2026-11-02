@@ -49,15 +49,15 @@ test('users can switch Gap but not the private strategies; the Gap backtest is a
   const orbBt = await post('/api/scalper/backtest-runs', { strategy: 'orb5', startDate: '2026-10-01', endDate: '2026-10-30' });
   assert.equal(orbBt.status, 400);
   assert.match((await orbBt.json()).message, /Only the Gap open 09:15 backtest/);
-  // Gap runs (here it stops at the missing history, not at access), with the live strategy's settings forced.
-  const gapBt = await post('/api/scalper/backtest-runs', { strategy: 'gap', startDate: '2026-10-01', endDate: '2026-10-30', strike: -3, exitCandle: '5m' });
+  // Gap runs (here it stops at the missing history, not at access), with the same inputs as administrators.
+  const gapBt = await post('/api/scalper/backtest-runs', { strategy: 'gap', startDate: '2026-10-01', endDate: '2026-10-30', strike: 2, exitCandle: '0916' });
   assert.doesNotMatch((await gapBt.json()).message || '', /not available on your account|Only the Gap/);
   const caps = await (await fetch(`${base}/api/scalper/backtest-capabilities`, { headers: { Cookie: user.cookie } })).json();
   assert.equal(caps.admin, false);
-  assert.deepEqual(Object.keys(caps.gap.defaults).sort(), ['capital', 'compound', 'dailySlPct', 'fundsUse', 'lotCap', 'slippage', 'squareOff'], 'no strike / exit / entry settings');
+  assert.ok('strike' in caps.gap.defaults && 'exitCandle' in caps.gap.defaults, 'the same form as administrators');
 });
 
-test('a user\'s saved Gap run carries totals only: no trades, no-trade days or strategy settings', async () => {
+test('a user\'s saved Gap run carries their settings and totals only: no trades or no-trade days', async () => {
   const user = await signup('user3@example.com');
   const metrics = { gap: true, sessions: 20, signals: 9, oneMinuteBars: 7500, coverage: { from: '2025-11-01', to: '2026-10-30' },
     settings: { capital: 20000, compound: true, fundsUse: 80, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:00', strike: 2, exitCandle: '0916', lateEntryPct: 5 },
@@ -72,5 +72,5 @@ test('a user\'s saved Gap run carries totals only: no trades, no-trade days or s
   assert.deepEqual([m.best.trades, m.worst.trades, m.days], [[], [], []]);
   assert.equal(m.best.summary.net, 1000);
   assert.equal(m.best.equityCurve.length, 1);
-  assert.deepEqual([m.settings.strike, m.settings.exitCandle, m.settings.lateEntryPct], [undefined, undefined, undefined]);
+  assert.deepEqual([m.settings.strike, m.settings.exitCandle, m.settings.lateEntryPct], [2, '0916', 5], 'their own settings, to restore the form');
 });

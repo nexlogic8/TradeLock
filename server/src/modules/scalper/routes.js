@@ -242,15 +242,13 @@ function savedBacktest(row, admin = true) {
     signalCount:row.signal_count,metrics:admin || row.strategy !== 'gap' ? metrics : publicGapMetrics(metrics)};
 }
 /**
- * A Gap run as users get it (lib/access.js): totals, months and the equity curve, without what would show the rules
- * (each trade's times, prices and exit reason, the days without a trade and why, the strike / exit / entry settings).
+ * A Gap run as users get it (lib/access.js): their settings, totals, months and the equity curve, without what would
+ * show the rules (each trade's times, prices and exit reason, the days without a trade and why).
  */
 function publicGapMetrics(m) {
   const plain = c => c && { summary: c.summary, months: c.months, equityCurve: c.equityCurve, trades: [] };
-  const s = m.settings || {};
   return { gap: true, coverage: m.coverage, sessions: m.sessions, signals: m.signals, oneMinuteBars: m.oneMinuteBars, days: [], public: true,
-    settings: { capital: s.capital, compound: s.compound, fundsUse: s.fundsUse, dailySlPct: s.dailySlPct, lotCap: s.lotCap, slippage: s.slippage, squareOff: s.squareOff },
-    best: plain(m.best), worst: plain(m.worst) };
+    settings: m.settings, best: plain(m.best), worst: plain(m.worst) };
 }
 
 // --- Nifty 5-Minute ORB backtest (historical data only; never places orders) ---
@@ -370,19 +368,11 @@ function gapDefaults(userId) {
   if (r?.cutoff?.on && /^\d{2}:\d{2}$/.test(r.cutoff.value)) d.squareOff = r.cutoff.value;
   return d;
 }
-// The live Gap settings a user's backtest always uses (autotrade.js: GAP_LIVE.strike = ITM2, AUTO.gap.exitAt = 09:16,
-// cost to cost at 1R; late entry 5%, the live fills' middle). Kept here: autotrade.js imports this module.
-const USER_GAP_FIXED = Object.freeze({ strike: 2, exitCandle: '0916', lateEntryPct: 5, costToCostR: 1 });
 function gapCapabilities(userId) {
   let store;
   try { store = openHistory(); const coverage = gapCoverage(store); return { available: !!coverage, coverage, defaults: gapDefaults(userId) }; }
   catch (e) { return { available: false, reason: e.message, defaults: gapDefaults(userId) }; }
   finally { store?.close(); }
-}
-/** Users: the fields they may set, without the strategy's own (strike, exit, entry). */
-function publicGapCapabilities(userId) {
-  const c = gapCapabilities(userId), d = c.defaults || {};
-  return { ...c, defaults: { capital: d.capital, compound: d.compound, fundsUse: d.fundsUse, dailySlPct: d.dailySlPct, lotCap: d.lotCap, slippage: d.slippage, squareOff: d.squareOff } };
 }
 function gapSettings(body) {
   const b = body || {}, d = GAP_DEFAULTS;
@@ -587,7 +577,7 @@ export function startScalperWarmup({ everyMs = 10 * 60_000 } = {}) {
 
 export function scalperRoutes(r) {
   r.get('/api/scalper/backtest-capabilities', async ctx => ({ optionsData:await optionDataAvailability(ctx.user.id), optionExpiries:ORB5_EXPIRIES,
-    orb5:{ defaults:{ ...ORB5_DEFAULTS, options:ORB5_OPTION_DEFAULTS }, maxOptionDays:ORB5_LIMITS.maxOptionDays }, gap:isAdminEmail(ctx.user.email) ? gapCapabilities(ctx.user.id) : publicGapCapabilities(ctx.user.id), admin:isAdminEmail(ctx.user.email), ema915:{ defaults:ema915Defaults(ctx.user.id) }, custom:customCapabilities(ctx.user.id) }));
+    orb5:{ defaults:{ ...ORB5_DEFAULTS, options:ORB5_OPTION_DEFAULTS }, maxOptionDays:ORB5_LIMITS.maxOptionDays }, gap:gapCapabilities(ctx.user.id), admin:isAdminEmail(ctx.user.email), ema915:{ defaults:ema915Defaults(ctx.user.id) }, custom:customCapabilities(ctx.user.id) }));
   // (gap.coverage is also the stored-history range ORB's weekly actual-options runs read locally.)
   r.get('/api/scalper/signal-risk', ctx => scalperSignalRisk(ctx.user.id));
   r.get('/api/scalper/backtest-candles', async ctx => {
@@ -603,12 +593,8 @@ export function scalperRoutes(r) {
   r.post('/api/scalper/backtest-runs', async ctx => {
     limit(`scalper-backtest-save:${ctx.user.id}`,6,60_000);
     const {strategy,startDate,endDate,horizon}=ctx.body;
-    // Users (lib/access.js): the Gap open 09:15 backtest only, run with the live strategy's own settings, which they
-    // can neither see nor change; capital, sizing, stop-loss, lot cap and slippage stay theirs.
-    if(!isAdminEmail(ctx.user.email)) {
-      if(strategy!=='gap') throw bad('VALIDATION','Only the Gap open 09:15 backtest is available on your account.');
-      Object.assign(ctx.body, USER_GAP_FIXED);
-    }
+    // Users (lib/access.js): the Gap open 09:15 backtest only (same inputs as administrators; results without the trade list).
+    if(!isAdminEmail(ctx.user.email) && strategy!=='gap') throw bad('VALIDATION','Only the Gap open 09:15 backtest is available on your account.');
     if(strategy==='orb5') return runOrb5Backtest(ctx);
     if(strategy==='gap') return runGapBacktest(ctx);
     if(strategy==='ema915') return runEma915Backtest(ctx);
