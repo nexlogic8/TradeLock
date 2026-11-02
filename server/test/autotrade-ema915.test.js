@@ -92,7 +92,7 @@ before(async () => {
   cookie = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
   uid = stmt('SELECT id FROM users WHERE email = ?').get('ema915@example.com').id;
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } });
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');   // the Algo Trading rule set
   upsertAccount(uid, { broker: 'dhan', clientId: 'C915', accessToken: 'test-token-not-real-0123456789' });
   stmt("UPDATE broker_accounts SET agent_on = 1, algo_on = 1, status = 'connected', orb_on = 0, cross_on = 0, gap_on = 0 WHERE user_id = ?").run(uid);
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);

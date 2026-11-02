@@ -724,4 +724,10 @@ export const MIGRATIONS = [
   DROP TABLE backtest_runs_before_ema915;
   CREATE INDEX backtest_runs_user ON backtest_runs(user_id, id DESC);
   `,
+  // Risk rules in two sets: `config` = Manual trading, `algo_config` = Algo Trading (active while Algo Trading is on).
+  // Starts as a copy of the current rules.
+  `
+  ALTER TABLE risk_rules ADD COLUMN algo_config TEXT;
+  UPDATE risk_rules SET algo_config = config;
+  `,
 ];

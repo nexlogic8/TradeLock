@@ -35,7 +35,7 @@ before(async () => {
     body: JSON.stringify({ email: 'preopen@example.com', password: 'longpassword' }) });
   uid = stmt('SELECT id FROM users WHERE email = ?').get('preopen@example.com').id;
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } });
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');   // the Algo Trading rule set
   upsertAccount(uid, { broker: 'dhan', clientId: 'C778', accessToken: 'test-token-not-real-0123456789' });
 });
 after(() => { Object.assign(PREOPEN_IO, saved); server.close(); });

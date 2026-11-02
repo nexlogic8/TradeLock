@@ -80,7 +80,7 @@ before(async () => {
     body: JSON.stringify({ email: 'gap@example.com', password: 'longpassword' }) });
   uid = stmt('SELECT id FROM users WHERE email = ?').get('gap@example.com').id;
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } });
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');   // the Algo Trading rule set
   upsertAccount(uid, { broker: 'dhan', clientId: 'C777', accessToken: 'test-token-not-real-0123456789' });
   stmt('UPDATE broker_accounts SET agent_on = 1, algo_on = 1, orb_on = 0, cross_on = 0, gap_on = 1 WHERE user_id = ?').run(uid);
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);

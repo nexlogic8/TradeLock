@@ -86,6 +86,28 @@ const LINES = {
   cutoff: () => 'No new entries after this time',
 };
 
+const SET_NAMES = { manual: 'Manual trading', algo: 'Algo Trading' };
+
+/** The set in force now: Algo Trading on (with protection) → Algo rules, else Manual rules (server: rules/service.js). */
+const modeNow = ctx => {
+  const b = ctx.state.dash?.broker;
+  return b ? (b.algoOn && b.agentOn !== false ? 'algo' : 'manual') : ctx.data.mode || 'manual';
+};
+
+/** Manual | Algo switch: which rule set is being edited, and which one protects the account now. */
+function setSwitch(ctx) {
+  const set = ctx.ui.set, now = modeNow(ctx), live = set === now;
+  return html`
+    <div class="rule-sets" id="rule-sets">
+      <div class="seg" role="group" aria-label="Rule set">
+        ${['manual', 'algo'].map(k => html`<button type="button" data-set="${k}" aria-pressed="${set === k}">${SET_NAMES[k]}${now === k ? html` <span class="pill sm">Active now</span>` : ''}</button>`)}
+      </div>
+      <p class="muted small" id="rule-set-note">${live
+        ? html`These rules protect your account now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
+        : html`<b>Not in force now.</b> These apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}; edits are saved for then.`}</p>
+    </div>`;
+}
+
 function killLine(d) {
   const ks = d?.killSwitch;
   if (ks?.activeAt || ks?.broker?.active === true) return html`<span class="neg">Locked today</span> · unlocks next trading day`;
@@ -101,7 +123,10 @@ export default {
 
   async load(ctx) {
     const data = await get('/rules');
-    ctx.ui.form = withDefaults(data.pending || data.active);   // the choice the trader made (pending = from next session)
+    // Two sets (Manual trading / Algo Trading); the page opens on the one in force.
+    ctx.ui.forms = { manual: withDefaults(data.manual || data.active), algo: withDefaults(data.algo || data.active) };
+    ctx.ui.set = ctx.ui.set || data.mode || 'manual';
+    ctx.ui.form = ctx.ui.forms[ctx.ui.set];
     ctx.ui.error = null;
     return data;
   },
@@ -116,6 +141,7 @@ export default {
       ${protCard(d, f)}
       ${ctx.data.pending ? html`<div class="banner amber mb" id="rules-pending">${icon('clock')}<div><b>Changes scheduled for ${longDay(ctx.data.pendingFrom)}.</b> You loosened a limit during market hours, so the new rules start next session.</div></div>` : ''}
       <div class="panel pad srules">
+        ${setSwitch(ctx)}
         <div class="srules-head"><span class="muted small">Starting capital today</span><span class="srules-save" id="save-msg" aria-live="polite"></span><b class="num">${capital > 0 ? inr(capital) : 'not known yet'}</b></div>
         ${row('maxLoss', 'Daily stop‑loss', LINES.maxLoss(f, capital), f.maxLoss, moneyInput('maxLoss', f.maxLoss), tv)}
         ${row('profitLock', 'Profit target', LINES.profitLock(f, capital), f.profitLock, moneyInput('profitLock', f.profitLock), tv)}
@@ -138,6 +164,8 @@ export default {
     if (ks) ks.innerHTML = String(killLine(patch.dash));
     const card = $('#prot-card', ctx.el);
     if (card) card.outerHTML = String(protCard(patch.dash, ctx.ui.form));   // only the card: unsaved edits stay
+    const sets = $('#rule-sets', ctx.el);
+    if (sets) sets.outerHTML = String(setSwitch(ctx));   // Algo switched on / off: "Active now" moves
   },
 
   mount(ctx) {
@@ -145,14 +173,15 @@ export default {
     const capital = () => ctx.state.dash?.capital ?? ctx.data.capital;
     // Every change is saved by itself (no Save button): switches, % / ₹ and the cutoff at once, typed values
     // shortly after the last key. One save at a time; a change made meanwhile is saved right after.
-    let timer = null, saving = false, again = false;
+    // Saves carry their set, so switching Manual / Algo mid-edit still saves the edit to the set it was made in.
+    let timer = null, saving = false, again = null;
     const status = (text, cls = '') => { const m = $('#save-msg', el); if (m) { m.textContent = text; m.className = `srules-save ${cls}`; } };
-    const save = async () => {
+    const save = async (set = ui.set) => {
       clearTimeout(timer); timer = null;
-      if (saving) { again = true; return; }
+      if (saving) { again = set; return; }
       saving = true; status('Saving…');
       try {
-        const res = await put('/rules', { rules: ui.form });
+        const res = await put('/rules', { rules: ui.forms[set], set });
         const hadPending = !!ctx.data.pending;
         ctx.data = res; ui.error = null;
         if (res.deferred) toast(`Saved. Looser limits start ${longDay(res.pendingFrom)}.`, 'warn');
@@ -167,11 +196,17 @@ export default {
         const box = $('#rules-error', el); if (box) box.innerHTML = String(formError(ui.error));
       } finally {
         saving = false;
-        if (again) { again = false; save(); }
+        if (again) { const s = again; again = null; save(s); }
       }
     };
     const saveSoon = () => { clearTimeout(timer); status('Editing…'); timer = setTimeout(save, 900); };
     signal.addEventListener('abort', () => { if (timer) save(); }, { once: true });   // leaving mid-edit still saves
+    on(el, 'click', '[data-set]', (_, b) => {
+      if (b.dataset.set === ui.set) return;
+      if (timer) save(ui.set);   // a typed value not saved yet goes to the set it was typed in
+      ui.set = b.dataset.set; ui.form = ui.forms[ui.set];
+      ctx.paint();
+    }, signal);
     on(el, 'click', '[data-toggle]', (_, b) => { const r = ui.form[b.dataset.toggle]; r.on = !r.on; ctx.paint(); save(); }, signal);
     // Start / Stop Protection = the top-bar switch (it flips both at once and confirms with the server).
     on(el, 'click', '[data-prot]', () => document.getElementById('agent-btn')?.click(), signal);

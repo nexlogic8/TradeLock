@@ -112,30 +112,46 @@ export function loosens(cur, next, capital = null) {
   );
 }
 
-export const ensureRules = userId =>
-  stmt('INSERT OR IGNORE INTO risk_rules (user_id, config, updated_at) VALUES (?, ?, ?)')
-    .run(userId, JSON.stringify(DEFAULT_RULES), Date.now());
+export const ensureRules = userId => {
+  const rules = JSON.stringify(DEFAULT_RULES);
+  stmt('INSERT OR IGNORE INTO risk_rules (user_id, config, algo_config, updated_at) VALUES (?, ?, ?, ?)').run(userId, rules, rules, Date.now());
+};
 
-// Rules are read on every broker sync, so they are cached; every write below goes through forget().
+/**
+ * Two rule sets per account: 'manual' (Manual trading) and 'algo' (Algo Trading). The one in force follows the
+ * Algo Trading switch: on (with protection on) → the Algo rules, off → the Manual rules. Day state (P&L, entries,
+ * rules already hit, kill switch) stays one per account.
+ */
+export const RULE_SETS = ['manual', 'algo'];
+const COLUMN = { manual: 'config', algo: 'algo_config' };
+export const ruleMode = userId =>
+  stmt('SELECT 1 FROM broker_accounts WHERE user_id = ? AND algo_on = 1 AND agent_on = 1 LIMIT 1').get(userId) ? 'algo' : 'manual';
+
+// Rules are read on every broker sync, so both sets are cached (the mode is read each time: the Algo switch can
+// change in several places); every write below goes through forget().
 const cache = new Map();
 const forget = userId => { cache.delete(userId); markDirty(userId); };
 
-export function getRules(userId) {
+function ruleSets(userId) {
   const hit = cache.get(userId);
   if (hit) return hit;
   ensureRules(userId);
-  const row = stmt('SELECT * FROM risk_rules WHERE user_id = ?').get(userId);
-  let out;
+  let row = stmt('SELECT * FROM risk_rules WHERE user_id = ?').get(userId);
   // Changes now apply as soon as they are saved; a change scheduled under the old next-session rule applies now.
   if (row.pending) {
     stmt('UPDATE risk_rules SET config = pending, pending = NULL, pending_from = NULL, updated_at = ? WHERE user_id = ?').run(Date.now(), userId);
     markDirty(userId);
-    out = { active: JSON.parse(row.pending), pending: null, pendingFrom: null };
-  } else {
-    out = { active: JSON.parse(row.config), pending: row.pending ? JSON.parse(row.pending) : null, pendingFrom: row.pending_from };
+    row = { ...row, config: row.pending };
   }
-  cache.set(userId, deepFreeze(out));
-  return out;
+  const sets = deepFreeze({ manual: JSON.parse(row.config), algo: JSON.parse(row.algo_config || row.config) });
+  cache.set(userId, sets);
+  return sets;
+}
+
+/** { active, mode, manual, algo }: `active` is the set in force now (see RULE_SETS). */
+export function getRules(userId) {
+  const sets = ruleSets(userId), mode = ruleMode(userId);
+  return { active: sets[mode], mode, manual: sets.manual, algo: sets.algo, pending: null, pendingFrom: null };
 }
 
 function deepFreeze(o) {
@@ -148,13 +164,16 @@ function deepFreeze(o) {
  * (its trigger, the pause and any broker kill switch are kept until the next trading day).
  * Loosening mid-session is still recorded in the audit log.
  */
-export function saveRules(userId, input, ip, capital = null) {
+export function saveRules(userId, input, ip, capital = null, set = ruleMode(userId)) {
+  set = v.oneOf(set, 'set', RULE_SETS);
   const next = normalizeRules(input);
-  const { active } = getRules(userId);
-  const loosened = marketOpen() && loosens(active, next, capital);
-  stmt('UPDATE risk_rules SET config = ?, pending = NULL, pending_from = NULL, updated_at = ? WHERE user_id = ?').run(JSON.stringify(next), Date.now(), userId);
+  const before = getRules(userId)[set];
+  // Loosening counts only for the set in force: the other one protects nothing today.
+  const loosened = marketOpen() && set === ruleMode(userId) && loosens(before, next, capital);
+  stmt(`UPDATE risk_rules SET ${COLUMN[set]} = ?, pending = NULL, pending_from = NULL, updated_at = ? WHERE user_id = ?`).run(JSON.stringify(next), Date.now(), userId);
   forget(userId);
-  audit(userId, 'rules.updated', { before: active, after: next, loosenedInSession: loosened || undefined }, ip);
-  emit(userId, 'rules', next);
-  return { ...getRules(userId), deferred: false };
+  audit(userId, 'rules.updated', { set, before, after: next, loosenedInSession: loosened || undefined }, ip);
+  const now = getRules(userId);
+  emit(userId, 'rules', now.active);
+  return { ...now, deferred: false };
 }

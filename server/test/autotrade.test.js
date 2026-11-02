@@ -94,7 +94,7 @@ before(async () => {
   uid = stmt('SELECT id FROM users WHERE email = ?').get('auto@example.com').id;
   // Cutoff off so the test does not depend on the wall clock; 5% daily loss ÷ 3 trades sizes each trade.
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } });
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');   // the Algo Trading rule set
   upsertAccount(uid, { broker: 'dhan', clientId: 'C123', accessToken: 'test-token-not-real-0123456789' });
   stmt('UPDATE broker_accounts SET agent_on = 1, algo_on = 1 WHERE user_id = ?').run(uid);
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);
@@ -365,6 +365,8 @@ test('Algo Trading switch: refused with protection off; stopping protection stop
     assert.equal(stop.status, 200);
     assert.equal(stmt('SELECT algo_on FROM broker_accounts WHERE id = ?').get(id).algo_on, 0, 'stopping protection stops Algo Trading too');
   }
+  // Back on for the tests below: with Algo Trading off the Manual rule set (cutoff on) would apply.
+  stmt('UPDATE broker_accounts SET agent_on = 1, algo_on = 1 WHERE id = ?').run(id);
 });
 
 test('Algo Trading lock: on during 09:15-15:30 on a weekday, free before / after and at weekends', async () => {

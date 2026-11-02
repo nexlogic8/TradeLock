@@ -25,8 +25,9 @@ function liftPauseIfInside(userId, active, ip) {
 
 export function rulesRoutes(r) {
   r.get('/api/rules', ctx => ({ ...getRules(ctx.user.id), capital: capitalFor(ctx.user.id) }));
+  // body.set: 'manual' or 'algo' (default: the set in force now).
   r.put('/api/rules', ctx => {
-    const saved = saveRules(ctx.user.id, ctx.body.rules ?? ctx.body, ctx.ip, capitalFor(ctx.user.id));
+    const saved = saveRules(ctx.user.id, ctx.body.rules ?? ctx.body, ctx.ip, capitalFor(ctx.user.id), ctx.body.set ?? undefined);
     liftPauseIfInside(ctx.user.id, saved.active, ctx.ip);
     // Every open screen (Overview chart, cutoff, limits) picks up the new rules at once.
     emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
