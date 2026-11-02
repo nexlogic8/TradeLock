@@ -11,8 +11,8 @@ import { toast, toastError } from './toast.js';
 import { confirmDialog, noticeDialog, confirmAlgoStart } from './dialog.js';
 
 const NAV = [
-  ['Session', [['overview', 'Overview', 'grid'], ['scalper', 'Power Scalper', 'chart'], ['algo', 'AI Algo Trading', 'spark'], ['strategy', 'Strategy', 'radar'], ['backtest', 'Backtest', 'chart'], ['rules', 'Risk rules', 'sliders'], ['calendar', 'P&L calendar', 'calendar'], ['journal', 'Journal', 'book'], ['analytics', 'Analytics', 'chart']]],
   ['Account', [['profile', 'Profile', 'user'], ['wallet', 'Wallet', 'wallet'], ['brokers', 'Broker accounts', 'link'], ['billing', 'Subscription', 'card'], ['affiliate', 'Affiliate hub', 'share'], ['settings', 'Settings', 'gear']]],
+  ['Session', [['overview', 'Overview', 'grid'], ['scalper', 'Power Scalper', 'chart'], ['algo', 'AI Algo Trading', 'spark'], ['strategy', 'Strategy', 'radar'], ['backtest', 'Backtest', 'chart'], ['rules', 'Risk rules', 'sliders'], ['calendar', 'P&L calendar', 'calendar'], ['journal', 'Journal', 'book'], ['analytics', 'Analytics', 'chart']]],
 ];
 
 // Right-hand profile panel (tap the profile picture).
@@ -83,7 +83,7 @@ export function mountShell(root) {
         <div class="pd-head" id="pd-head"></div>
         <div class="pd-section pd-phone">Trading</div>
         <nav class="pd-grid pd-phone" aria-label="All trading pages">
-          ${NAV[0][1].map(([id, label, ic]) => html`<a class="pd-tile" href="/${id}" data-pd data-pd-page="${id}">${icon(ic)}<span>${label}</span></a>`)}
+          ${NAV.find(([g]) => g === 'Session')[1].map(([id, label, ic]) => html`<a class="pd-tile" href="/${id}" data-pd data-pd-page="${id}">${icon(ic)}<span>${label}</span></a>`)}
         </nav>
         <div class="pd-section pd-phone">Account</div>
         <nav class="pd-grid pd-phone" aria-label="Account pages">
