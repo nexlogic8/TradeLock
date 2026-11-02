@@ -10,9 +10,13 @@ import { statusOf, toneColor, brokerMark, avatar } from './parts.js';
 import { toast, toastError } from './toast.js';
 import { confirmDialog, noticeDialog, confirmAlgoStart } from './dialog.js';
 
+// Sidebar: one list in order of use (most-used first). `trading` = also a tile in the phone menu's Trading grid.
 const NAV = [
-  ['Account', [['profile', 'Profile', 'user'], ['wallet', 'Wallet', 'wallet'], ['brokers', 'Broker accounts', 'link'], ['billing', 'Subscription', 'card'], ['affiliate', 'Affiliate hub', 'share'], ['settings', 'Settings', 'gear']]],
-  ['Session', [['overview', 'Overview', 'grid'], ['scalper', 'Power Scalper', 'chart'], ['algo', 'AI Algo Trading', 'spark'], ['strategy', 'Strategy', 'radar'], ['backtest', 'Backtest', 'chart'], ['rules', 'Risk rules', 'sliders'], ['calendar', 'P&L calendar', 'calendar'], ['journal', 'Journal', 'book'], ['analytics', 'Analytics', 'chart']]],
+  ['overview', 'Overview', 'grid', true], ['algo', 'AI Algo Trading', 'spark', true], ['rules', 'Risk rules', 'sliders', true],
+  ['brokers', 'Broker accounts', 'link'], ['scalper', 'Power Scalper', 'chart', true], ['strategy', 'Strategy', 'radar', true],
+  ['backtest', 'Backtest', 'chart', true], ['calendar', 'P&L calendar', 'calendar', true], ['journal', 'Journal', 'book', true],
+  ['analytics', 'Analytics', 'chart', true], ['wallet', 'Wallet', 'wallet'], ['billing', 'Subscription', 'card'],
+  ['profile', 'Profile', 'user'], ['affiliate', 'Affiliate hub', 'share'], ['settings', 'Settings', 'gear'],
 ];
 
 // Right-hand profile panel (tap the profile picture).
@@ -41,10 +45,10 @@ export function mountShell(root) {
       <div class="scrim" id="scrim"></div>
       <aside class="side" aria-label="Main navigation">
         <a class="logo" href="/overview">${logoMark()}<span>TRADE<b>LOCK</b></span></a>
-        ${NAV.map(([group, items]) => html`
-          <div class="nav-group">${group}</div>
-          ${items.map(([id, label, ic, cls]) => html`
-            <a class="nav-item ${cls || ''}" href="/${id}" data-nav="${id}">${icon(ic)}${label}</a>`)}`)}
+        <div class="nav-list">
+        ${NAV.map(([id, label, ic]) => html`
+          <a class="nav-item" href="/${id}" data-nav="${id}">${icon(ic)}${label}</a>`)}
+        </div>
         <div class="side-foot">
           <div class="status-card" id="side-status"></div>
           <div class="user-row">
@@ -83,7 +87,7 @@ export function mountShell(root) {
         <div class="pd-head" id="pd-head"></div>
         <div class="pd-section pd-phone">Trading</div>
         <nav class="pd-grid pd-phone" aria-label="All trading pages">
-          ${NAV.find(([g]) => g === 'Session')[1].map(([id, label, ic]) => html`<a class="pd-tile" href="/${id}" data-pd data-pd-page="${id}">${icon(ic)}<span>${label}</span></a>`)}
+          ${NAV.filter(n => n[3]).map(([id, label, ic]) => html`<a class="pd-tile" href="/${id}" data-pd data-pd-page="${id}">${icon(ic)}<span>${label}</span></a>`)}
         </nav>
         <div class="pd-section pd-phone">Account</div>
         <nav class="pd-grid pd-phone" aria-label="Account pages">
