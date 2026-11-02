@@ -67,6 +67,7 @@ import { indexOptionInstruments } from './instruments.js';
 import { underlyingFor } from './underlyings.js';
 import { normalizeScalperCandles } from './routes.js';
 import { algoUnwatch, algoWatch, liveMinute, liveTick, onMinuteClose } from './live.js';
+import { isAdminUser, withAllowedStrategies } from '../../lib/access.js';
 
 export const AUTO = Object.freeze({
   tickMs: 5_000,
@@ -485,7 +486,8 @@ function gapNoTrade(acct, u, day, title, body) {
   const k = `${acct.user_id}:${u.key}`;
   if (gapNoticeDay.get(k) === day) return;
   gapNoticeDay.set(k, day);
-  notify(acct.user_id, { kind: 'risk', level: 'info', title, body });
+  const plain = !isAdminUser(acct.user_id);   // users: no premiums or gap figures
+  notify(acct.user_id, { kind: 'risk', level: 'info', title, body: plain ? `${u.label}: no Gap 09:15 trade today.` : body });
   audit(acct.user_id, 'algo.gap_no_trade', { underlying: u.key, day, title, body });
 }
 
@@ -653,6 +655,7 @@ export const algoIndices = acct => {
  * for a fresh confirmed ORB signal on the 5-minute chart and trade it. Returns what happened.
  */
 export async function scanForEntry(acct, { now = Date.now(), adapter = adapterFor(acct), pause = sleep, instruments = optionMeta, underlying } = {}) {
+  acct = withAllowedStrategies(acct);   // non-admins: only the public strategy (Gap 09:15) runs
   const u = underlyingFor(underlying ?? algoIndices(acct)[0]), stateKey = `${acct.user_id}:${u.key}`;
   const uid = acct.user_id;
   if (!marketOpen(now)) return { skipped: 'market closed' };
@@ -836,7 +839,8 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const uid = acct.user_id, G = AUTO.gap;
   const skip = reason => {
     update(id, { status: 'skipped', reason, closed_at: Date.now() });
-    notify(uid, { kind: 'risk', level: 'warn', title: `Algo Trading: Gap 09:15 ${direction} skipped`, body: reason });
+    notify(uid, { kind: 'risk', level: 'warn', title: `Algo Trading: Gap 09:15 ${direction} skipped`,
+      body: isAdminUser(uid) || /fund|margin|balance|lot|Risk rules|stop-loss|rejected|refused/i.test(reason) ? reason : 'The opening conditions were not met, so no trade today.' });
     audit(uid, 'algo.auto_skipped', { id, direction, reason, strategy: 'gap' });
     return { skipped: reason, id };
   };
@@ -963,7 +967,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     return exitNow(`Dhan refused the stop-loss order (${e.message}); exiting at market so the trade is never left without a stop.`);
   }
   notify(uid, { kind: 'risk', level: 'ok', title: `Algo Trading: bought ${lots} lot${lots > 1 ? 's' : ''} ${symbol}`,
-    body: `Gap 09:15 ${direction} (${pick}${steps ? `, ATM ${atm.strike}` : ''}): the ATM premium opened ${setup.open} vs ${setup.prevClose} yesterday (${setup.gapPct > 0 ? '+' : ''}${setup.gapPct}%), ${setup.premiumLtp} at ${clockMs(setup.checkedAt || now)} (NIFTY ${setup.ltp}; prices from ${setup.priceSource || 'REST'}). Entry ${entryPrice} (${how}), stop-loss ${stop} (₹${budget} of today's stop-loss left ÷ ${qty} qty), risk ≈ ₹${round2((entryPrice - stop) * qty)}. Exits on the first ${direction === 'CE' ? 'red' : 'green'} 1-minute candle, the stop-loss, or at ${squareOffTime(getRules(uid).active)} IST.` });
+    // Users get the trade, not the strategy's rules (lib/access.js); admins get the full reasoning.
+    body: !isAdminUser(uid) ? `Gap 09:15 ${direction}: entry ${entryPrice}, stop-loss ${stop} (from your Risk rules). TradeLock exits it automatically.`
+      : `Gap 09:15 ${direction} (${pick}${steps ? `, ATM ${atm.strike}` : ''}): the ATM premium opened ${setup.open} vs ${setup.prevClose} yesterday (${setup.gapPct > 0 ? '+' : ''}${setup.gapPct}%), ${setup.premiumLtp} at ${clockMs(setup.checkedAt || now)} (NIFTY ${setup.ltp}; prices from ${setup.priceSource || 'REST'}). Entry ${entryPrice} (${how}), stop-loss ${stop} (₹${budget} of today's stop-loss left ÷ ${qty} qty), risk ≈ ₹${round2((entryPrice - stop) * qty)}. Exits on the first ${direction === 'CE' ? 'red' : 'green'} 1-minute candle, the stop-loss, or at ${squareOffTime(getRules(uid).active)} IST.` });
   audit(uid, 'algo.auto_entered', { id, strategy: 'Gap 09:15', symbol, qty, entryPrice, stop });
   syncAccount(acct, { force: true }).catch(() => {});
   return { entered: true, id, symbol, qty, entryPrice, stop };
@@ -1094,7 +1100,9 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
   if (trade.status === 'open') {
     const strategy = JSON.parse(trade.detail || '{}').setup?.strategy;
     const why = await (strategy === 'Gap 09:15' ? gapExitDue : strategy === EMA_SCALP.name ? emaScalpExitDue : strategy === EMA_TREND.name ? emaTrendExitDue : emaExitDue)(trade, adapter, now).catch(() => null);
-    if (why) { update(trade.id, { status: 'closing', reason: why }); trade = { ...trade, status: 'closing', reason: why }; }
+    // Users see that the strategy closed it, not its exit rule (lib/access.js).
+    const shown = why && strategy === 'Gap 09:15' && !isAdminUser(uid) ? 'Strategy exit' : why;
+    if (why) { update(trade.id, { status: 'closing', reason: shown }); trade = { ...trade, status: 'closing', reason: shown }; }
   }
   const due = trade.status === 'closing' || ist(now).hhmm >= squareOffTime(getRules(uid).active);
   if (!due || now - (exitTry.get(trade.id) || 0) < 30_000) return;
@@ -1304,7 +1312,8 @@ export async function preopenCheck(acct) {
     const risk = scalperSignalRisk(uid), today = dayState(uid), budget = riskLeft(risk.budget?.daily, today.realized + today.unrealized);
     const steps = GAP_LIVE.strike || 0, pick = steps ? `${steps > 0 ? 'ITM' : 'OTM'}${Math.abs(steps)}` : 'ATM';
     notify(uid, { kind: 'risk', level: 'ok', title: `Ready for 09:15 via ${via}`,
-      body: `Gap 09:15 is on: ${pick} of the nearest expiry on the first tick, ${Math.round(AUTO.gap.fundsUse * 100)}% of the ₹${round2(h.funds)} available, stop-loss from the ₹${budget} of today's stop-loss, exit at ${AUTO.gap.exitAt}. Keep ${via} as the trading broker until then.` });
+      body: !isAdminUser(uid) ? `Gap 09:15 is on, with ₹${round2(h.funds)} available and ₹${budget} of today's stop-loss. Keep ${via} as the trading broker until then.`
+        : `Gap 09:15 is on: ${pick} of the nearest expiry on the first tick, ${Math.round(AUTO.gap.fundsUse * 100)}% of the ₹${round2(h.funds)} available, stop-loss from the ₹${budget} of today's stop-loss, exit at ${AUTO.gap.exitAt}. Keep ${via} as the trading broker until then.` });
   }
   audit(uid, 'algo.preopen_check', { via, ok: !problems.length, problems });
   return { ok: !problems.length, problems, alt };

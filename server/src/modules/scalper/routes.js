@@ -23,6 +23,7 @@ import { listStrategies, normalizeStrategy } from '../strategy/service.js';
 import { openHistory } from '../backtest/history-store.js';
 import { getRules } from '../rules/service.js';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import { isAdminEmail } from '../../lib/access.js';
 import { STOP_RULES, backtestSignals, countOpeningRangeSessions, ema45HammerSignals, emaIndicatorRows, normalizeBacktestCandles, openingRangeFirstTradeSignals, previousDayBreakoutSignals } from '../../../../web/js/pages/scalper-chart-signals.js';
 
 // Dhan limits option-chain requests to one per user every three seconds. Queue requests
@@ -555,7 +556,7 @@ export function startScalperWarmup({ everyMs = 10 * 60_000 } = {}) {
 
 export function scalperRoutes(r) {
   r.get('/api/scalper/backtest-capabilities', async ctx => ({ optionsData:await optionDataAvailability(ctx.user.id), optionExpiries:ORB5_EXPIRIES,
-    orb5:{ defaults:{ ...ORB5_DEFAULTS, options:ORB5_OPTION_DEFAULTS }, maxOptionDays:ORB5_LIMITS.maxOptionDays }, gap:gapCapabilities(ctx.user.id), ema915:{ defaults:ema915Defaults(ctx.user.id) }, custom:customCapabilities(ctx.user.id) }));
+    orb5:{ defaults:{ ...ORB5_DEFAULTS, options:ORB5_OPTION_DEFAULTS }, maxOptionDays:ORB5_LIMITS.maxOptionDays }, gap:isAdminEmail(ctx.user.email) ? gapCapabilities(ctx.user.id) : null, ema915:{ defaults:ema915Defaults(ctx.user.id) }, custom:customCapabilities(ctx.user.id) }));
   // (gap.coverage is also the stored-history range ORB's weekly actual-options runs read locally.)
   r.get('/api/scalper/signal-risk', ctx => scalperSignalRisk(ctx.user.id));
   r.get('/api/scalper/backtest-candles', async ctx => {
@@ -571,6 +572,8 @@ export function scalperRoutes(r) {
     limit(`scalper-backtest-save:${ctx.user.id}`,6,60_000);
     const {strategy,startDate,endDate,horizon}=ctx.body;
     if(strategy==='orb5') return runOrb5Backtest(ctx);
+    // Gap open 09:15 is the live strategy: its backtest (rules, strike, exit) is admin-only (lib/access.js).
+    if(strategy==='gap' && !isAdminEmail(ctx.user.email)) throw bad('VALIDATION','This backtest is not available on your account.');
     if(strategy==='gap') return runGapBacktest(ctx);
     if(strategy==='ema915') return runEma915Backtest(ctx);
     if(strategy==='custom') return runCustomBacktest(ctx);

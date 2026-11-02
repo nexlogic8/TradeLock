@@ -5,7 +5,7 @@ import { get, post } from '../core/api.js';
 import { store } from '../core/store.js';
 import { icon } from '../ui/icons.js';
 import { toast, toastError } from '../ui/toast.js';
-import { BUILT_IN, SHARED_RULES } from './strategy-library.js';
+import { builtInFor, sharedRulesFor } from './strategy-library.js';
 import { artInfo } from './strategy-art.js';
 import { confirmAlgoStart, noticeDialog } from '../ui/dialog.js';
 import { raw } from '../core/dom.js';
@@ -14,8 +14,10 @@ const inr = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 const price = n => (Number.isFinite(Number(n)) && n !== null ? Number(n).toFixed(2) : '—');
 const time = n => n ? new Date(n).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : '—';
 
-// The two strategies Algo Trading can run (descriptions shared with the Strategy page).
-const STRATEGIES = BUILT_IN.filter(s => s.auto);
+// The strategies Algo Trading can run (descriptions shared with the Strategy page): every one for administrators,
+// the public Gap card for other users (server: lib/access.js).
+const isAdmin = () => !!store.get().user?.admin;
+const strategies = () => builtInFor(isAdmin()).filter(s => s.auto);
 
 const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
 
@@ -26,7 +28,7 @@ function strategyRow(s, a, open) {
     <div class="algo-strat ${on_ ? 'on' : ''}">
       <div class="algo-strat-head">
         <span class="algo-strat-name"><b>${s.name}</b><small>${s.tag} · ${s.timeframe}</small></span>
-        ${raw(artInfo(s.key, s.name))}
+        ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
     </div>`;
@@ -43,7 +45,8 @@ export default {
   view(ctx) {
     const d = ctx.data, a = d.account, running = !!a?.algoOn;
     const missing = d.readiness.filter(r => !r.ok);
-    const state = running ? (d.marketOpen ? ['Running', 'Watching every 5-minute close for signals'] : ['On', 'Starts watching at the next market open'])
+    const admin = isAdmin(), STRATEGIES = strategies();
+    const state = running ? (d.marketOpen ? ['Running', admin ? 'Watching every 5-minute close for signals' : 'Watching the market'] : ['On', 'Starts watching at the next market open'])
       : d.ready ? ['Stopped', 'No automatic orders are placed'] : ['Setup needed', `${missing.length} item${missing.length > 1 ? 's' : ''} below`];
     const activeStrats = STRATEGIES.filter(s => a?.[s.flag]).map(s => s.name), index = (d.underlyings || []).filter(u => (a?.underlyings || ['NIFTY']).includes(u.key)).map(u => u.label).join(' + ') || 'NIFTY 50';
     return html`
@@ -76,7 +79,8 @@ export default {
           <h3 class="panel-title">Indices to trade</h3>
           <div class="algo-index" role="group" aria-label="Indices to trade">${(d.underlyings || []).map(u => { const on_ = (a?.underlyings || ['NIFTY']).includes(u.key); return html`
             <label class="algo-index-item ${on_ ? 'on' : ''}"><input type="checkbox" data-algo-index="${u.key}" ${on_ ? 'checked' : ''} ${a ? '' : 'disabled'}><span>${u.label}</span></label>`; })}</div>
-          <p class="muted small algo-index-note">Each ticked index is watched on its own 5-minute chart; a signal buys that index’s ATM next-expiry option. Still one trade at a time, sharing the day’s stop-loss.</p>
+          <p class="muted small algo-index-note">${admin ? 'Each ticked index is watched on its own 5-minute chart; a signal buys that index’s ATM next-expiry option. Still one trade at a time, sharing the day’s stop-loss.'
+            : 'Each ticked index is traded on its own. Still one trade at a time, sharing the day’s stop-loss.'}</p>
         </section>
         <section class="panel pad algo-manual-card">
           <div class="algo-strat algo-manual ${a?.manualOn ? 'on' : ''}">
@@ -95,7 +99,7 @@ export default {
 
       <section class="panel pad algo-block algo-shared">
         <h3 class="panel-title">Every automatic trade</h3>
-        <dl class="algo-rules">${SHARED_RULES.map(([k, v]) => html`<dt>${k}</dt><dd>${v}${k === 'Phone alarm' && window.TradeLockApp?.testTradeAlarm ? html` <button class="btn btn-sm" type="button" data-alarm-test-algo>Test alarm</button>` : ''}</dd>`)}</dl>
+        <dl class="algo-rules">${sharedRulesFor(admin).map(([k, v]) => html`<dt>${k}</dt><dd>${v}${k === 'Phone alarm' && window.TradeLockApp?.testTradeAlarm ? html` <button class="btn btn-sm" type="button" data-alarm-test-algo>Test alarm</button>` : ''}</dd>`)}</dl>
       </section>
 
       <section class="panel pad algo-block">
@@ -198,7 +202,7 @@ export default {
       try {
         const { account } = await post(`/brokers/${id}/strategies`, { [key]: next });
         syncTopbar(account);
-        const s = STRATEGIES.find(x => x.key === key);
+        const s = strategies().find(x => x.key === key);
         toast(`${s.name} ${next ? 'on' : 'off'}.`, 'ok');
         await refresh();
       } catch (err) { toastError(err); b.disabled = false; }

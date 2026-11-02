@@ -19,6 +19,7 @@ import { stoxkartLink } from './stoxkart.js';
 import { getBook } from './book.js';
 import { brokerBusy, switchTradeVia } from './switch.js';
 import { staticIpView } from './static-ip.js';
+import { isAdminEmail } from '../../lib/access.js';
 
 function ownAccount(userId, id) {
   const acct = stmt('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?').get(Number(id), userId);
@@ -53,7 +54,10 @@ export function brokerRoutes(r) {
     await verifyCreds(broker, clientId, accessToken);
     // Only one active broker per user for now.
     stmt(`UPDATE broker_accounts SET status = 'disconnected', token_enc = NULL WHERE user_id = ? AND broker != ?`).run(ctx.user.id, broker);
+    const isNew = !stmt('SELECT 1 FROM broker_accounts WHERE user_id = ? AND broker = ?').get(ctx.user.id, broker);
     const acct = upsertAccount(ctx.user.id, { broker, clientId, accessToken });
+    // A new account starts with the default strategy only: Gap open 09:15 (Algo Trading itself stays off until switched on).
+    if (isNew) stmt('UPDATE broker_accounts SET gap_on = 1, orb_on = 0, cross_on = 0, ema915_on = 0 WHERE id = ?').run(acct.id);
     guardBroker(ctx.user.id, broker, clientId);   // one free trial per broker account
     await syncAccount(acct, { force: true });
     const fresh = stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id);
@@ -146,6 +150,10 @@ export function brokerRoutes(r) {
   r.post('/api/brokers/:id/strategies', async ctx => {
     const acct = ownAccount(ctx.user.id, ctx.params.id);
     const change = {};
+    // ORB, EMA 5/9 and EMA 9/15 are admin-only (lib/access.js): other users have Gap open 09:15 only.
+    if (!isAdminEmail(ctx.user.email) && ['emaCross', 'orb', 'ema915'].some(k => ctx.body[k] === true)) {
+      throw bad('VALIDATION', 'This strategy is not available on your account.');
+    }
     if (ctx.body.emaCross !== undefined) change.cross_on = v.bool(ctx.body.emaCross, 'EMA 9/21 crossover') ? 1 : 0;
     if (ctx.body.orb !== undefined) change.orb_on = v.bool(ctx.body.orb, 'ORB 5m') ? 1 : 0;
     if (ctx.body.gap !== undefined) change.gap_on = v.bool(ctx.body.gap, 'Gap open 09:15') ? 1 : 0;

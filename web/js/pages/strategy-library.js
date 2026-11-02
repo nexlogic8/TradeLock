@@ -48,6 +48,22 @@ export const BUILT_IN = [
   ] },
 ];
 
+// What users (not administrators) see: the default strategy only, without its rules (server: lib/access.js).
+const PUBLIC_GAP = { key: 'gap', flag: 'gapOn', name: 'Gap open 09:15', tag: 'Opening strategy', timeframe: 'fully automatic', auto: true, public: true, rules: [
+  ['What it does', 'Trades the market open, at most once a day, fully automatically on your Dhan account.'],
+  ['Stop-loss', 'Set from your Risk rules and placed at your broker with every entry.'],
+  ['Exit', 'Closed automatically by the strategy, by the stop-loss, or at your cutoff.'],
+] };
+export const PUBLIC_SHARED_RULES = [
+  ['Size', 'Sized from your available funds and your Risk rules.'],
+  ['Stop-loss', 'Every entry gets its stop-loss order at your broker straight away.'],
+  ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch, one trade at a time.'],
+  ['Phone alarm', 'Each entry rings the TradeLock Android app like an alarm, even closed, on silent or in DND.'],
+];
+/** The built-in strategies this user may see: all of them for administrators, else the public Gap card only. */
+export const builtInFor = admin => (admin ? BUILT_IN : [PUBLIC_GAP]);
+export const sharedRulesFor = admin => (admin ? SHARED_RULES : PUBLIC_SHARED_RULES);
+
 // What every automatic trade does, whichever strategy fired.
 export const SHARED_RULES = [
   ['Contract', 'ATM option of the next expiry (the one after the nearest) on the index you trade: CE for up signals, PE for down signals.'],

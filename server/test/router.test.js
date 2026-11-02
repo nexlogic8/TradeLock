@@ -9,7 +9,7 @@ test('navigation cancels old loads and prevents old pages repainting the current
   let finishLoad;
   let slow = false;
   const fixture = {
-    store: { get: () => ({ user: {} }), on(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } },
+    store: { get: () => ({ user: { admin: true } }), on(fn) { subscribers.add(fn); return () => subscribers.delete(fn); } },
     mountShell: () => ({ page, activate(name) { fixture.selected = name; } }),
     pages: Object.fromEntries(['algo', 'scalper'].map(name => [name, async () => ({ default: {
       title: name, layout: 'app', live: ['dash'],

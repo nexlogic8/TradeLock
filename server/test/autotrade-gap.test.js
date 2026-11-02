@@ -4,6 +4,7 @@
 // stop-loss, the cancel when it is not filled, and the exit on the first opposite-colour 1-minute candle.
 process.env.DB_PATH = ':memory:';
 process.env.MONITOR = '0';
+process.env.ADMIN_EMAILS = 'gap@example.com';   // the full strategy view (lib/access.js)
 const { test, before, after } = await import('node:test');
 const { createServer } = await import('node:http');
 const { createHandler } = await import('../src/lib/app.js');

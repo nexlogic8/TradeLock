@@ -3,6 +3,7 @@
 // Algo Trading switches in use carried over). The broker calls are stood in for through PREOPEN_IO.
 process.env.DB_PATH = ':memory:';
 process.env.MONITOR = '0';
+process.env.ADMIN_EMAILS = 'preopen@example.com';   // the full strategy view (lib/access.js)
 const { test, before, after, beforeEach } = await import('node:test');
 const { createServer } = await import('node:http');
 const { createHandler } = await import('../src/lib/app.js');

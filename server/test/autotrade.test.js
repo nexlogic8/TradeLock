@@ -1,6 +1,7 @@
 // Live ORB auto-trading: contract choice, premium stop-loss, sizing and the order lifecycle against a fake Dhan.
 process.env.DB_PATH = ':memory:';
 process.env.MONITOR = '0';
+process.env.ADMIN_EMAILS = 'auto@example.com';   // the full strategy view (lib/access.js)
 const { test, before, after } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
 const { createServer } = await import('node:http');

@@ -1,6 +1,7 @@
 import { html, $, on, raw } from '../core/dom.js';
 import { get, post, put, del } from '../core/api.js';
-import { BUILT_IN } from './strategy-library.js';
+import { builtInFor } from './strategy-library.js';
+import { store } from '../core/store.js';
 import { artInfo } from './strategy-art.js';
 import { icon } from '../ui/icons.js';
 import { toast, toastError } from '../ui/toast.js';
@@ -34,7 +35,7 @@ function builtInCard(b, live) {
   const status = !b.auto ? ['Chart signal', 'ice'] : !a ? ['Algo Trading', 'grey']
     : a[b.flag] ? [a.algoOn ? 'Algo Trading · On' : 'On · Algo Trading stopped', a.algoOn ? '' : 'amber'] : ['Off', 'grey'];
   return html`<article class="panel pad strat-builtin">
-    <header><div><b>${b.name}</b><small>${b.tag} · ${b.timeframe}</small></div><span class="strat-builtin-tools"><span class="pill sm ${status[1]}">${status[0]}</span>${raw(artInfo(b.key, b.name))}</span></header>
+    <header><div><b>${b.name}</b><small>${b.tag} · ${b.timeframe}</small></div><span class="strat-builtin-tools"><span class="pill sm ${status[1]}">${status[0]}</span>${b.public ? '' : raw(artInfo(b.key, b.name))}</span></header>
     <dl class="algo-rules">${b.rules.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
   </article>`;
 }
@@ -66,12 +67,13 @@ export default {
   },
 
   view(ctx) {
-    const d = ctx.data, editing = ctx.ui.editing;
+    const d = ctx.data, editing = ctx.ui.editing, admin = !!store.get().user?.admin;   // users: the public Gap card only
     const list = html`
       <section class="strat-section">
-        <div class="strat-section-head"><div><h3>Built-in strategies</h3><p>Exactly how TradeLock runs them today. ORB 5m and EMA 9/21 trade automatically when switched on in AI Algo Trading.</p></div>
+        <div class="strat-section-head"><div><h3>Built-in strategies</h3><p>${admin ? 'Exactly how TradeLock runs them today. ORB 5m and EMA 9/21 trade automatically when switched on in AI Algo Trading.'
+          : 'Runs automatically when switched on in AI Algo Trading.'}</p></div>
           <a class="btn btn-ghost btn-sm" href="/algo" data-nav="algo">${icon('spark')}AI Algo Trading</a></div>
-        <div class="strat-builtin-grid">${BUILT_IN.map(b => builtInCard(b, d.live))}</div>
+        <div class="strat-builtin-grid">${builtInFor(admin).map(b => builtInCard(b, d.live))}</div>
       </section>
       <section class="strat-section">
         <div class="strat-section-head"><div><h3>My strategies</h3><p>Your own playbooks: saved privately, for planning and review. They are not traded automatically.</p></div>

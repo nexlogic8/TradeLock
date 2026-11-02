@@ -6,6 +6,7 @@ import { ensureRules } from '../rules/service.js';
 import { startTrial, getSubscription } from '../billing/service.js';
 import { ensureAffiliate, attributeReferral } from '../affiliate/service.js';
 import { accountFor, accountSummary } from '../broker/registry.js';
+import { isAdminEmail } from '../../lib/access.js';
 
 export const DEFAULT_PREFS = { push: true, brokerAlerts: true, emergencyConfirm: true };
 
@@ -43,5 +44,7 @@ export function publicUser(id) {
     prefs: { ...DEFAULT_PREFS, ...JSON.parse(u.prefs) },
     subscription: getSubscription(id),
     broker: accountSummary(accountFor(id)),
+    // Admins see every strategy with its full detail; others the public set only (lib/access.js).
+    admin: isAdminEmail(u.email),
   };
 }

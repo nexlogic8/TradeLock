@@ -11,9 +11,10 @@ import { toast, toastError } from './toast.js';
 import { confirmDialog, noticeDialog, confirmAlgoStart } from './dialog.js';
 
 // Sidebar: one list in order of use (most-used first). `trading` = also a tile in the phone menu's Trading grid.
+// The 5th field 'admin': shown to administrators only (Power Scalper; server: lib/access.js).
 const NAV = [
   ['overview', 'Overview', 'grid', true], ['algo', 'AI Algo Trading', 'spark', true], ['rules', 'Risk rules', 'sliders', true],
-  ['brokers', 'Broker accounts', 'link'], ['scalper', 'Power Scalper', 'chart', true], ['strategy', 'Strategy', 'radar', true],
+  ['brokers', 'Broker accounts', 'link'], ['scalper', 'Power Scalper', 'chart', true, 'admin'], ['strategy', 'Strategy', 'radar', true],
   ['backtest', 'Backtest', 'chart', true], ['calendar', 'P&L calendar', 'calendar', true], ['journal', 'Journal', 'book', true],
   ['analytics', 'Analytics', 'chart', true], ['wallet', 'Wallet', 'wallet'], ['billing', 'Subscription', 'card'],
   ['profile', 'Profile', 'user'], ['affiliate', 'Affiliate hub', 'share'], ['settings', 'Settings', 'gear'],
@@ -36,6 +37,9 @@ const PROFILE_LINKS = [
 // Phone tab bar; Power Scalper is the raised round button in the middle.
 const TABS = [['overview', 'Home', 'grid'], ['algo', 'Algo', 'spark'], ['scalper', 'Scalper', 'chart', 'tab-bubble'], ['rules', 'Rules', 'sliders'], ['profile', 'Menu', 'menu']];
 
+const isAdmin = () => !!store.get().user?.admin;
+const navFor = () => NAV.filter(n => n[4] !== 'admin' || isAdmin());
+
 let shell = null;
 
 export function mountShell(root) {
@@ -46,7 +50,7 @@ export function mountShell(root) {
       <aside class="side" aria-label="Main navigation">
         <a class="logo" href="/overview">${logoMark()}<span>TRADE<b>LOCK</b></span></a>
         <div class="nav-list">
-        ${NAV.map(([id, label, ic]) => html`
+        ${navFor().map(([id, label, ic]) => html`
           <a class="nav-item" href="/${id}" data-nav="${id}">${icon(ic)}${label}</a>`)}
         </div>
         <div class="side-foot">
@@ -87,7 +91,7 @@ export function mountShell(root) {
         <div class="pd-head" id="pd-head"></div>
         <div class="pd-section pd-phone">Trading</div>
         <nav class="pd-grid pd-phone" aria-label="All trading pages">
-          ${NAV.filter(n => n[3]).map(([id, label, ic]) => html`<a class="pd-tile" href="/${id}" data-pd data-pd-page="${id}">${icon(ic)}<span>${label}</span></a>`)}
+          ${navFor().filter(n => n[3]).map(([id, label, ic]) => html`<a class="pd-tile" href="/${id}" data-pd data-pd-page="${id}">${icon(ic)}<span>${label}</span></a>`)}
         </nav>
         <div class="pd-section pd-phone">Account</div>
         <nav class="pd-grid pd-phone" aria-label="Account pages">
@@ -99,7 +103,7 @@ export function mountShell(root) {
         <button class="pd-logout" id="pd-logout" type="button">${icon('logout')}Sign out</button>
       </aside>
       <nav class="tabbar" aria-label="Quick navigation">
-        ${TABS.map(([id, label, ic, cls]) => id === 'profile' ? html`<button class="tab" id="top-avatar" type="button" aria-label="Open the menu: all pages and your profile" aria-haspopup="dialog" aria-controls="pdrawer" aria-expanded="false"><span id="tab-avatar"></span><span>${label}</span></button>` : html`<a class="tab ${cls || ''}" href="/${id}" data-nav="${id}">${icon(ic)}<span>${label}</span></a>`)}
+        ${TABS.filter(([id]) => id !== 'scalper' || isAdmin()).map(([id, label, ic, cls]) => id === 'profile' ? html`<button class="tab" id="top-avatar" type="button" aria-label="Open the menu: all pages and your profile" aria-haspopup="dialog" aria-controls="pdrawer" aria-expanded="false"><span id="tab-avatar"></span><span>${label}</span></button>` : html`<a class="tab ${cls || ''}" href="/${id}" data-nav="${id}">${icon(ic)}<span>${label}</span></a>`)}
       </nav>
     </div>`);
 
