@@ -13,7 +13,7 @@ const { stmt } = await import('../src/db/index.js');
 const { setBook } = await import('../src/modules/broker/book.js');
 const { upsertAccount } = await import('../src/modules/broker/registry.js');
 const { saveRules, getRules } = await import('../src/modules/rules/service.js');
-const { gapPick, premiumGreen, gapExitCandle, scanForEntry, manageTrade, gapFirstTick, strikeFrom, AUTO, FEED, GAP_LIVE } = await import('../src/modules/scalper/autotrade.js');
+const { gapPick, premiumGreen, gapExitCandle, scanForEntry, manageTrade, gapFirstTick, strikeFrom, stopGone, AUTO, FEED, GAP_LIVE } = await import('../src/modules/scalper/autotrade.js');
 // The ATM tests below trade the ATM; the live default (ITM2) has its own test at the end.
 assert.equal(GAP_LIVE.strike, 2, 'live: ITM2');
 GAP_LIVE.strike = 0;
@@ -64,9 +64,9 @@ function fakeDhan({ fills = true, ltp = 23070, idxOpen = 23060, fillPrice = 150.
       return raw([['09:15:00', 23060, 23090, 23055, 23085], ['09:16:00', 23085, 23100, 23080, 23095], ['09:17:00', 23095, 23096, 23070, 23075]]);
     },
     async placeOrder(o) { calls.push(['order', o]); return { id: o.type === 'STOP_LOSS' ? 'GS1' : 'GE1', status: 'pending' }; },
-    async orderStatus(id) { calls.push(['status', id]); if (id !== 'GE1') return { status: 'pending' }; if (fills) return { status: 'filled', price: fillPrice };
+    async orderStatus(id) { calls.push(['status', id]); if (id !== 'GE1') return this.cancelled?.has(id) ? { status: 'failed', filledQty: 0 } : { status: 'pending' }; if (fills) return { status: 'filled', price: fillPrice };
       return partQty && calls.some(x => x[0] === 'cancel') ? { status: 'failed', reason: 'Order cancelled', filledQty: partQty, price: 151 } : { status: 'pending', filledQty: partQty }; },
-    async cancelOrder(id) { calls.push(['cancel', id]); return { status: 'cancelled' }; },
+    async cancelOrder(id) { calls.push(['cancel', id]); (this.cancelled ??= new Set()).add(id); return { status: 'cancelled' }; },
     async exitPosition(p) { calls.push(['exit', p.symbol]); return { id: 'GX1', status: 'pending' }; },
   };
 }
@@ -130,6 +130,24 @@ test('the gap CE exits at market at 09:16:00 whatever the colour: stop cancelled
   const t2 = stmt('SELECT status, reason FROM auto_trades WHERE id = ?').get(row.id);
   assert.equal(t2.status, 'closing');
   assert.match(t2.reason, /Fixed exit at 09:16 \(any candle colour\)/);
+  // The exit is sent only after Dhan reports the stop cancelled (else its RMS reads a short sale: 2 Nov 2026).
+  const order = dhan.calls.map(c => c[0] === 'status' ? `status:${c[1]}` : c[0]).filter(c => ['cancel', 'status:GS1', 'exit'].includes(c));
+  assert.deepEqual(order.slice(order.indexOf('cancel')), ['cancel', 'status:GS1', 'exit'], 'cancel → confirmed cancelled → exit');
+  assert.equal(JSON.parse(stmt('SELECT detail FROM auto_trades WHERE id = ?').get(row.id).detail).exitOrderId, 'GX1', 'exit order remembered');
+  // Flat on the next sync: the exit price comes from the exit order's fill.
+  setBook(uid, { positions: [], orders: [], funds: { available: 200000, used: 0 }, at: Date.now() });
+  const after = fakeDhan();
+  after.orderStatus = async id => id === 'GX1' ? { status: 'filled', price: 217.05, filledQty: 1170 } : { status: 'failed', filledQty: 0 };
+  await manageTrade(stmt('SELECT * FROM auto_trades WHERE id = ?').get(row.id), { now: ms('09:16:05'), adapter: after });
+  const t3 = stmt('SELECT status, exit_price FROM auto_trades WHERE id = ?').get(row.id);
+  assert.deepEqual([t3.status, t3.exit_price], ['closed', 217.05], 'the Exit column shows the fill');
+});
+
+test('a stop still pending after the cancel (3 s): no exit yet; one that sold first: nothing to exit', async () => {
+  const dhan = fakeDhan();
+  assert.equal(await stopGone(dhan, 'GS1', { tries: 3, waitMs: 1 }), null, 'Dhan still shows it pending');
+  dhan.orderStatus = async () => ({ status: 'filled', filledQty: 65, price: 94.75 });
+  assert.equal(await stopGone(dhan, 'GS1', { tries: 3, waitMs: 1 }), 'filled');
 });
 
 test('an unfilled limit is cancelled and the day is skipped', async (t) => {

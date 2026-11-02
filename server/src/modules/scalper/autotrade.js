@@ -1035,6 +1035,19 @@ async function emaScalpExitDue(trade, adapter, now) {
 
 const exitTry = new Map();   // trade id -> last exit attempt
 
+/**
+ * After cancelling a stop: its final status once Dhan no longer reports it pending (checked every 250 ms, up to 3 s),
+ * or null. 'filled' means it sold before the cancel landed: then there is nothing left to exit.
+ */
+export async function stopGone(adapter, orderId, { tries = 12, waitMs = 250 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const s = await adapter.orderStatus(orderId).catch(() => null);
+    if (s && s.status !== 'pending') return s.filledQty > 0 ? 'filled' : s.status;
+    await new Promise(r => setTimeout(r, waitMs));
+  }
+  return null;
+}
+
 /** Follow an open auto trade: notice the stop-loss fill, square off at cutoff, never leave a stray stop order. */
 export async function manageTrade(trade, { now = Date.now(), acct = accountFor(trade.user_id), adapter: given } = {}) {
   const uid = trade.user_id;
@@ -1065,7 +1078,11 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
       }
     }
     const stopped = sl?.status === 'filled';
-    update(trade.id, { status: 'closed', closed_at: now, exit_price: stopped ? Number(sl.price) || trade.sl_price : null,
+    // Our own exit (fixed exit, strategy exit, square-off): its fill price, from the exit order it last sent.
+    const exitId = !stopped && JSON.parse(trade.detail || '{}').exitOrderId;
+    const exited = exitId ? await adapter.orderStatus(exitId).catch(() => null) : null;
+    const exitPrice = stopped ? Number(sl.price) || trade.sl_price : exited?.status === 'filled' ? Number(exited.price) || null : null;
+    update(trade.id, { status: 'closed', closed_at: now, exit_price: exitPrice,
       reason: stopped ? 'Stop-loss hit' : trade.status === 'closing' ? trade.reason || 'Squared off' : 'Position closed outside the auto-trader' });
     notify(uid, { kind: 'risk', level: stopped ? 'warn' : 'info', title: `Algo Trading: ${trade.symbol} closed`,
       body: `${stopped ? `Stop-loss hit at ${Number(sl.price) || trade.sl_price}.` : trade.status === 'closing' ? `${trade.reason || 'Squared off'}.` : 'The position was closed outside the auto-trader; its stop-loss order was cancelled.'} The next ORB or EMA 5/9 crossover signal can trade with the stop-loss left for today.` });
@@ -1091,12 +1108,21 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
     if (sl?.status === 'pending') {
       const cancelled = await adapter.cancelOrder(trade.sl_order_id).then(() => true, () => false);
       if (!cancelled) return;   // try again on a later pass
+      // Wait until Dhan has really cancelled it: while the stop still holds the quantity, Dhan's RMS reads the exit
+      // as a fresh short sale and rejects it for margin (2 Nov 2026: "insufficient funds", the exit went 32 s late).
+      const gone = await stopGone(adapter, trade.sl_order_id);
+      if (!gone) { exitTry.delete(trade.id); return; }   // still pending: check again on the next pass
+      if (gone === 'filled') return;                     // (part) sold by the stop: the next pass sees the book
+
     } else if (sl?.status === 'filled') return;   // the stop is filling; the next pass sees it flat
   }
   const reason = trade.status === 'closing' ? trade.reason : `Square-off at ${squareOffTime(getRules(uid).active)} IST`;
   if (trade.status !== 'closing') update(trade.id, { status: 'closing', reason });
   await adapter.exitPosition(pos).then(
-    () => notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: exiting ${trade.symbol}`, body: `${reason}.` }),
+    r => {
+      if (r?.id) update(trade.id, { detail: JSON.stringify({ ...JSON.parse(trade.detail || '{}'), exitOrderId: r.id }) });
+      notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: exiting ${trade.symbol}`, body: `${reason}.` });
+    },
     e => notify(uid, { kind: 'risk', level: 'critical', title: `Could not square off ${trade.symbol}`, body: `${e.message}. Close it in the Dhan app.` }));
   syncAccount(acct, { force: true }).catch(() => {});
 }

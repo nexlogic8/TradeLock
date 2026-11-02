@@ -76,8 +76,8 @@ function fakeDhan({ premiumBars = [['10:00', 114, 118, 110.03, 117], ['10:05', 1
       return raw(['C1', 'P1'].includes(securityId) ? premiumBars : []);
     },
     async placeOrder(o) { calls.push(['order', o]); return { id: o.type === 'STOP_LOSS' ? 'S1' : 'E1', status: 'pending' }; },
-    async orderStatus(id) { calls.push(['status', id]); return id === 'E1' ? { status: 'filled', price: 120.5 } : { status: this.slStatus, price: 109.8 }; },
-    async cancelOrder(id) { calls.push(['cancel', id]); return { status: 'cancelled' }; },
+    async orderStatus(id) { calls.push(['status', id]); return id === 'E1' ? { status: 'filled', price: 120.5 } : this.cancelled?.has(id) ? { status: 'failed', filledQty: 0 } : { status: this.slStatus, price: 109.8 }; },
+    async cancelOrder(id) { calls.push(['cancel', id]); (this.cancelled ??= new Set()).add(id); return { status: 'cancelled' }; },
     async exitPosition(p) { calls.push(['exit', p.symbol]); return { id: 'X1', status: 'pending' }; },
   };
 }

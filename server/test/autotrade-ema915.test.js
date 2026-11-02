@@ -75,8 +75,8 @@ function fakeDhan(spot) {
       return q.securityId === '13' ? asRaw(spot) : asRaw([{ time: at('10:05'), open: 104, high: 121, low: 110.03, close: 118 }]);
     },
     async placeOrder(o) { calls.push(['order', o]); return { id: o.type === 'STOP_LOSS' ? 'S1' : 'E1', status: 'pending' }; },
-    async orderStatus(id) { return id === 'E1' ? { status: 'filled', price: 120.5 } : { status: 'pending' }; },
-    async cancelOrder(id) { calls.push(['cancel', id]); return { status: 'cancelled' }; },
+    async orderStatus(id) { return id === 'E1' ? { status: 'filled', price: 120.5 } : this.cancelled?.has(id) ? { status: 'failed', filledQty: 0 } : { status: 'pending' }; },
+    async cancelOrder(id) { calls.push(['cancel', id]); (this.cancelled ??= new Set()).add(id); return { status: 'cancelled' }; },
     async exitPosition(p) { calls.push(['exit', p.symbol]); return { id: 'X1', status: 'pending' }; },
   };
 }
