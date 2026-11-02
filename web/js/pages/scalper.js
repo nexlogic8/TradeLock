@@ -86,8 +86,11 @@ export const STRATEGIES = [
   ['ema25', 'EMA 5/9 1m', 'Scalp: EMA 5 / EMA 9 crossover on the 1-minute chart (up: CE, down: PE); the opposite crossover is the exit. Chart signal only'],
   ['ema35', 'EMA 3/5 1m', 'Scalp: EMA 3 / EMA 5 crossover on the 1-minute chart (up: CE, down: PE); the opposite crossover is the exit. Chart signal and backtest'],
 ];
+// Chart strategy signals are for administrators only; other users get clean charts (server: lib/access.js).
+const isAdmin = () => !!store.get().user?.admin;
 const strategyPrefs = () => {
-  const out = Object.fromEntries(STRATEGIES.map(([key]) => [key, true]));
+  const out = Object.fromEntries(STRATEGIES.map(([key]) => [key, isAdmin()]));
+  if (!isAdmin()) return out;
   try { Object.assign(out, JSON.parse(localStorage.getItem('tradelock.scalper.strategies') || '{}')); } catch { /* defaults */ }
   return out;
 };
@@ -105,6 +108,7 @@ function strategyChecks(ui) {
   return STRATEGIES.map(([key, label, hint]) => html`<button type="button" class="scm-check" role="menuitemcheckbox" data-strategy="${key}" aria-checked="${String(on[key] !== false && !hammerOff(key))}" title="${hammerOff(key) ? 'Needs the 1-minute chart, which is switched off for now' : hint}" ${hammerOff(key) ? 'disabled' : ''}><i aria-hidden="true"></i><b>${label}</b></button>`);
 }
 function strategySwitches(ui) {
+  if (!isAdmin()) return '';
   const on = ui.strategies || {};
   return html`<div class="scalper-control sc-strategies"><small>Strategies</small><div class="sc-strategy-list" role="group" aria-label="Chart strategies">${STRATEGIES.map(([key, label, hint]) =>
     html`<button type="button" class="sc-strategy" role="switch" data-strategy="${key}" aria-checked="${String(on[key] !== false && (key !== 'hammer' || INTERVALS.some(([v]) => v === '1')))}" title="${key === 'hammer' && !INTERVALS.some(([v]) => v === '1') ? 'Needs the 1-minute chart, which is switched off for now' : hint}" ${key === 'hammer' && !INTERVALS.some(([v]) => v === '1') ? 'disabled' : ''}><i aria-hidden="true"></i>${label}</button>`)}</div></div>`;
@@ -239,11 +243,11 @@ export default {
           <div class="scm-bar scm-index">
             ${scmMenu('index', 'Index', current, UNDERLYINGS.map(([key, label]) => [key, label]))}
             <b class="scm-px" data-spot>${money(d.underlying.ltp)}</b>
-            <button type="button" class="scm-tool" data-scm-strats aria-haspopup="menu" aria-expanded="false" title="Chart strategies">Strategy<span aria-hidden="true">▾</span></button>
+            ${isAdmin() ? html`<button type="button" class="scm-tool" data-scm-strats aria-haspopup="menu" aria-expanded="false" title="Chart strategies">Strategy<span aria-hidden="true">▾</span></button>` : ''}
             <button type="button" class="scm-tool scm-fx" data-studies="spot" aria-haspopup="dialog" title="Indicators">ƒx</button>
             ${scmMenu('interval', 'Chart interval', ctx.ui.interval, INTERVALS.map(([v, l]) => [v, l, l.replace(' min', 'm').replace('1 hour', '1h')]))}
             ${scmMenu('span', 'Chart history', chartSpan, SPANS.map(([k, l, hint]) => [k, `${l} · ${hint.replace(' (last session when the market is closed)', '')}`, l]))}
-            <div class="scm-strat-pop" data-scm-strat-pop role="menu" aria-label="Chart strategies" hidden>${strategyChecks(ctx.ui)}</div>
+            ${isAdmin() ? html`<div class="scm-strat-pop" data-scm-strat-pop role="menu" aria-label="Chart strategies" hidden>${strategyChecks(ctx.ui)}</div>` : ''}
           </div>
           <div class="scm-bar scm-side">
             <button type="button" class="scm-side-pick" data-open-sheet="chain" title="Option chain: pick another strike"><b class="scm-ce">${optionLabel(ce, 'CE')}</b><b class="scm-pe">${optionLabel(pe, 'PE')}</b><span class="scm-px"><b class="scm-ce" data-ltp="ce">${money(ce?.ltp)}</b><b class="scm-pe" data-ltp="pe">${money(pe?.ltp)}</b></span><span class="scm-caret" aria-hidden="true">▾</span></button>
@@ -895,7 +899,7 @@ function chartPanel(name, instrument, key, _candles, spot, interval = '5', order
   const exchange = instrument?.exchangeSegment?.startsWith('BSE') ? 'BSE' : 'NSE';
   const heading = key === 'spot' ? `${instrument.symbol} · ${interval} · IDX` : instrument ? `${instrument.underlying || 'NIFTY'} ${instrument.expiry} ${instrument.strike} ${instrument.option} · ${interval} · ${exchange}` : `${name} · Select an option`;
   const { fast, slow } = emaPeriods(interval);
-  const subtitle = key === 'spot' ? (showsHammerMarkers(interval) ? 'EMA45 wick-touch hammer + 5m opening-range breakout arrows · next candle confirms' : ['5'].includes(String(interval)) ? `EMA ${fast} / EMA ${slow} · 5m opening-range breakout arrows · hammer signals on 1-minute` : `EMA ${fast} / EMA ${slow} · breakout and hammer arrows show on the 1- and 5-minute charts`) : instrument?.symbol || name;
+  const subtitle = key === 'spot' && !isAdmin() ? `EMA ${fast} / EMA ${slow}` : key === 'spot' ? (showsHammerMarkers(interval) ? 'EMA45 wick-touch hammer + 5m opening-range breakout arrows · next candle confirms' : ['5'].includes(String(interval)) ? `EMA ${fast} / EMA ${slow} · 5m opening-range breakout arrows · hammer signals on 1-minute` : `EMA ${fast} / EMA ${slow} · breakout and hammer arrows show on the 1- and 5-minute charts`) : instrument?.symbol || name;
   const live = key === 'spot' ? html`<span class="sc-hdr-index"><strong data-spot>${money(instrument?.ltp || 0)}</strong><em class="${(instrument?.ltp || 0) >= (_candles?.at?.(-1)?.open || instrument?.ltp || 0) ? 'pos' : 'neg'}">Live index</em></span>` : '';
   return html`<section class="panel sc-chart-panel" data-chart-panel="${key}"><header><span><b>${heading}${live}</b><small>${subtitle}</small></span><span class="sc-chart-ltp" data-ltp="${key}">${money(instrument?.ltp || 0)}</span>${order ? html`<span class="sc-hdr-order" title="${order.reason}"><button type="button" class="btn btn-sm sc-hdr-sell" data-order-side="SELL" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Sell <small data-hdr-funds="${key}-sell">${order.sell}</small></button><span class="sc-hdr-lots" data-hdr-lots="${key}">${order.lots} lot${order.lots === 1 ? '' : 's'}</span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Buy <small data-hdr-funds="${key}-buy">${order.buy}</small></button></span>` : ''}</header><div class="sc-chart-meta"><button type="button" class="sc-ind sc-ind-add" data-studies="${key}" title="Add or change indicators" aria-haspopup="dialog">ƒx Indicators</button><span class="sc-legend" data-legend="${key}"></span><span>Spot <b>${money(spot)}</b></span><span>${key === 'spot' ? 'PCR' : 'OI'} <b class="oi-value">--</b></span><span class="sc-chart-count" data-candle-count></span></div><div class="sc-studies-pop" data-studies-pop="${key}" role="dialog" aria-label="Indicators" hidden></div><div class="sc-chart-host" data-chart="${key}" role="img" aria-label="${name} live candlestick chart"></div><div class="sc-chart-controls" aria-label="Chart zoom controls"><span>TIME</span><button type="button" data-chart-control="x-out" aria-label="Zoom time out" title="Zoom out on time axis">-</button><button type="button" data-chart-control="x-in" aria-label="Zoom time in" title="Zoom in on time axis">+</button><span>PRICE</span><button type="button" data-chart-control="y-out" aria-label="Zoom price out" title="Zoom out on price axis">-</button><button type="button" data-chart-control="y-in" aria-label="Zoom price in" title="Zoom in on price axis">+</button><button type="button" data-chart-control="reset" aria-label="Reset chart zoom" title="Back to the selected session (1D / 5D)">Reset</button></div></section>`;
 }

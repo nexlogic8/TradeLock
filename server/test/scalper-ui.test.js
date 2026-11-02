@@ -1,6 +1,20 @@
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
 const page = (await import('../../web/js/pages/scalper.js')).default;
+const { store } = await import('../../web/js/core/store.js');
+store.set({ user: { admin: true } });   // administrators see the chart strategies; the user view is tested at the end
+
+test('users (not administrators): no strategy switches or signal subtitles, clean charts', () => {
+  store.set({ user: { admin: false } });
+  try {
+    const data = { expiry:'2026-10-15',expiries:['2026-10-15'],asOf:Date.now(),marketOpen:true,
+      underlying:{ltp:25010,candles:[]}, strikes:[], selectedCharts:{ce:[],pe:[]}, broker:{connected:false} };
+    const view = String(page.view({data,ui:{interval:'5',ceCandles:[],peCandles:[],quantity:1},el:{}}));
+    assert.doesNotMatch(view,/data-strategy="orb"|data-scm-strats|Chart strategies/);
+    assert.doesNotMatch(view,/breakout arrows|hammer/i);
+    assert.match(view,/EMA 9 \/ EMA 21/);
+  } finally { store.set({ user: { admin: true } }); }
+});
 
 test('Power Scalper renders the three-chart workspace, chain and one-tap order tickets', () => {
   const call = { securityId:'101',exchangeSegment:'NSE_FNO',symbol:'NIFTY 2026-10-15 25000 CE',strike:25000,option:'CE',expiry:'2026-10-15',ltp:125.5 };
