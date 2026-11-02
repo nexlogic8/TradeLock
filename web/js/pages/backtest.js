@@ -156,6 +156,9 @@ export default {
       if(last.strategy===EMA915_KEY) ema915FromRun(ui,last);
       if(last.strategy===CUSTOM_KEY) customFromRun(ui,last);
     }
+    // Users (not administrators): Gap open 09:15 only (server: lib/access.js).
+    if(ui.caps?.admin===false && ui.strategy!==GAP_KEY) { ui.strategy=GAP_KEY; if(ui.result?.strategy!==GAP_KEY) ui.result=null; }
+    if(ui.caps?.admin===false) ui.savedRuns=(ui.savedRuns||[]).filter(run=>run.strategy===GAP_KEY);
     return {};
   },
   view(ctx) {
@@ -174,7 +177,7 @@ export default {
       <section class="panel pad bt-controls">
         <div class="strategy-section-head"><span class="strategy-step">01</span><div><h3>Backtest setup</h3><p>Choose a rule set, historical range and exit logic.</p></div><span class="pill sm ice">NIFTY 50 | 1 MIN</span></div>
         <div class="bt-form">
-          <label class="strategy-field"><span>Strategy</span><select class="input" data-bt-field="strategy" aria-label="Backtest strategy">${strategies.filter(([key])=>key!==GAP_KEY||ui.caps?.gap).map(([key,label])=>html`<option value="${key}" ${ui.strategy===key&&!(key===CUSTOM_KEY&&builtInPicked(ui))?'selected':''}>${label}</option>`)}${builtIns(ui).map(x=>html`<option value="${x.id}" ${ui.strategy===CUSTOM_KEY&&ui.custom?.strategyId===x.id?'selected':''}>${x.name.replace(' (built-in)','')}: entry and exit on the crossover</option>`)}</select></label>
+          <label class="strategy-field"><span>Strategy</span><select class="input" data-bt-field="strategy" aria-label="Backtest strategy">${strategies.filter(([key])=>ui.caps?.admin!==false||key===GAP_KEY).map(([key,label])=>html`<option value="${key}" ${ui.strategy===key&&!(key===CUSTOM_KEY&&builtInPicked(ui))?'selected':''}>${label}</option>`)}${(ui.caps?.admin===false?[]:builtIns(ui)).map(x=>html`<option value="${x.id}" ${ui.strategy===CUSTOM_KEY&&ui.custom?.strategyId===x.id?'selected':''}>${x.name.replace(' (built-in)','')}: entry and exit on the crossover</option>`)}</select></label>
           <label class="strategy-field"><span>Quick range</span><select class="input" data-bt-field="range" aria-label="Quick date range"><option value="1m" ${ui.range==='1m'?'selected':''}>1 month</option><option value="2m" ${ui.range==='2m'?'selected':''}>2 months</option><option value="6m" ${ui.range==='6m'?'selected':''}>6 months</option><option value="1y" ${ui.range==='1y'?'selected':''}>1 year</option><option value="5y" ${ui.range==='5y'?'selected':''}>5 years (max)</option><option value="custom" ${ui.range==='custom'?'selected':''}>Custom dates</option></select></label>
           <label class="strategy-field"><span>Start date</span><input class="input" type="date" data-bt-field="startDate" aria-label="Backtest start date" value="${ui.startDate}" min="${earliestIntradayDate()}" max="${ui.endDate}"></label>
           <label class="strategy-field"><span>End date</span><input class="input" type="date" data-bt-field="endDate" aria-label="Backtest end date" value="${ui.endDate}" min="${ui.startDate}" max="${todayIst()}"></label>

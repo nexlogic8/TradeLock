@@ -46,8 +46,31 @@ test('users can switch Gap but not the private strategies; the Gap backtest is a
   assert.equal(gap.status, 200);
   const off = await post(`/api/brokers/${acct.id}/strategies`, { orb: false });
   assert.equal(off.status, 200, 'switching a private strategy off is always allowed');
-  const bt = await post('/api/scalper/backtest-runs', { strategy: 'gap', startDate: '2026-10-01', endDate: '2026-10-30' });
-  assert.equal(bt.status, 400);
+  const orbBt = await post('/api/scalper/backtest-runs', { strategy: 'orb5', startDate: '2026-10-01', endDate: '2026-10-30' });
+  assert.equal(orbBt.status, 400);
+  assert.match((await orbBt.json()).message, /Only the Gap open 09:15 backtest/);
+  // Gap runs (here it stops at the missing history, not at access), with the live strategy's settings forced.
+  const gapBt = await post('/api/scalper/backtest-runs', { strategy: 'gap', startDate: '2026-10-01', endDate: '2026-10-30', strike: -3, exitCandle: '5m' });
+  assert.doesNotMatch((await gapBt.json()).message || '', /not available on your account|Only the Gap/);
   const caps = await (await fetch(`${base}/api/scalper/backtest-capabilities`, { headers: { Cookie: user.cookie } })).json();
-  assert.equal(caps.gap, null, 'no Gap backtest settings for users');
+  assert.equal(caps.admin, false);
+  assert.deepEqual(Object.keys(caps.gap.defaults).sort(), ['capital', 'compound', 'dailySlPct', 'fundsUse', 'lotCap', 'slippage', 'squareOff'], 'no strike / exit / entry settings');
+});
+
+test('a user\'s saved Gap run carries totals only: no trades, no-trade days or strategy settings', async () => {
+  const user = await signup('user3@example.com');
+  const metrics = { gap: true, sessions: 20, signals: 9, oneMinuteBars: 7500, coverage: { from: '2025-11-01', to: '2026-10-30' },
+    settings: { capital: 20000, compound: true, fundsUse: 80, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:00', strike: 2, exitCandle: '0916', lateEntryPct: 5 },
+    days: [{ day: '2026-10-29', side: null, reason: 'both gapped up' }],
+    best: { summary: { trades: 8, net: 1000 }, months: [{ month: '2026-10' }], equityCurve: [{ time: 1, value: 2 }], trades: [{ day: '2026-10-30', exitReason: 'Fixed exit 09:16' }] },
+    worst: { summary: { trades: 6, net: -500 }, months: [], equityCurve: [], trades: [{ day: '2026-10-30' }] } };
+  stmt(`INSERT INTO backtest_runs (user_id,strategy,start_date,end_date,horizon_bars,created_at,as_of,one_minute_bars,range_sessions,signal_count,metrics_json,candles_gzip,exit_logic,stop_logic)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(user.id, 'gap', '2026-10-01', '2026-10-30', 0, Date.now(), Date.now(), 7500, 20, 9, JSON.stringify(metrics), Buffer.from(''), 'horizon', 'none');
+  const [run] = await (await fetch(`${base}/api/scalper/backtest-runs`, { headers: { Cookie: user.cookie } })).json();
+  const m = run.metrics;
+  assert.equal(m.public, true);
+  assert.deepEqual([m.best.trades, m.worst.trades, m.days], [[], [], []]);
+  assert.equal(m.best.summary.net, 1000);
+  assert.equal(m.best.equityCurve.length, 1);
+  assert.deepEqual([m.settings.strike, m.settings.exitCandle, m.settings.lateEntryPct], [undefined, undefined, undefined]);
 });
