@@ -106,6 +106,8 @@ export const AUTO = Object.freeze({
   entryFundsUse: 0.95,   // ORB / EMA entries size on this share of the available funds
   gap: Object.freeze({ firstTick: true, leadMs: 300, pollMs: 5, restAfterMs: 800, restEveryMs: 1_000, requireGreen: false, checkAfterMs: 2_000, windowMs: 20_000, prefetchMs: 70_000,
     fillPollMs: 200, maxAttempts: 3, retryMs: 150, exitAt: '09:16',   // EXIT_AT: market exit at this IST time, any candle colour (null: opposite candle)
+    // BLOCK_PAD: a broker blocks a market buy this far above the last price (27 Oct: ₹101 a unit at ₹88.10).
+    blockPad: 0.15,
     fundsUse: 0.80, lotCap: false, market: true, marketBand: 0.15, padPct: 0, minPad: 0, minStopPct: 0.01 }),
   // Pre-open (accounts with Gap 09:15 on): at CHECK_AT a notification says what 09:15 will do, or what will stop it; at
   // ROUTE_AT a trading broker that does not answer is replaced by the other one (Dhan <-> linked StoxKart) when that one
@@ -899,11 +901,12 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const funds = Number(getBook(uid).funds?.available);
   if (!(funds > 0)) return skip('Dhan did not report the available funds, so the trade cannot be sized.');
   const freeze = AUTO.freezeQty[u.key] || AUTO.maxQty;
-  // The Risk rules' Capital per trade when it is on (never more than the funds; a refusal for funds is re-sized below),
-  // else FUNDS_USE of the funds.
-  const cap = risk.budget?.capitalLimit ?? null, spend = cap != null ? Math.min(cap, funds) : funds * G.fundsUse;
+  // The Risk rules' Capital per trade when it is on, else FUNDS_USE of the funds. Either way no more than the broker can
+  // block for a market buy (the premium + BLOCK_PAD, 98% of the funds), so the first order is not refused for funds.
+  const cap = risk.budget?.capitalLimit ?? null, fits = funds * 0.98 / (1 + G.blockPad);
+  const spend = Math.min(cap != null ? cap : funds * G.fundsUse, fits);
   let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
-  if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < funds ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
+  if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < fits ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
   // Stop-loss room per unit: what the Risk rules still allow to lose today, spread over the whole quantity.
   const today = dayState(uid), budget = riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
   if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The day's stop-loss left (₹${budget}) is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);
