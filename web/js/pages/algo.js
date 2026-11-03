@@ -22,7 +22,7 @@ const strategies = () => builtInFor(isAdmin()).filter(s => s.auto);
 const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
 
 // Compact row: name, tag, ⓘ for the full rules, on/off switch.
-function strategyRow(s, a, open) {
+function strategyRow(s, a, open, rules) {
   const on_ = !!a?.[s.flag];
   return html`
     <div class="algo-strat ${on_ ? 'on' : ''}">
@@ -31,6 +31,20 @@ function strategyRow(s, a, open) {
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
+      ${s.key === 'gap' ? gapLockRow(a, rules) : ''}
+    </div>`;
+}
+
+/** Inside the Gap open 09:15 row: the kill switch on a day the strategy has no entry. */
+function gapLockRow(a, rules) {
+  const on_ = !!a?.gapLockOn;
+  return html`
+    <div class="algo-strat-head algo-strat-sub">
+      <span class="algo-strat-name"><b>Kill switch if no entry</b><small>${on_
+        ? 'No Gap entry today (no gap, skipped or not filled): the Dhan kill switch locks trading for the rest of the day.'
+        : 'Off: a day without a Gap entry leaves the account open for trading.'}${on_ && !rules?.killSwitch
+        ? html` <span class="warn">Needs the kill switch on in <a href="/rules" data-nav="rules">Risk rules</a>.</span>` : ''}</small></span>
+      <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="Kill switch on a day without a Gap open 09:15 entry" data-gap-lock-toggle ${a ? '' : 'disabled'}></button>
     </div>`;
 }
 
@@ -90,21 +104,10 @@ export default {
             </div>
           </div>
         </section>
-        <section class="panel pad algo-manual-card">
-          <div class="algo-strat algo-manual ${a?.gapLockOn ? 'on' : ''}">
-            <div class="algo-strat-head">
-              <span class="algo-strat-name"><b>Kill switch if no Gap entry</b><small>${a?.gapLockOn
-                ? `On a day Gap open 09:15 does not enter (no gap, skipped or not filled), the Dhan kill switch locks trading for the rest of the day.`
-                : 'Off: a day without a Gap open 09:15 entry leaves the account open for trading.'}${a?.gapLockOn && !d.rules.killSwitch
-                ? html` <span class="warn">Needs the kill switch on in <a href="/rules" data-nav="rules">Risk rules</a>.</span>` : ''}</small></span>
-              <button class="switch" type="button" role="switch" aria-checked="${String(!!a?.gapLockOn)}" aria-label="Kill switch on a day without a Gap open 09:15 entry" data-gap-lock-toggle ${a ? '' : 'disabled'}></button>
-            </div>
-          </div>
-        </section>
         </div>
         <section class="panel pad">
           <h3 class="panel-title">Strategies <a class="algo-strat-link" href="/strategy" data-nav="strategy">All strategies ${icon('arrow')}</a></h3>
-          <div class="algo-strat-list">${STRATEGIES.map(s => strategyRow(s, a, !!ctx.ui.info?.[s.key]))}</div>
+          <div class="algo-strat-list">${STRATEGIES.map(s => strategyRow(s, a, !!ctx.ui.info?.[s.key], d.rules))}</div>
         </section>
       </div>
 

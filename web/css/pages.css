@@ -1604,6 +1604,8 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .algo-strat-list .algo-strat { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; opacity: .75; }
 .algo-strat-list .algo-strat.on { opacity: 1; border-color: var(--mint-soft); }
 .algo-strat-list .algo-strat-head { margin: 0; }
+.algo-strat-list .algo-strat-sub { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.algo-strat-sub .algo-strat-name b { font-size: 13px; }
 .algo-strat-name { flex: 1; min-width: 0; }
 .algo-strat-name b { display: block; font-size: 14px; }
 .algo-strat-name small { color: var(--muted); font-size: 12px; }
