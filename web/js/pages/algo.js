@@ -90,6 +90,17 @@ export default {
             </div>
           </div>
         </section>
+        <section class="panel pad algo-manual-card">
+          <div class="algo-strat algo-manual ${a?.gapLockOn ? 'on' : ''}">
+            <div class="algo-strat-head">
+              <span class="algo-strat-name"><b>Kill switch if no Gap entry</b><small>${a?.gapLockOn
+                ? `On a day Gap open 09:15 does not enter (no gap, skipped or not filled), the Dhan kill switch locks trading for the rest of the day.`
+                : 'Off: a day without a Gap open 09:15 entry leaves the account open for trading.'}${a?.gapLockOn && !d.rules.killSwitch
+                ? html` <span class="warn">Needs the kill switch on in <a href="/rules" data-nav="rules">Risk rules</a>.</span>` : ''}</small></span>
+              <button class="switch" type="button" role="switch" aria-checked="${String(!!a?.gapLockOn)}" aria-label="Kill switch on a day without a Gap open 09:15 entry" data-gap-lock-toggle ${a ? '' : 'disabled'}></button>
+            </div>
+          </div>
+        </section>
         </div>
         <section class="panel pad">
           <h3 class="panel-title">Strategies <a class="algo-strat-link" href="/strategy" data-nav="strategy">All strategies ${icon('arrow')}</a></h3>
@@ -191,6 +202,18 @@ export default {
         const { account } = await post(`/brokers/${id}/strategies`, { manual: next });
         syncTopbar(account);
         toast(next ? 'Manual trades allowed alongside Algo Trading.' : 'Manual trades blocked while Algo Trading is on.', 'ok');
+        await refresh();
+      } catch (err) { toastError(err); b.disabled = false; }
+    }, signal);
+
+    on(el, 'click', '[data-gap-lock-toggle]', async (_, b) => {
+      const id = ctx.data.account?.id, next = b.getAttribute('aria-checked') !== 'true';
+      if (!id) return;
+      b.disabled = true;
+      try {
+        const { account } = await post(`/brokers/${id}/strategies`, { gapLock: next });
+        syncTopbar(account);
+        toast(next ? 'The kill switch locks the day when Gap open 09:15 has no entry.' : 'A day without a Gap entry no longer locks the account.', 'ok');
         await refresh();
       } catch (err) { toastError(err); b.disabled = false; }
     }, signal);

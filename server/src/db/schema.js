@@ -730,4 +730,6 @@ export const MIGRATIONS = [
   ALTER TABLE risk_rules ADD COLUMN algo_config TEXT;
   UPDATE risk_rules SET algo_config = config;
   `,
+  // Kill switch when the Gap open 09:15 strategy has no entry that day (on by default).
+  `ALTER TABLE broker_accounts ADD COLUMN gap_lock INTEGER NOT NULL DEFAULT 1;`,
 ];

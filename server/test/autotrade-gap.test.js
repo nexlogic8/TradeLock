@@ -322,8 +322,13 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     acct = { ...acct, orb_on: 1 };
     await run(orb, '2026-10-12');
     assert.ok(!orb.calls.some(c => c[0] === 'killswitch'), 'ORB still to trade today: no lock');
+
+    const off2 = withKill('2026-10-09');
+    acct = { ...acct, orb_on: 0, gap_lock: 0 };
+    await run(off2, '2026-10-09');
+    assert.ok(off2.calls.some(c => c[0] === 'quotes') && !off2.calls.some(c => c[0] === 'killswitch'), '"Kill switch if no Gap entry" off: no lock');
   } finally {
-    acct = { ...acct, orb_on: 0 };
+    acct = { ...acct, orb_on: 0, gap_lock: 1 };
     saveRules(uid, rules, undefined, null, 'algo');
     patchDay(uid, today, { ks_armed: null, ks_active_at: null });
   }

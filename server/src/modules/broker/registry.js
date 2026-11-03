@@ -122,6 +122,7 @@ export function accountSummary(acct) {
     gapOn: acct.gap_on === 1,
     ema915On: acct.ema915_on === 1,
     manualOn: acct.manual_on === 1,
+    gapLockOn: acct.gap_lock !== 0,
     tradeVia: acct.trade_via === 'stoxkart' ? 'stoxkart' : acct.broker,
     algoUnderlyings: String(acct.algo_underlying || 'NIFTY').split(','),
     lastSyncAt: getBook(acct.user_id).at ?? acct.last_sync_at,   // the DB copy is only refreshed every 30 s

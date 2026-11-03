@@ -731,13 +731,14 @@ async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, ui
 }
 
 /**
- * No Gap 09:15 entry today (no gap, not checked, skipped, not filled or rejected): with the kill switch rule on and no
+ * No Gap 09:15 entry today (no gap, not checked, skipped, not filled or rejected): with "Kill switch if no Gap entry"
+ * (gap_lock) and the kill switch rule on, and no
  * other strategy left to trade today, the broker's kill switch locks the account for the rest of the day (armed until
  * flat, if anything is open).
  */
 export function lockAfterNoGapEntry(acct, adapter) {
   const a = withAllowedStrategies(acct);
-  if (a.orb_on || a.cross_on || a.ema915_on || !getRules(acct.user_id).active?.killSwitch?.on || !getSubscription(acct.user_id)?.active) return;
+  if (acct.gap_lock === 0 || a.orb_on || a.cross_on || a.ema915_on || !getRules(acct.user_id).active?.killSwitch?.on || !getSubscription(acct.user_id)?.active) return;
   tryKillSwitch(acct.user_id, acct, 'gap:no-entry', adapter).catch(e => console.error('[autotrade] kill switch', e.message));
 }
 

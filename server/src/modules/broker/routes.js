@@ -160,6 +160,8 @@ export function brokerRoutes(r) {
     if (ctx.body.ema915 !== undefined) change.ema915_on = v.bool(ctx.body.ema915, 'EMA 9/15 5m') ? 1 : 0;
     // Manual trades while Algo Trading runs: on or off at any time, also during the session.
     if (ctx.body.manual !== undefined) change.manual_on = v.bool(ctx.body.manual, 'Manual trades') ? 1 : 0;
+    // Kill switch on a day the Gap open 09:15 strategy has no entry.
+    if (ctx.body.gapLock !== undefined) change.gap_lock = v.bool(ctx.body.gapLock, 'Kill switch if no Gap entry') ? 1 : 0;
     // Indices to trade: any combination of NIFTY, BANKNIFTY and SENSEX, at least one.
     const picked = ctx.body.underlyings ?? (ctx.body.underlying !== undefined ? [ctx.body.underlying] : undefined);
     if (picked !== undefined) {
