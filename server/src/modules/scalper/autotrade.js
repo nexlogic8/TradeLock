@@ -10,7 +10,8 @@
 //   the ATM CE or PE whose PREMIUM gapped up (first trade above its previous close) is bought (both or neither → no
 //   trade); no wait for the premium to stay green (gap.requireGreen). The feed silent → Dhan's quotes, polled about once a
 //   second from 09:15:00.8, decide instead. A rejected entry is placed again (up to MAX_ATTEMPTS; fewer lots for funds).
-//   MARKET buy (always fills), sized at 80% of the available funds at the premium now: a broker blocks a market order
+//   MARKET buy (always fills), sized at the Risk rules' Capital per trade (at most the funds), or with that rule off at
+//   80% of the available funds, at the premium now: a broker blocks a market order
 //   well above the last price in a fast open (27 Oct: about ₹101 a unit at ₹88.10, so 90% was refused), and a refusal
 //   for funds is retried at once with the lots that fit. StoxKart takes no API market orders: there it goes as a limit
 //   MARKET_BAND above the first-tick price (no extra price request). No lot cap (sliced above the freeze).
@@ -898,10 +899,11 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const funds = Number(getBook(uid).funds?.available);
   if (!(funds > 0)) return skip('Dhan did not report the available funds, so the trade cannot be sized.');
   const freeze = AUTO.freezeQty[u.key] || AUTO.maxQty;
-  // FUNDS_USE of the funds, within the Risk rules' Capital per trade when it is on.
-  const cap = risk.budget?.capitalLimit ?? null, spend = Math.min(funds * G.fundsUse, cap ?? Infinity);
+  // The Risk rules' Capital per trade when it is on (never more than the funds; a refusal for funds is re-sized below),
+  // else FUNDS_USE of the funds.
+  const cap = risk.budget?.capitalLimit ?? null, spend = cap != null ? Math.min(cap, funds) : funds * G.fundsUse;
   let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
-  if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < funds * G.fundsUse ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
+  if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < funds ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
   // Stop-loss room per unit: what the Risk rules still allow to lose today, spread over the whole quantity.
   const today = dayState(uid), budget = riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
   if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The day's stop-loss left (₹${budget}) is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);

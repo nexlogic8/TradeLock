@@ -232,6 +232,16 @@ test('Capital per trade (Risk rules) caps the Gap entry below 80% of the funds',
     assert.equal(r.entered, true, JSON.stringify(r));
     const buy = dhan.calls.find(c => c[0] === 'order')[1];
     assert.equal(buy.qty, 325, '₹50,000 ÷ (≈₹150 × 65) = 5 lots, not the 16 that 80% of ₹2,00,000 buys');
+    // Above 80%: the rule decides, not the built-in 80% (₹1,80,000 ÷ (₹150 × 65) = 18 lots).
+    stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+    flatBook();
+    saveRules(uid, { ...active, capitalUse: { on: true, mode: 'amount', value: 180000 } });
+    const more = fakeDhan();
+    more.optionExpiries = async () => ['2026-10-13'];
+    const at2 = x => Date.parse(`2026-10-07T${x}+05:30`);
+    const r2 = await scanForEntry(acct, { now: at2('09:15:02'), adapter: more, pause: noPause, instruments });
+    assert.equal(r2.entered, true, JSON.stringify(r2));
+    assert.equal(more.calls.find(c => c[0] === 'order')[1].qty, 1170);
   } finally { saveRules(uid, active); }
 });
 
