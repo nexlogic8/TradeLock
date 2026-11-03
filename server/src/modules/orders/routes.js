@@ -74,6 +74,8 @@ export function ordersRoutes(r) {
       productType: b.productType,
     };
     if (order.type === 'LIMIT') order.price = v.num(b.price, 'Limit price', { min: 0.05, max: 1_000_000 });
+    // The live premium the ticket was sized at (market orders): checked against Capital per trade, not sent to the broker.
+    const sizedAt = b.ltp != null ? v.num(b.ltp, 'Price', { min: 0.05, max: 1_000_000 }) : null;
 
     const acct = requireAccount(ctx.user.id);
     const t = ist();
@@ -87,6 +89,7 @@ export function ordersRoutes(r) {
       pnl: s.realized + s.unrealized,
       minutes: marketOpen() ? t.minutes : null,
       capital: capitalFor(ctx.user.id, s),
+      price: sizedAt,
       paused: !!s.paused,
       killSwitchActive: !!s.ks_active_at || getKillStatus(ctx.user.id)?.active === true,
       pauseReason: s.pause_reason,

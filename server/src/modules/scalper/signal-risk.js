@@ -1,4 +1,4 @@
-import { limitAmount } from '../rules/limits.js';
+import { limitAmount, capitalLimit } from '../rules/limits.js';
 import { ist } from '../../lib/time.js';
 import { confirmedRangeBreakouts } from '../../../../web/js/pages/scalper-chart-signals.js';
 
@@ -64,7 +64,7 @@ export function signalBudget(rules, capital, pnl = 0) {
   const perTrade = Math.floor(daily / rules.maxTrades.value * 100) / 100;
   return { capital, daily, trades: rules.maxTrades.value, dailyPct: daily / capital * 100,
     percent: daily / rules.maxTrades.value / capital * 100, perTrade,
-    available: Math.max(0, Math.min(perTrade, daily + Math.min(0, pnl))) };
+    available: Math.max(0, Math.min(perTrade, daily + Math.min(0, pnl))), capitalLimit: capitalLimit(rules, capital) };
 }
 
 export function sizeSwingTrade(candles, { entry, tickSize, lotSize, budget, funds, now = Date.now(), beforeTime, intervalMs = 300_000 }) {

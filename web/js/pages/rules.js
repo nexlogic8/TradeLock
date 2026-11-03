@@ -7,7 +7,7 @@ import { ruleTip, tipValues } from '../ui/ruletips.js';
 import { toast } from '../ui/toast.js';
 import { store } from '../core/store.js';
 
-const DEFAULT_PCT = { maxLoss: 5, profitLock: 10 };
+const DEFAULT_PCT = { maxLoss: 5, profitLock: 10, capitalUse: 80 };
 const CUTOFFS = ['14:30', '14:45', '15:00', '15:10', '15:15', '15:20'];
 const clone = o => JSON.parse(JSON.stringify(o));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -34,7 +34,7 @@ function row(key, title, line, r, input, tv) {
 /** Start / Stop Protection, like Start / Stop Algo Trading: the same switch as "Protection" in the top bar. */
 function protCard(d, f) {
   const broker = d?.broker, label = broker?.label || 'broker', running = !!broker && broker.agentOn !== false;
-  const on = ['maxLoss', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', 'optionSl', 'cutoff', 'killSwitch'].filter(k => f?.[k]?.on).length;
+  const on = ['maxLoss', 'capitalUse', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', 'optionSl', 'cutoff', 'killSwitch'].filter(k => f?.[k]?.on).length;
   const locked = running && d?.agentLock;
   const state = !broker ? ['Not connected', 'grey'] : locked ? ['Locked today', 'amber'] : running ? ['Protecting', ''] : ['Stopped', 'ice'];
   const text = !broker ? 'Connect a broker so TradeLock can watch your trades against these rules.'
@@ -46,7 +46,7 @@ function protCard(d, f) {
       <div class="algo-control-copy">
         <span class="pill ${state[1]}"><span class="dot ${running && d?.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
         <h2>Protection</h2>
-        <p>${text} <span class="prot-count">${on} of 8 rules on.</span></p>
+        <p>${text} <span class="prot-count">${on} of 9 rules on.</span></p>
       </div>
       ${locked ? html`<button class="btn btn-ghost algo-start prot-locked" type="button" data-prot="locked">${icon('lock')}Locked until next trading day</button>`
         : html`<button class="btn ${running ? 'btn-danger' : 'btn-primary'} algo-start" type="button" data-prot="${running ? 'stop' : 'start'}" ${broker ? '' : 'disabled'}>
@@ -78,6 +78,7 @@ const amountText = (r, capital) => {
 const shortAmount = (r, c) => { const v = limitOf(r, c); return v == null ? 'your limit' : inr(v); };
 const LINES = {
   maxLoss: (f, c) => `Exit all at −${shortAmount(f.maxLoss, c)} today`,
+  capitalUse: (f, c) => `Use at most ${shortAmount(f.capitalUse, c)} in one trade`,
   profitLock: (f, c) => `Stop for the day at +${shortAmount(f.profitLock, c)}`,
   maxTrades: () => 'Pause new orders after this many entries',
   lossStreak: () => 'Stop after this many losses in a row',
@@ -144,6 +145,7 @@ export default {
         ${setSwitch(ctx)}
         <div class="srules-head"><span class="muted small">Starting capital today</span><span class="srules-save" id="save-msg" aria-live="polite"></span><b class="num">${capital > 0 ? inr(capital) : 'not known yet'}</b></div>
         ${row('maxLoss', 'Daily stop‑loss', LINES.maxLoss(f, capital), f.maxLoss, moneyInput('maxLoss', f.maxLoss), tv)}
+        ${row('capitalUse', 'Capital per trade', LINES.capitalUse(f, capital), f.capitalUse, moneyInput('capitalUse', f.capitalUse), tv)}
         ${row('profitLock', 'Profit target', LINES.profitLock(f, capital), f.profitLock, moneyInput('profitLock', f.profitLock), tv)}
         ${row('maxTrades', 'Trades per day', LINES.maxTrades(), f.maxTrades, countInput('maxTrades', f.maxTrades, 'trades'), tv)}
         ${row('lossStreak', 'Losing streak', LINES.lossStreak(), f.lossStreak, countInput('lossStreak', f.lossStreak, 'losses'), tv)}
@@ -217,7 +219,7 @@ export default {
       const cap = capital();
       // Convert so the rupee limit stays the same when capital is known.
       if (mode === 'percent') r.value = cap > 0 ? Math.max(0.1, Math.round((r.value / cap) * 1000) / 10) : DEFAULT_PCT[key];
-      else r.value = cap > 0 ? Math.max(100, Math.round(limitOf(r, cap))) : key === 'maxLoss' ? 5000 : 10000;
+      else r.value = cap > 0 ? Math.max(key === 'capitalUse' ? 1000 : 100, Math.round(limitOf(r, cap))) : key === 'maxLoss' ? 5000 : key === 'capitalUse' ? 50000 : 10000;
       r.mode = mode;
       ctx.paint(); save();
     }, signal);
@@ -227,7 +229,7 @@ export default {
       const n = r.mode === 'percent' || i.dataset.value === 'optionSl' ? parseFloat(i.value.replace(/[^\d.]/g, '')) : Number(i.value.replace(/[^\d]/g, ''));
       r.value = Number.isFinite(n) ? n : 0;
       // Keep the rupee amounts in the short lines in step while typing (give-back follows the stop-loss).
-      for (const k of ['maxLoss', 'profitLock', 'giveback', 'optionSl']) {
+      for (const k of ['maxLoss', 'capitalUse', 'profitLock', 'giveback', 'optionSl']) {
         const line = $(`#line-${k}`, el);
         if (line) line.textContent = LINES[k](ui.form, capital());
       }
@@ -248,6 +250,7 @@ function withDefaults(rules) {
   f.lossStreak ??= { on: false, value: 2 };
   f.giveback ??= { on: false, value: 20 };
   f.optionSl ??= { on: true, value: 20 };
+  f.capitalUse ??= { on: false, mode: 'percent', value: 80 };
   delete f.giveback.minProfit;   // old setting: give-back now arms at the stop-loss amount
   return f;
 }

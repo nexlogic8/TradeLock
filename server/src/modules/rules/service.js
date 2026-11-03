@@ -22,6 +22,9 @@ export const DEFAULT_RULES = Object.freeze({
   // Power Scalper option sizing: the stop is this % below the premium, and lots are sized so that
   // stop loses at most the per-trade budget (daily stop-loss ÷ trades per day).
   optionSl:   { on: true, value: 20 },
+  // Most one trade may use (premium × quantity): a share of the day's starting capital or a fixed amount. Automatic
+  // entries and Power Scalper lots are sized within it; a bigger order is refused.
+  capitalUse: { on: false, mode: 'percent', value: 80 },
 });
 
 export const MONEY_MODES = ['percent', 'amount'];
@@ -35,10 +38,18 @@ export const RULE_ACTIONS = {
 
 export const RULE_NAMES = {
   maxLoss: 'daily loss limit', maxTrades: 'trade cap', profitLock: 'profit lock', cutoff: 'trading cutoff',
-  lossStreak: 'losing-streak rule', giveback: 'profit give-back rule', optionSl: 'option SL room',
+  lossStreak: 'losing-streak rule', giveback: 'profit give-back rule', optionSl: 'option SL room', capitalUse: 'capital per trade limit',
 };
 
 const STRENGTH = { alert: 0, pause: 1, exit: 2 };
+
+function capitalUse(r) {
+  const mode = v.oneOf(r.mode ?? DEFAULT_RULES.capitalUse.mode, 'capitalUse.mode', MONEY_MODES);
+  const value = mode === 'percent'
+    ? v.num(r.value ?? DEFAULT_RULES.capitalUse.value, 'Capital per trade (% of starting capital)', { min: 1, max: 100 })
+    : v.num(r.value, 'Capital per trade', { min: 1000, max: 100_000_000 });
+  return { on: v.bool(r.on ?? false, 'capitalUse.on'), mode, value: Math.round(value * 100) / 100 };
+}
 
 export function normalizeRules(input = {}) {
   const g = k => input[k] || {};
@@ -71,6 +82,7 @@ export function normalizeRules(input = {}) {
       on: v.bool(g('optionSl').on ?? DEFAULT_RULES.optionSl.on, 'optionSl.on'),
       value: v.num(g('optionSl').value ?? DEFAULT_RULES.optionSl.value, 'Option SL room', { min: 1, max: 90 }),
     },
+    capitalUse: capitalUse(g('capitalUse')),
   };
 }
 
@@ -80,6 +92,12 @@ export function normalizeRules(input = {}) {
  */
 export function loosens(cur, next, capital = null) {
   if (cur.killSwitch?.on && !next.killSwitch?.on) return true;
+  // A bigger (or no) capital limit per trade allows bigger orders.
+  if (cur.capitalUse?.on) {
+    if (!next.capitalUse?.on) return true;
+    const a = limitAmount(cur.capitalUse, capital), b = limitAmount(next.capitalUse, capital);
+    if (a == null || b == null ? cur.capitalUse.mode !== next.capitalUse.mode || next.capitalUse.value > cur.capitalUse.value : b > a) return true;
+  }
   // A tighter option SL means more lots for the same rupee budget, and turning sizing on allows orders.
   const curSl = cur.optionSl ?? DEFAULT_RULES.optionSl, nextSl = next.optionSl ?? DEFAULT_RULES.optionSl;
   if (!curSl.on && nextSl.on) return true;

@@ -1,13 +1,13 @@
 // Pure pre-trade check for orders routed through TradeLock.
 import { toMinutes } from '../../lib/time.js';
 import { RULE_NAMES } from '../rules/service.js';
-import { limitAmount } from '../rules/limits.js';
+import { limitAmount, capitalLimit } from '../rules/limits.js';
 
 const block = (code, reason) => ({ ok: false, code, reason });
 
 /**
  * @param order { symbol, side: 'BUY'|'SELL', qty }
- * @param s     { rules, positions, orders, entryInFlight, entries, pnl, minutes, capital, paused, pauseReason, killSwitchActive, subscriptionActive }
+ * @param s     { rules, positions, orders, entryInFlight, entries, pnl, minutes, capital, price (premium the order was sized at), paused, pauseReason, killSwitchActive, subscriptionActive }
  */
 export function checkOrder(order, s) {
   const pos = s.positions.find(p => p.symbol === order.symbol && p.qty !== 0);
@@ -35,6 +35,11 @@ export function checkOrder(order, s) {
   const lossLimit = limitAmount(rules.maxLoss, s.capital);
   if (rules.maxLoss.on && lossLimit && -s.pnl >= lossLimit) {
     return block('LOSS_LIMIT', 'Your daily loss limit is reached. Only exits are allowed.');
+  }
+  // Capital per trade: a buy's value (its limit price, else the premium it was sized at) within the limit.
+  const cap = capitalLimit(rules, s.capital), px = Number(order.price ?? s.price);
+  if (cap != null && order.side === 'BUY' && px > 0 && order.qty * px > cap + 0.01) {
+    return block('CAPITAL_LIMIT', `This order uses ₹${Math.round(order.qty * px).toLocaleString('en-IN')}, more than your ₹${Math.round(cap).toLocaleString('en-IN')} capital per trade. Use fewer lots.`);
   }
   // One trade at a time: no new entry while a position is open, an order is pending, or one is being placed.
   const open = s.positions.find(p => p.qty !== 0);

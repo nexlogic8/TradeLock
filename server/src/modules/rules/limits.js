@@ -18,3 +18,6 @@ export const limitsFor = (rules, capital) => ({
   maxLoss: limitAmount(rules.maxLoss, capital),
   profitLock: limitAmount(rules.profitLock, capital),
 });
+
+/** Most one trade may use in rupees (Capital per trade), or null when that rule is off or capital is not known yet. */
+export const capitalLimit = (rules, capital) => (rules?.capitalUse?.on ? limitAmount(rules.capitalUse, capital) : null);

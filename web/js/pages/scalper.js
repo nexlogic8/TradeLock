@@ -600,7 +600,7 @@ export default {
       const busy = runningTrade(ctx.state, ui);
       if (busy) { toast(busy, 'warn'); return; }
       if (!size.lots) { showError(size.reason); return; }
-      sendOrder({ side, contract:{ ...contract }, lots:size.lots, qty:size.lots * lotSize });
+      sendOrder({ side, contract:{ ...contract }, lots:size.lots, qty:size.lots * lotSize, ltp:contract.ltp });
     }, signal);
     // Market order at the auto-sized lots, sent on the tap. The buttons lock at once (orderInFlight)
     // so a double tap cannot send twice.
@@ -611,7 +611,7 @@ export default {
       const what = `${order.side} ${order.lots} lot${order.lots === 1 ? '' : 's'} (${order.qty}) ${order.contract.symbol}`;
       try {
         const result = await post('/orders', { symbol:order.contract.symbol, securityId:order.contract.securityId,
-          exchangeSegment:order.contract.exchangeSegment, side:order.side, qty:order.qty, type:'MARKET', productType:'INTRADAY' });
+          exchangeSegment:order.contract.exchangeSegment, side:order.side, qty:order.qty, type:'MARKET', productType:'INTRADAY', ...(order.ltp > 0 ? { ltp:order.ltp } : {}) });
         toast(`${what} sent to Dhan (${result.order?.id || 'pending'}).`, 'ok');
         showError('');
       } catch (e) { ui.orderInFlight = 0; updateTickets(ctx); showError(e.message); toastError(e); }
@@ -919,7 +919,9 @@ export function autoSize(item, lotSize, risk) {
   const sl = round2(item.ltp * (1 - slPct / 100)), riskPerLot = round2((item.ltp - sl) * lotSize), allowed = Number(budget.available);
   const base = { sl, slPct, riskPerLot, allowed, perTrade:budget.perTrade, trades:budget.trades, dailyPct:budget.dailyPct };
   if (!(allowed > 0)) return { ...base, lots:0, reason:'Daily loss limit reached: no new risk today.' };
-  const lots = Math.floor(allowed / riskPerLot);
+  const byRisk = Math.floor(allowed / riskPerLot), cap = Number(budget.capitalLimit) > 0 ? Number(budget.capitalLimit) : null;
+  const lots = cap != null ? Math.min(byRisk, Math.floor(cap / (item.ltp * lotSize) + 1e-9)) : byRisk;
+  if (!lots && byRisk && cap != null) return { ...base, lots:0, reason:`One lot costs ${rupees(item.ltp * lotSize)}, more than your ${rupees(cap)} capital per trade.` };
   if (!lots) return { ...base, lots:0, reason:`One lot risks ${rupees(riskPerLot)} at a ${slPct}% SL, more than the ${rupees(allowed)} per-trade budget.` };
   return { ...base, lots, risk:round2(lots * riskPerLot), capital:round2(lots * lotSize * item.ltp) };
 }

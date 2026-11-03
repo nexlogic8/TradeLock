@@ -76,6 +76,13 @@ const DIAGRAMS = {
       <text class="d-t d-muted" x="14" y="112">lots = ${esc(perTrade)} ÷ (₹${Math.round(slPct * 100) / 100} × lot size)</text>`);
   },
 
+  capitalUse: ({ capCap, capUse }) => svg(`
+    <rect class="d-closed" x="14" y="40" width="232" height="22" rx="5"/>
+    <rect class="d-open" x="14" y="40" width="${Math.max(8, Math.min(232, 232 * capUse / 100))}" height="22" rx="5"/>
+    <text class="d-t d-muted" x="16" y="30">Starting capital</text>
+    <text class="d-t d-mint-t" x="16" y="80">One trade: up to ${esc(capCap)}</text>
+    <text class="d-t d-muted" x="14" y="104">Lots are sized to fit; a bigger order is refused.</text>`),
+
   killSwitch: ({ broker }) => svg(`
     <rect class="d-phone" x="28" y="10" width="58" height="96" rx="10"/>
     <rect class="d-lockbody" x="44" y="54" width="26" height="20" rx="4"/><path class="d-locktop" d="M49 54v-7a8 8 0 0 1 16 0v7"/>
@@ -94,6 +101,7 @@ const TEXT = {
   giveback: 'Protects profit you already booked. If the day falls this far from its best point, TradeLock exits and stops you.',
   cutoff: 'Avoids late, rushed trades. After this time no new entries are allowed; your open trades and their stop-losses stay.',
   killSwitch: 'Uses your broker’s own kill switch, so you cannot trade from the broker app either after a limit is hit.',
+  capitalUse: 'The most one trade may use (premium × quantity). Gap, ORB and EMA entries and Power Scalper lots are sized to fit inside it, and a bigger order is refused, however much is in your broker account.',
   optionSl: 'Power Scalper sizes every option buy so that a fall of this much in the premium loses at most your per-trade budget (daily stop-loss ÷ trades per day). Lots follow the live premium; you never type them.',
 };
 
@@ -115,5 +123,7 @@ export const tipValues = (f, capital, limitOf, broker) => ({
   time: f.cutoff.value,
   broker,
   slPct: f.optionSl?.value ?? 20,
+  capCap: f.capitalUse && limitOf(f.capitalUse, capital) != null ? inr(limitOf(f.capitalUse, capital)) : 'your limit',
+  capUse: f.capitalUse?.mode === 'percent' ? f.capitalUse.value : capital > 0 && f.capitalUse ? Math.min(100, f.capitalUse.value / capital * 100) : 50,
   perTrade: limitOf(f.maxLoss, capital) != null && f.maxTrades.value > 0 ? inr(limitOf(f.maxLoss, capital) / f.maxTrades.value) : 'per-trade budget',
 });

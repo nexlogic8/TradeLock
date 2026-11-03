@@ -218,6 +218,23 @@ test('the stop comes from the Risk rules: no daily stop-loss left → no trade',
   } finally { saveRules(uid, active); }
 });
 
+test('Capital per trade (Risk rules) caps the Gap entry below 80% of the funds', async (t) => {
+  const at = x => Date.parse(`2026-10-08T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  const active = getRules(uid).active;
+  saveRules(uid, { ...active, capitalUse: { on: true, mode: 'amount', value: 50000 } });
+  try {
+    const dhan = fakeDhan();
+    dhan.optionExpiries = async () => ['2026-10-13'];
+    const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments });
+    if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+    assert.equal(r.entered, true, JSON.stringify(r));
+    const buy = dhan.calls.find(c => c[0] === 'order')[1];
+    assert.equal(buy.qty, 325, '₹50,000 ÷ (≈₹150 × 65) = 5 lots, not the 16 that 80% of ₹2,00,000 buys');
+  } finally { saveRules(uid, active); }
+});
+
 test('live ticks: the 09:15:02 decision uses feed ticks (no REST quote); the exit is the fixed 09:16 one', async (t) => {
   const D8 = '2026-10-28', at = x => Date.parse(`${D8}T${x}+05:30`);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
