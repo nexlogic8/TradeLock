@@ -105,11 +105,10 @@ async function execute(rec, acct) {
  * Brokers (Dhan) refuse the kill switch while positions or pending orders exist.
  * @returns {{ status: 'active'|'armed'|'failed', text: string }}
  */
-export async function tryKillSwitch(userId, acct, reason) {
+export async function tryKillSwitch(userId, acct, reason, adapter = acct && adapterFor(acct)) {
   const day = ist().day;
   const s = dayState(userId, day);
   if (s.ks_active_at) return { status: 'active', text: 'Kill switch is already active today.' };
-  const adapter = acct && adapterFor(acct);
   if (!adapter?.activateKillSwitch) return { status: 'failed', text: 'This broker does not offer a kill switch through its API. Lock trading in the broker app.' };
   try {
     if (adapter.getKillSwitch && (await adapter.getKillSwitch()) === true) {
@@ -127,7 +126,8 @@ export async function tryKillSwitch(userId, acct, reason) {
     patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
     audit(userId, 'killswitch.activated', { reason });
     notify(userId, { kind: 'risk', level: 'critical', title: `${adapter.label} kill switch activated`,
-      body: `Trading is locked on your ${adapter.label} account for the rest of the day${reason?.startsWith('rule:') ? `, after your ${RULE_NAMES[reason.slice(5)]} was reached` : ''}.` });
+      body: `Trading is locked on your ${adapter.label} account for the rest of the day${reason?.startsWith('rule:') ? `, after your ${RULE_NAMES[reason.slice(5)]} was reached`
+        : reason === 'gap:no-entry' ? ', as there was no Gap 09:15 entry today' : ''}.` });
     return { status: 'active', text: message || `${adapter.label} kill switch activated. Trading is locked for the rest of the day.` };
   } catch (e) {
     if (!s.ks_armed) patchDay(userId, day, { ks_armed: reason });

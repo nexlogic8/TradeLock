@@ -68,6 +68,7 @@ import { underlyingFor } from './underlyings.js';
 import { normalizeScalperCandles } from './routes.js';
 import { algoUnwatch, algoWatch, liveMinute, liveTick, onMinuteClose } from './live.js';
 import { isAdminUser, withAllowedStrategies } from '../../lib/access.js';
+import { tryKillSwitch } from '../emergency/service.js';
 
 export const AUTO = Object.freeze({
   tickMs: 5_000,
@@ -482,13 +483,14 @@ const nearIds = (chain, spot, n = 8) => Object.entries(chain?.oc || {}).map(([k,
   .flatMap(([, s]) => [s?.ce?.security_id, s?.pe?.security_id]).filter(Boolean).map(String);
 
 const gapNoticeDay = new Map();   // `${userId}:${index}` -> day the "no trade today" notice went out
-function gapNoTrade(acct, u, day, title, body) {
+function gapNoTrade(acct, adapter, u, day, title, body) {
   const k = `${acct.user_id}:${u.key}`;
   if (gapNoticeDay.get(k) === day) return;
   gapNoticeDay.set(k, day);
   const plain = !isAdminUser(acct.user_id);   // users: no premiums or gap figures
   notify(acct.user_id, { kind: 'risk', level: 'info', title, body: plain ? `${u.label}: no Gap 09:15 trade today.` : body });
   audit(acct.user_id, 'algo.gap_no_trade', { underlying: u.key, day, title, body });
+  lockAfterNoGapEntry(acct, adapter);
 }
 
 /**
@@ -513,7 +515,7 @@ async function gapCheck(acct, adapter, now, u, opts) {
   const lastTry = now > open + AUTO.gap.checkAfterMs + AUTO.gap.windowMs - 6_000;
   if (!q?.ltp || !prep?.chain) {   // retried on the next pass; at the end of the window, say so
     gapChecked.delete(key);
-    if (lastTry) gapNoTrade(acct, u, day, `Algo Trading: Gap 09:15 not checked today`, `${u.label}: ${!prep?.chain ? 'the option chain' : 'the index price'} was not available from Dhan by 09:15:${String(Math.round((AUTO.gap.checkAfterMs + AUTO.gap.windowMs) / 1000)).padStart(2, '0')}, so there was no gap check and no trade today.`);
+    if (lastTry) gapNoTrade(acct, adapter, u, day, `Algo Trading: Gap 09:15 not checked today`, `${u.label}: ${!prep?.chain ? 'the option chain' : 'the index price'} was not available from Dhan by 09:15:${String(Math.round((AUTO.gap.checkAfterMs + AUTO.gap.windowMs) / 1000)).padStart(2, '0')}, so there was no gap check and no trade today.`);
     return { skipped: 'gap check: no index price / option chain yet' };
   }
   // ATM strike at the index price now; each option's previous close = its last price in the chain fetched before the open.
@@ -528,7 +530,7 @@ async function gapCheck(acct, adapter, now, u, opts) {
   }
   if (!Object.values(atm).some(c => c && opt[c.securityId]?.open > 0)) {
     gapChecked.delete(key);
-    if (lastTry) gapNoTrade(acct, u, day, `Algo Trading: Gap 09:15 not checked today`, `${u.label}: no opening price for the ATM options by 09:15:22, so there was no gap check and no trade today.`);
+    if (lastTry) gapNoTrade(acct, adapter, u, day, `Algo Trading: Gap 09:15 not checked today`, `${u.label}: no opening price for the ATM options by 09:15:22, so there was no gap check and no trade today.`);
     return { skipped: 'gap check: no option opening price yet' };
   }
   const ticked = !!q.tick && Object.values(atm).every(c => !c || opt[c.securityId]?.tick);
@@ -550,7 +552,7 @@ function gapDecide(acct, adapter, u, { day, now, prep, index, atm, opt, source, 
     const line = x => (x ? `${x.strike} ${x === sides.CE ? 'CE' : 'PE'} ${x.prev ?? '—'} → open ${x.open ?? '—'} → ${x.ltp ?? '—'} at ${at}` : '');
     const green = AUTO.gap.requireGreen ? ' and stayed green' : '';
     const why = /both/.test(g.skip) ? `both premiums gapped up${green} (no clear side)` : `neither premium gapped up above its previous close${green}`;
-    gapNoTrade(acct, u, day, `Algo Trading: no Gap 09:15 trade today`,
+    gapNoTrade(acct, adapter, u, day, `Algo Trading: no Gap 09:15 trade today`,
       `${u.label} opened ${index.open ?? '—'} (${index.ltp} at ${at}), ATM ${sides.CE?.strike ?? sides.PE?.strike}: ${why}.\n${[line(sides.CE), line(sides.PE)].filter(Boolean).join('\n')}\n(previous close = ${sides.CE?.prevFrom || sides.PE?.prevFrom}).`);
     return { skipped: `gap check: no trade: ${g.skip}` };
   }
@@ -606,7 +608,7 @@ export async function gapFirstTick(acct, adapter, u, opts = {}, { clock = () => 
     }
     if (gapChecked.get(key) === day) return null;
     gapChecked.set(key, day);
-    gapNoTrade(acct, u, day, `Algo Trading: Gap 09:15 not checked today`, `${u.label}: ${prep?.chain ? 'no opening price for the ATM options' : 'the option chain was not available from Dhan'} by ${clockMs(end).slice(0, 8)}, so there was no gap check and no trade today.`);
+    gapNoTrade(acct, adapter, u, day, `Algo Trading: Gap 09:15 not checked today`, `${u.label}: ${prep?.chain ? 'no opening price for the ATM options' : 'the option chain was not available from Dhan'} by ${clockMs(end).slice(0, 8)}, so there was no gap check and no trade today.`);
     return { skipped: 'gap check: no opening prices in the window' };
   } finally { gapWatching.delete(key); }
 }
@@ -723,7 +725,20 @@ async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, ui
         body: t.entry_order_id ? `${e.message}. An entry order was sent: check Dhan for an open position without a stop-loss.` : e.message });
     }
     return { error: e.message };
+  } finally {
+    if (setup.strategy === 'Gap 09:15' && ['skipped', 'failed'].includes(row(id)?.status)) lockAfterNoGapEntry(acct, adapter);
   }
+}
+
+/**
+ * No Gap 09:15 entry today (no gap, not checked, skipped, not filled or rejected): with the kill switch rule on and no
+ * other strategy left to trade today, the broker's kill switch locks the account for the rest of the day (armed until
+ * flat, if anything is open).
+ */
+export function lockAfterNoGapEntry(acct, adapter) {
+  const a = withAllowedStrategies(acct);
+  if (a.orb_on || a.cross_on || a.ema915_on || !getRules(acct.user_id).active?.killSwitch?.on || !getSubscription(acct.user_id)?.active) return;
+  tryKillSwitch(acct.user_id, acct, 'gap:no-entry', adapter).catch(e => console.error('[autotrade] kill switch', e.message));
 }
 
 async function enter(acct, adapter, id, setup, direction, { now, pause, instruments }) {

@@ -12,6 +12,7 @@ const { buildRouter } = await import('../src/modules/index.js');
 const assert = (await import('node:assert/strict')).default;
 const { stmt } = await import('../src/db/index.js');
 const { setBook } = await import('../src/modules/broker/book.js');
+const { patchDay } = await import('../src/modules/risk/service.js');
 const { upsertAccount } = await import('../src/modules/broker/registry.js');
 const { saveRules, getRules } = await import('../src/modules/rules/service.js');
 const { gapPick, premiumGreen, gapExitCandle, scanForEntry, manageTrade, gapFirstTick, strikeFrom, stopGone, AUTO, FEED, GAP_LIVE } = await import('../src/modules/scalper/autotrade.js');
@@ -278,6 +279,54 @@ test('previous close = the previous session\'s last traded price (not NSE\'s off
   assert.match(n.body, /CE 145 → open 140/, 'uses the last trade 145, not the NSE close 125');
   assert.match(n.body, /neither premium gapped up/);
   assert.match(n.body, /previous close = last trade/);
+});
+
+test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch rule on; not when it is off or another strategy is on)', async (t) => {
+  const at = (day, x) => Date.parse(`${day}T${x}+05:30`), today = new Date(Date.now() + 19800e3).toISOString().slice(0, 10);
+  const withKill = day => {
+    const dhan = fakeDhan(), base = dhan.intradayCandles, last = { G1: 145, P1: 112 };   // neither premium gapped up: no trade
+    const t = Date.parse(`${day}T15:29:00+05:30`) / 1000 - 86400;   // their last trade the evening before
+    dhan.intradayCandles = async q => (last[q.securityId] ? { timestamp: [t], open: [last[q.securityId]], high: [last[q.securityId]], low: [last[q.securityId]], close: [last[q.securityId]] } : base.call(dhan, q));
+    dhan.optionExpiries = async () => ['2026-10-20'];
+    Object.assign(dhan, { label: 'Dhan', async getKillSwitch() { return false; }, async snapshot() { return { positions: [], orders: [], funds: { available: 200000 } }; },
+      async activateKillSwitch() { dhan.calls.push(['killswitch']); return { message: 'Kill switch activated' }; } });
+    return dhan;
+  };
+  const run = async (dhan, day) => {
+    stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+    patchDay(uid, today, { ks_armed: null, ks_active_at: null });
+    flatBook();
+    const r = await scanForEntry(acct, { now: at(day, '09:15:02'), adapter: dhan, pause: noPause, instruments });
+    await new Promise(res => setTimeout(res, 30));   // the lock is not awaited by the scan
+    return r;
+  };
+  const rules = getRules(uid).algo;
+  try {
+    const dhan = withKill('2026-10-14'), r = await run(dhan, '2026-10-14');
+    if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+    assert.ok(!dhan.calls.some(c => c[0] === 'order'), 'no trade');
+    assert.ok(dhan.calls.some(c => c[0] === 'killswitch'), `kill switch activated (${JSON.stringify(r)})`);
+    const s = stmt('SELECT ks_armed, ks_active_at FROM day_state WHERE user_id = ? AND day = ?').get(uid, today);
+    assert.equal(s.ks_armed, 'gap:no-entry');
+    assert.ok(s.ks_active_at > 0);
+    assert.match(stmt("SELECT body FROM notifications WHERE user_id = ? AND title LIKE '%kill switch activated%' ORDER BY id DESC").get(uid).body, /no Gap 09:15 entry today/);
+
+    saveRules(uid, { ...rules, killSwitch: { on: false } }, undefined, null, 'algo');
+    const off = withKill('2026-10-13');
+    const r2 = await run(off, '2026-10-13');
+    assert.ok(off.calls.some(c => c[0] === 'quotes') && !off.calls.some(c => c[0] === 'order'), `decided, no trade (${JSON.stringify(r2)})`);
+    assert.ok(!off.calls.some(c => c[0] === 'killswitch'), 'kill switch rule off: no lock');
+    saveRules(uid, rules, undefined, null, 'algo');
+
+    const orb = withKill('2026-10-12');
+    acct = { ...acct, orb_on: 1 };
+    await run(orb, '2026-10-12');
+    assert.ok(!orb.calls.some(c => c[0] === 'killswitch'), 'ORB still to trade today: no lock');
+  } finally {
+    acct = { ...acct, orb_on: 0 };
+    saveRules(uid, rules, undefined, null, 'algo');
+    patchDay(uid, today, { ks_armed: null, ks_active_at: null });
+  }
 });
 
 test('a refusal for funds re-sizes from what Dhan blocked per lot (2% spare); other refusals are not retried', async () => {
