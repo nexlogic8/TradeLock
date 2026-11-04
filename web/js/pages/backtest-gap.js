@@ -37,13 +37,13 @@ const STRIKES = [-3, -2, -1, 0, 1, 2, 3];
 
 export function gapDefaults(ui, caps) {
   const d = caps?.gap?.defaults || {};
-  ui.gap ??= { capital:d.capital ?? 100000, compound:d.compound ?? true, fundsUse:d.fundsUse ?? 90, dailySlPct:d.dailySlPct ?? 20, lotCap:d.lotCap ?? 0, slippage:d.slippage ?? 1, squareOff:d.squareOff ?? '15:15', costToCostR:d.costToCostR ?? 1, exitCandle:d.exitCandle ?? '0916', strike:d.strike ?? 0, lateEntryPct:d.lateEntryPct ?? 5, minGapPts:d.minGapPts ?? 0 };
+  ui.gap ??= { capital:d.capital ?? 100000, compound:d.compound ?? true, fundsUse:d.fundsUse ?? 90, dailySlPct:d.dailySlPct ?? 20, lotCap:d.lotCap ?? 0, slippage:d.slippage ?? 1, squareOff:d.squareOff ?? '15:15', costToCostR:d.costToCostR ?? 1, exitCandle:d.exitCandle ?? '0916', strike:d.strike ?? 0, lateEntryPct:d.lateEntryPct ?? 5, minGapPts:d.minGapPts ?? 0, tradeAmount:d.tradeAmount ?? 0 };
   ui.gapView ??= 'best';
 }
 /** Restore the form from a saved run's settings. */
 export function gapFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
-  ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0, minGapPts:s.minGapPts ?? 0 };
+  ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0, minGapPts:s.minGapPts ?? 0, tradeAmount:s.tradeAmount ?? 0 };
 }
 export const gapPayload = ui => ({ strategy:GAP_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.gap });
 /** Apply a change from a [data-gap-field] control. Returns true when handled. */
@@ -62,7 +62,7 @@ export function gapRunLabel(run) {
 export function gapRunFacts(run) {
   const m = run.metrics, s = m.settings || {};
   const bound = (label, x) => ({ label, value: `${inr(x?.net, true)} (${pct(x?.returnPct)})`, sub: `${inr(x?.startCapital)} → ${inr(x?.endCapital)}`, tone: x?.net });
-  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
+  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, !s.compound && s.tradeAmount > 0 ? `${inr(s.tradeAmount)} per trade` : `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
     trades: `${m.best?.summary.trades ?? 0} (${s.lateEntryPct ? 'late' : 'best'}) · ${m.worst?.summary.trades ?? 0} (worst)`, signals: m.signals, sessions: m.sessions,
     results: [bound(firstMode(s.lateEntryPct)[0], m.best?.summary), bound('Worst case', m.worst?.summary)] };
 }
@@ -72,7 +72,8 @@ export function gapFields(ui) {
   return html`
     ${field('Starting capital ₹', html`<input class="input" type="number" min="1000" step="1000" data-gap-field="capital" value="${g.capital}" aria-label="Starting capital in rupees">`)}
     ${field('Sizing', html`<select class="input" data-gap-field="compound" aria-label="Position sizing"><option value="compound" ${g.compound ? 'selected' : ''}>Compound: grows with the capital</option><option value="fixed" ${g.compound ? '' : 'selected'}>Fixed: always the starting capital</option></select>`)}
-    ${field('Capital used per trade %', html`<input class="input" type="number" min="1" max="100" step="1" data-gap-field="fundsUse" value="${g.fundsUse}" aria-label="Percent of capital used per trade">`)}
+    ${!g.compound ? field('Capital per trade ₹ (0 = use the %)', html`<input class="input" type="number" min="0" step="1000" data-gap-field="tradeAmount" value="${g.tradeAmount ?? 0}" aria-label="Rupees used per trade with fixed sizing; 0 to use the percent">`) : ''}
+    ${field('Capital used per trade %', html`<input class="input" type="number" min="1" max="100" step="1" data-gap-field="fundsUse" value="${g.fundsUse}" aria-label="Percent of capital used per trade" ${!g.compound && g.tradeAmount > 0 ? 'disabled' : ''}>`)}
     ${field('Daily stop-loss % of capital', html`<input class="input" type="number" min="0.1" max="100" step="0.5" data-gap-field="dailySlPct" value="${g.dailySlPct}" aria-label="Daily stop-loss in percent of capital">`)}
     ${field('Lot cap (0 = none)', html`<input class="input" type="number" min="0" step="1" data-gap-field="lotCap" value="${g.lotCap}" aria-label="Maximum lots per trade, 0 for no cap">`)}
     ${field('Slippage ₹ / unit (entry)', html`<input class="input" type="number" min="0" max="50" step="0.25" data-gap-field="slippage" value="${g.slippage}" aria-label="Entry slippage in rupees per unit">`)}

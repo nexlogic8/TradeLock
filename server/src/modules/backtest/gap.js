@@ -25,7 +25,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { niftyLotSize, weeklyExpiry } from '../scalper/option-backtest.js';
 
-export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0 });   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
+export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0 });   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
 export const GAP_MODES = Object.freeze({ best: 'Late entry: fill above the 09:15 open', worst: 'Worst case: fill at the 09:16 open' });
 
 const TICK = 0.05, UNDERLYING = 'NIFTY';
@@ -118,7 +118,9 @@ function run(store, startDate, endDate, s) {
       const k = mode === 'best' ? 0 : 1, e = D[k] && rows.get(D[k].time);
       if (!e) { b.skipped.push({ day: d, reason: 'option price missing' }); continue; }
       const lotSize = niftyLotSize(d), entry = r2(tick(e.open * (k ? 1 : 1 + (Number(s.lateEntryPct) || 0) / 100) + s.slippage)), basis = s.compound ? b.capital : s.capital;
-      const lots = Math.min(Math.floor(basis * s.fundsUse / 100 / (entry * lotSize)), s.lotCap > 0 ? s.lotCap : Infinity);
+      // Fixed sizing with a rupee amount: that much a trade, never more than the account holds that day.
+      const spend = !s.compound && s.tradeAmount > 0 ? Math.min(s.tradeAmount, b.capital) : basis * s.fundsUse / 100;
+      const lots = Math.min(Math.floor(spend / (entry * lotSize)), s.lotCap > 0 ? s.lotCap : Infinity);
       if (!(lots >= 1)) { b.skipped.push({ day: d, reason: 'capital too small for 1 lot' }); continue; }
       const qty = lots * lotSize, room = basis * s.dailySlPct / 100 / qty;
       if (room < entry * s.minStopPct / 100) { b.skipped.push({ day: d, reason: 'stop too tight' }); continue; }

@@ -132,3 +132,14 @@ test('minimum NIFTY gap: below the threshold (points, up or down) is no trade; a
   assert.equal(gapBacktest({ ...o, minGapPts: 0 }, s).best.trades.length, 1, '0 = any gap');
   s.close();
 });
+
+test('fixed sizing with a rupee amount: that much a trade (the % is not used); 0 = the %', () => {
+  const s = store();
+  const o = { lateEntryPct: 0, startDate: D2, endDate: D2, capital: 100000, compound: false, fundsUse: 90, exitCandle: '1m' };
+  const [t1] = gapBacktest({ ...o, tradeAmount: 30000 }, s).best.trades;
+  assert.equal(t1.lots, 4, '₹30,000 ÷ (111 × 65) = 4 lots');
+  assert.equal(gapBacktest({ ...o, tradeAmount: 0 }, s).best.trades[0].lots, 12, '0: 90% of ₹1L = 12 lots');
+  assert.equal(gapBacktest({ ...o, tradeAmount: 500000 }, s).best.trades[0].lots, 13, 'never more than the account holds: ₹1L ÷ 7,215 = 13 lots');
+  assert.equal(gapBacktest({ ...o, compound: true, tradeAmount: 30000 }, s).best.trades[0].lots, 12, 'compounding sizes by the %');
+  s.close();
+});
