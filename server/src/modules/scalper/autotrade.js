@@ -262,6 +262,16 @@ export function autoTradesToday(userId, day = ist().day) {
       FROM auto_trades WHERE user_id = ? AND day = ? ORDER BY id DESC`).all(userId, day);
 }
 
+/** Earlier days' automatic trades, newest first, with each one's P&L (before charges) when it has an entry and an exit. */
+export function autoTradeHistory(userId, today = ist().day, limit = 300) {
+  return stmt(`SELECT id, day, direction, status, reason, symbol, lots, qty, entry_price AS entryPrice, sl_price AS slPrice, exit_price AS exitPrice,
+      created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy
+      FROM auto_trades WHERE user_id = ? AND day < ? ORDER BY day DESC, id DESC LIMIT ?`).all(userId, today, limit)
+    .filter(t => !String(t.symbol || '').startsWith('TEST'))
+    .map(t => (t.entryPrice > 0 && t.exitPrice > 0 && t.qty > 0
+      ? { ...t, pnl: round2((t.exitPrice - t.entryPrice) * t.qty), pnlPct: round2((t.exitPrice / t.entryPrice - 1) * 100) } : { ...t, pnl: null, pnlPct: null }));
+}
+
 // Dhan allows one option-chain request per user every 3 seconds; the Power Scalper page shares it.
 const chainAt = new Map();
 async function chainCall(userId, fn) {

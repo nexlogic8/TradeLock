@@ -514,3 +514,19 @@ test('ITM2 on the first tick: the decision carries only the ATM ticks, so ITM2 i
     assert.ok(!dhan.calls.some(c => c[0] === 'quote' || c[0] === 'quotes'), 'no REST price request');
   } finally { Object.assign(FEED, saved); GAP_LIVE.strike = 0; }
 });
+
+test('Algo page history: earlier days only, newest first, with P&L and % when the trade has an entry and an exit', async () => {
+  const { autoTradeHistory } = await import('../src/modules/scalper/autotrade.js');
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  const add = (day, key, status, entry, exit, qty) => stmt(`INSERT INTO auto_trades (user_id, day, signal_key, direction, status, symbol, lots, qty, entry_price, exit_price, created_at)
+    VALUES (?, ?, ?, 'CE', ?, 'NIFTY X', ?, ?, ?, ?, ?)`).run(uid, day, key, status, qty / 65, qty, entry, exit, Date.parse(`${day}T09:15:01+05:30`));
+  add('2026-11-02', 'a', 'closed', 156.5, 217.05, 65);
+  add('2026-11-03', 'b', 'closed', 88.2, 101.03, 195);
+  add('2026-11-04', 'c', 'skipped', null, null, 2535);
+  add('2026-11-05', 'd', 'open', 200, null, 65);
+  const h = autoTradeHistory(uid, '2026-11-05');
+  assert.deepEqual(h.map(t => t.day), ['2026-11-04', '2026-11-03', '2026-11-02'], 'today is in Today, not in History');
+  assert.deepEqual([h[2].pnl, h[2].pnlPct], [3935.75, 38.69]);
+  assert.deepEqual([h[0].pnl, h[0].pnlPct], [null, null], 'no entry: no P&L');
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+});

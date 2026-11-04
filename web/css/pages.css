@@ -1553,6 +1553,7 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .algo-block .panel-title { margin-bottom: 14px; }
 .algo-strats { align-items: start; }
 .algo-trades .algo-reason { display: block; max-width: 260px; margin-top: 3px; color: var(--muted); font-size: 11px; white-space: normal; }
+.algo-history-sum { margin: 0 0 10px; }
 @media (max-width: 620px) {
   .algo-start { width: 100%; justify-content: center; }
   .algo-rules { grid-template-columns: 1fr; gap: 2px; }

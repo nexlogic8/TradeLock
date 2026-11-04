@@ -21,6 +21,28 @@ const strategies = () => builtInFor(isAdmin()).filter(s => s.auto);
 
 const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
 
+/** Earlier days' automatic trades: one row each, with its P&L (before charges), and the totals of the traded ones. */
+function historySection(rows) {
+  const traded = rows.filter(t => t.pnl != null), wins = traded.filter(t => t.pnl > 0).length;
+  const total = traded.reduce((a, t) => a + t.pnl, 0), used = traded.reduce((a, t) => a + t.entryPrice * t.qty, 0);
+  const money = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
+  return html`
+    <section class="panel pad algo-block">
+      <h3 class="panel-title">History</h3>
+      ${rows.length ? html`
+        <p class="muted small algo-history-sum">${traded.length} trade${traded.length === 1 ? '' : 's'} · ${wins} won · P&amp;L <b class="${total >= 0 ? 'pos' : 'neg'}">${money(total)}</b>${used ? ` (${(total / used * 100).toFixed(1)}% of the capital used)` : ''} · before charges</p>
+        <div class="bt-table-wrap"><table class="bt-table algo-trades">
+          <thead><tr><th>Date</th><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>%</th><th>Status</th></tr></thead>
+          <tbody>${rows.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
+            <td class="num">${t.day}</td><td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.exitPrice)}</td>
+            <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnl == null ? '—' : money(t.pnl)}</td>
+            <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnlPct == null ? '—' : `${t.pnlPct > 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%`}</td>
+            <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
+        : html`<p class="muted small" style="margin:0">No automatic trades on earlier days yet.</p>`}
+    </section>`;
+}
+
 // Compact row: name, tag, ⓘ for the full rules, on/off switch.
 function strategyRow(s, a, open, rules) {
   const on_ = !!a?.[s.flag];
@@ -125,7 +147,8 @@ export default {
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
           : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
-      </section>`;
+      </section>
+      ${historySection(d.history || [])}`;
   },
 
   // Follow the top-bar switch at once instead of waiting for the 15-second refresh.

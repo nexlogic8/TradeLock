@@ -7,7 +7,7 @@ import { getRules } from '../rules/service.js';
 import { limitAmount } from '../rules/limits.js';
 import { dayState, capitalFor } from '../risk/service.js';
 import { marketOpen } from '../../lib/time.js';
-import { autoTradesToday, riskLeft, squareOffTime, algoIndices } from './autotrade.js';
+import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices } from './autotrade.js';
 import { UNDERLYINGS } from './underlyings.js';
 
 /** Everything Algo Trading needs before it may place orders, as a checklist (all ok = may start). */
@@ -38,5 +38,6 @@ export function algoLive(userId, acct) {
     rules: { cutoff: rules.cutoff?.on ? rules.cutoff.value : null, squareOff: squareOffTime(rules), tradeCap: rules.maxTrades?.on ? rules.maxTrades.value : null,
       killSwitch: !!rules.killSwitch?.on, locked: !!(s.paused || s.ks_active_at) },
     trades: autoTradesToday(userId).filter(t => !String(t.symbol || '').startsWith('TEST')),
+    history: autoTradeHistory(userId),
   };
 }
