@@ -152,6 +152,31 @@ test('a stop still pending after the cancel (3 s): no exit yet; one that sold fi
   assert.equal(await stopGone(dhan, 'GS1', { tries: 3, waitMs: 1 }), 'filled');
 });
 
+test('4 Nov: the order status never shows the fill, but Dhan holds the position → taken over: stop-loss placed, trade open', async (t) => {
+  const at = x => Date.parse(`2026-10-06T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  const dhan = fakeDhan({ fills: false });
+  const place = dhan.placeOrder;
+  dhan.placeOrder = async o => (o.type === 'MARKET' ? (dhan.calls.push(['order', o]), { id: '0', status: 'pending' }) : place.call(dhan, o));
+  dhan.snapshot = async () => ({ positions: dhan.calls.some(c => c[0] === 'order' && c[1].type === 'MARKET') ? [{ securityId: 'G1', qty: 1040, avg: 151.2 }] : [] });
+  const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments });
+  if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+  assert.equal(r.entered, true, JSON.stringify(r));
+  const row = stmt('SELECT * FROM auto_trades WHERE user_id = ?').get(uid);
+  assert.deepEqual([row.status, row.qty, row.entry_price], ['open', 1040, 151.2], 'not "skipped": the held position is the trade');
+  const sl = dhan.calls.find(c => c[0] === 'order' && c[1].type === 'STOP_LOSS')?.[1];
+  assert.ok(sl && sl.qty === 1040, 'its stop-loss is at Dhan');
+  assert.ok(stmt("SELECT 1 FROM notifications WHERE user_id = ? AND title LIKE '%position found at Dhan%'").get(uid));
+  // Nothing held: still "not filled", as before.
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  const none = fakeDhan({ fills: false });
+  none.snapshot = async () => ({ positions: [] });
+  const r2 = await scanForEntry(acct, { now: Date.parse('2026-10-05T09:15:02+05:30'), adapter: none, pause: noPause, instruments });
+  assert.equal(r2.skipped, 'not filled', JSON.stringify(r2));
+});
+
 test('an unfilled limit is cancelled and the day is skipped', async (t) => {
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   flatBook();

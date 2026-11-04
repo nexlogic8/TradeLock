@@ -78,8 +78,8 @@ export const AUTO = Object.freeze({
   dataWaitMs: 40_000,        // ...and keep retrying this long if the closed minute is not in yet
   fillWaitMs: 15_000,
   slLimitBuffer: 0.10,       // stop-loss limit price = trigger − 10%
-  maxQty: 3510,              // NIFTY freeze quantity per order (NSE, from 5 Oct 2026)
-  freezeQty: { NIFTY: 3510, BANKNIFTY: 1440, SENSEX: 1000 },   // exchange freeze quantity per order, per index (NSE circular NSE/FAOP/76693, from 5 Oct 2026)
+  maxQty: 1755,              // NIFTY quantity per order at Dhan: above it Dhan splits the order (4 Nov 2026: 2,535 → 1,755 + 780)
+  freezeQty: { NIFTY: 1755, BANKNIFTY: 1440, SENSEX: 1000 },   // quantity per order, per index: above it the order goes through Dhan's slicing API (NIFTY: Dhan split at 1,755 on 4 Nov 2026)
   defaultSquareOff: '15:15',
   placingTimeoutMs: 120_000,
   // ORB 5m entry: 'close' = right after the confirming candle closes (it broke the breakout candle's high/low,
@@ -146,6 +146,8 @@ async function livePrice(uid, adapter, segment, securityId, now = Date.now()) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const round2 = n => Math.round(n * 100) / 100;
+// A Gap entry whose order status shows no fill: Dhan's positions are asked HELD_TRIES times, HELD_WAIT_MS apart.
+const HELD_TRIES = 4, HELD_WAIT_MS = 1_000;
 const roundTick = (n, tick) => Math.round(Math.round(n / tick) * tick * 10_000) / 10_000;
 
 /** The expiry after the nearest upcoming one (today counts as upcoming on expiry day). */
@@ -921,12 +923,36 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
 
+  // What Dhan holds of this contract (asked a few times, a fill can take a moment to show): before any "not filled",
+  // "rejected" or failed placement, so a position the order status missed (4 Nov: Dhan split the order and answered
+  // order id "0") is never left without its stop-loss and exit.
+  const held = async (tries = HELD_TRIES) => {
+    for (let k = 0; k < tries && adapter.snapshot; k++) {
+      const p = (await adapter.snapshot({ funds: false }).catch(() => null))?.positions?.find(x => String(x.securityId) === String(c.securityId) && x.qty > 0);
+      if (p) return { qty: p.qty, price: Number(p.avg) || null };
+      if (k < tries - 1) await (pause || sleep)(HELD_WAIT_MS);
+    }
+    return null;
+  };
+  const takeOver = h => {
+    qty = h.qty; lots = Math.round(qty / meta.lotSize);
+    update(id, { lots, qty });
+    notify(uid, { kind: 'risk', level: 'warn', title: `Algo Trading: Gap 09:15 ${direction} position found at Dhan`,
+      body: `${symbol}: the order status did not show the fill, but Dhan holds ${qty}. Placing its stop-loss and exit now.` });
+    audit(uid, 'algo.gap_took_over', { id, qty, price: h.price });
+    return { status: 'filled', price: h.price };
+  };
   entriesInFlight.add(uid);
   let fill;
   try {
     let placed;
     for (let attempt = 0; ; attempt++) {
-      placed = await adapter.placeOrder(order);
+      try { placed = await adapter.placeOrder(order); }
+      catch (e) {   // the order may still have gone through
+        const h = await held();
+        if (!h) throw e;
+        fill = takeOver(h); placed = null; break;
+      }
       update(id, { entry_order_id: String(placed.id), lots, qty });
       audit(uid, 'order.placed', { order, result: placed, auto: 'gap', attempt: attempt + 1 });
       // Confirmed by polling the order every FILL_POLL_MS.
@@ -961,10 +987,15 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
         fill = { status: 'filled', price: after.price };
         update(id, { lots, qty });
         notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: Gap 09:15 ${direction} partly filled`, body: `${symbol}: ${qty} of the ${how} traded within ${AUTO.fillWaitMs / 1000} seconds; the rest was cancelled. Trading the ${qty}.` });
-      } else { update(id, { status: 'skipped', reason: `The ${how} was not filled within ${AUTO.fillWaitMs / 1000} seconds; cancelled.`, closed_at: Date.now() });
-        notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: Gap 09:15 ${direction} not filled`, body: `${symbol} ${how} was not filled within ${AUTO.fillWaitMs / 1000} seconds and was cancelled. No trade today.` });
-        return { skipped: 'not filled', id }; }
+      } else {
+        const h = await held();
+        if (h) fill = takeOver(h);
+        else { update(id, { status: 'skipped', reason: `The ${how} was not filled within ${AUTO.fillWaitMs / 1000} seconds; cancelled.`, closed_at: Date.now() });
+          notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: Gap 09:15 ${direction} not filled`, body: `${symbol} ${how} was not filled within ${AUTO.fillWaitMs / 1000} seconds and was cancelled. No trade today.` });
+          return { skipped: 'not filled', id }; }
+      }
     }
+    if (fill.status === 'failed') { const h = await held(); if (h) fill = takeOver(h); }
     if (fill.status === 'failed') {
       update(id, { status: 'failed', reason: fill.reason || 'Entry order rejected', closed_at: Date.now() });
       notify(uid, { kind: 'risk', level: 'critical', title: `Algo Trading: ${symbol} buy rejected`, body: `Dhan rejected the entry${fill.reason ? `: ${fill.reason}` : ''}.` });

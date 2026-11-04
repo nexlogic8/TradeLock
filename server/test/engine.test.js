@@ -73,8 +73,9 @@ test('one order filled in many pieces is one entry', () => {
   assert.equal(countEntries(pieces.map((qty, i) => ({ symbol: 'NIFTY PE', side: 'BUY', qty, ts: 1000 + i * 30, orderId: 'O1' }))), 1);
   // ...and fills saved before order ids were kept (same symbol, side and second).
   assert.equal(countEntries(pieces.map(qty => ({ symbol: 'NIFTY PE', side: 'BUY', qty, ts: 5000 }))), 1);
-  // Two separate orders still count twice.
-  assert.equal(countEntries([{ symbol: 'A', side: 'BUY', qty: 1, ts: 1, orderId: 'O1' }, { symbol: 'A', side: 'BUY', qty: 1, ts: 2, orderId: 'O2' }]), 2);
+  // Two separate orders still count twice; orders seconds apart (a broker splitting one order) count once.
+  assert.equal(countEntries([{ symbol: 'A', side: 'BUY', qty: 1, ts: 1, orderId: 'O1' }, { symbol: 'A', side: 'BUY', qty: 1, ts: 60_001, orderId: 'O2' }]), 2);
+  assert.equal(countEntries([{ symbol: 'A', side: 'BUY', qty: 1, ts: 1, orderId: 'O1' }, { symbol: 'A', side: 'BUY', qty: 1, ts: 2, orderId: 'O2' }]), 1);
 });
 
 test('switching modes is judged in rupees when capital is known', () => {

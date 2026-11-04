@@ -76,14 +76,18 @@ export function evaluate(rules, s) {
   return out;
 }
 
+const SPLIT_LEG_MS = 10_000;   // fills of one split order land within seconds of each other
+
 /**
  * Counts entries: orders that open or add to a position. Exits do not count; a reversal counts once.
  * One order often fills in several pieces (exchange freeze quantity, liquidity), so fills of the same
- * order count once. Fills saved before order ids were kept are grouped by symbol, side and second.
+ * order count once, and so do the orders a broker split one order into (adding within SPLIT_LEG_MS of
+ * the entry). Fills saved before order ids were kept are grouped by symbol, side and second.
  */
 export function countEntries(fills) {
   const net = new Map();
   const counted = new Set();
+  const lastEntry = new Map();   // symbol → { side, ts } of the last counted entry
   let n = 0;
   for (const f of fills) {
     const cur = net.get(f.symbol) || 0;
@@ -91,7 +95,13 @@ export function countEntries(fills) {
     const next = cur + d;
     const opens = cur === 0 || Math.sign(d) === Math.sign(cur) || (next !== 0 && Math.sign(next) !== Math.sign(cur));
     const order = f.orderId ? `o:${f.orderId}` : `t:${f.symbol}|${f.side}|${Math.floor((f.ts || 0) / 1000)}`;
-    if (opens && !counted.has(order)) { counted.add(order); n++; }
+    // One order the broker split above the freeze quantity fills as several orders within seconds: one entry.
+    const prev = lastEntry.get(f.symbol);
+    const sameOrder = cur !== 0 && Math.sign(d) === Math.sign(cur) && prev?.side === f.side && Math.abs((f.ts || 0) - prev.ts) <= SPLIT_LEG_MS;
+    if (opens && !counted.has(order)) {
+      counted.add(order);
+      if (!sameOrder) { n++; lastEntry.set(f.symbol, { side: f.side, ts: f.ts || 0 }); }
+    }
     net.set(f.symbol, next);
   }
   return n;

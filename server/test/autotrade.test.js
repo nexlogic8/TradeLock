@@ -29,7 +29,7 @@ test('stop is one tick below the premium candle low; stop limit 10% below; whole
   assert.deepEqual(sizeOrbTrade({ entry: 120, stop: 110, lotSize: 65, budget: 3333.33, funds: 200000 }), { lots: 5, qty: 325, risk: 3250, premium: 39000 });
   assert.equal(sizeOrbTrade({ entry: 120, stop: 110, lotSize: 65, budget: 3333.33, funds: 20000 }).lots, 2, 'funds cap');
   assert.equal(sizeOrbTrade({ entry: 120, stop: 110, lotSize: 65, budget: 500, funds: 200000 }), null, 'one lot over budget');
-  assert.equal(sizeOrbTrade({ entry: 2, stop: 1, lotSize: 65, budget: 1e6, funds: 1e7 }).qty, 3510, 'freeze quantity 3,510 → 54 lots');
+  assert.equal(sizeOrbTrade({ entry: 2, stop: 1, lotSize: 65, budget: 1e6, funds: 1e7 }).qty, 1755, 'Dhan per-order quantity 1,755 → 27 lots');
 });
 
 test('each signal may risk all of the day stop-loss that is left; profits do not add to it', () => {
@@ -448,4 +448,13 @@ test('live ticks: ORB entry on the tick-built 5-minute candle right at the close
     assert.deepEqual(ex.calls.filter(c => c[0] === 'cancel' || c[0] === 'exit').map(c => c[0]), ['cancel', 'exit']);
     assert.match(stmt('SELECT reason FROM auto_trades WHERE id = ?').get(row.id).reason, /Two 5-minute closes below EMA 9/);
   } finally { Object.assign(FEED, saved); }
+});
+
+test('one order Dhan split into two (1,755 + 780 within seconds) is one entry; a second trade later is another', async () => {
+  const { countEntries } = await import('../src/modules/risk/engine.js');
+  const t0 = Date.parse('2026-11-04T09:15:01+05:30');
+  const leg = (orderId, qty, ts, side = 'BUY') => ({ symbol: 'NIFTY-Nov2026-23800-PE', side, qty, orderId, ts });
+  assert.equal(countEntries([leg('A', 1755, t0), leg('B', 780, t0 + 1000), leg('A', 0, t0 + 3000)].filter(f => f.qty)), 1);
+  assert.equal(countEntries([leg('A', 1755, t0), leg('B', 780, t0 + 1000), leg('S1', 2535, t0 + 70_000, 'SELL'), leg('C', 65, t0 + 600_000)]), 2);
+  assert.equal(countEntries([leg('A', 65, t0), leg('B', 65, t0 + 120_000)]), 2, 'adding to a position minutes later is a new entry');
 });

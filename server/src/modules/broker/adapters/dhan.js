@@ -57,6 +57,21 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
   };
   const registered = ip => (ip ? [ip.primaryIP, ip.secondaryIP].filter(Boolean) : []);
   const readIp = () => call('GET', '/ip/getIP').then(x => (Array.isArray(x) ? x[0] : x) || {});
+  // Dhan splits a plain order above its own freeze quantity (NIFTY 1,755 on 4 Nov 2026) and then answers orderId "0":
+  // the orders it made are read back from the order book (same contract and side, placed in the last minute, newest
+  // first, adding up to the quantity). Not found: no ids (the caller treats the order as unknown).
+  async function orderIds(ids, { securityId, side, qty }) {
+    const real = ids.filter(id => id !== '0');
+    if (real.length) return real;
+    const book = await call('GET', '/orders').catch(() => null), since = Date.now() - 60_000, out = [];
+    let sum = 0;
+    for (const x of (Array.isArray(book) ? book : []).filter(x => String(x.securityId) === String(securityId) && x.transactionType === side && istTime(x.createTime) >= since)
+      .sort((a, b) => istTime(b.createTime) - istTime(a.createTime))) {
+      if (sum >= qty) break;
+      out.push(String(x.orderId)); sum += Number(x.quantity) || 0;
+    }
+    return sum === qty ? out : [];
+  }
   async function call(method, path, body, timeoutMs = 5000) {
     // Orders must leave from the registered IP: learn it before the first one.
     const own = egress();   // the user's own static IP: every call leaves from it
@@ -210,7 +225,7 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
         // (Exchanges do not accept stop-loss market orders on index options.)
         ...(o.type === 'STOP_LOSS' ? { triggerPrice: o.triggerPrice } : {}),
       });
-      const ids = o.slice ? slicedIds(r) : [r?.orderId].filter(Boolean).map(String);
+      const ids = await orderIds(o.slice ? slicedIds(r) : [r?.orderId].filter(Boolean).map(String), { securityId: o.securityId, side: o.side, qty: o.qty });
       if (!ids.length) throw new BrokerError('Dhan accepted the order but returned no order id; check the Dhan app', 'BROKER');
       return { id: ids.join(','), status: 'pending' };
     },
@@ -246,7 +261,8 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
           securityId: String(p.securityId),
           quantity: Math.abs(p.qty),
         });
-        return { id: (slice ? slicedIds(r) : [r?.orderId].filter(Boolean).map(String)).join(','), status: 'pending' };
+        const ids = await orderIds(slice ? slicedIds(r) : [r?.orderId].filter(Boolean).map(String), { securityId: p.securityId, side: p.qty > 0 ? 'SELL' : 'BUY', qty: Math.abs(p.qty) });
+        return { id: ids.join(','), status: 'pending' };
       };
       const qty = Math.abs(p.qty);
       if (qty > SLICE_ABOVE) return send(true);

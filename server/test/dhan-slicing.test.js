@@ -74,3 +74,25 @@ test('an account that registered only the server IPv6 sends its calls over IPv6 
   assert.equal(seen.at(-1)[1], 4, 'the IPv4 account stays on IPv4');
   setServerIpsForTest(null, null);
 });
+
+test('4 Nov 2026: Dhan split a plain order itself and answered order id "0": the orders it made are read back from the book', async () => {
+  const ist = ms => new Date(ms + 19_800_000).toISOString().slice(0, 19).replace('T', ' ');
+  const now = Date.now(), seen = [];
+  const book = [
+    { orderId: 'A1', securityId: '39952', transactionType: 'BUY', quantity: 1755, createTime: ist(now - 1000) },
+    { orderId: 'B1', securityId: '39952', transactionType: 'BUY', quantity: 780, createTime: ist(now - 1000) },
+    { orderId: 'OLD', securityId: '39952', transactionType: 'BUY', quantity: 65, createTime: ist(now - 3_600_000) },
+    { orderId: 'X', securityId: '11111', transactionType: 'BUY', quantity: 780, createTime: ist(now - 500) },
+  ];
+  const transport = async (method, url) => {
+    const path = url.replace(/^https?:\/\/[^/]+(\/v2)?/, '');
+    seen.push([method, path]);
+    if (method === 'POST' && path === '/orders') return { status: 200, text: JSON.stringify({ orderId: '0', orderStatus: 'TRANSIT' }) };
+    if (method === 'GET' && path === '/orders') return { status: 200, text: JSON.stringify(book) };
+    return { status: 404, text: '{}' };
+  };
+  const dhan = createDhanAdapter({ clientId: 'C1', accessToken: 'x'.repeat(30), transport });
+  const placed = await dhan.placeOrder({ ...base, securityId: '39952', qty: 2535, type: 'MARKET' });
+  assert.deepEqual(placed.id.split(',').sort(), ['A1', 'B1'], 'the two orders Dhan made, not "0"');
+  await assert.rejects(dhan.placeOrder({ ...base, securityId: '22222', qty: 2535, type: 'MARKET' }), /no order id/, 'nothing found: unknown, not "0"');
+});
