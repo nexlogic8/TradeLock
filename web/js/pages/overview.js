@@ -49,6 +49,15 @@ const fundsMissing = d => (d.broker.status === 'connected'
   : d.broker.status === 'expired' ? `Reconnect ${d.broker.label} to see it`
   : `${d.broker.label} is not responding`);
 
+/** Manual trading and Algo Trading stop-loss (Risk rules), the one in force now marked. */
+function slSets(sl) {
+  const line = (k, name) => {
+    const x = sl[k], amount = !x.on ? 'Off' : x.amount ? inr(x.amount) : `${x.value}%`;
+    return html`<div class="sl-set ${sl.mode === k ? 'now' : ''}"><span>${name}${sl.mode === k ? html` <span class="pill sm">Active</span>` : ''}</span><b class="num">${amount}</b></div>`;
+  };
+  return html`<div class="sl-sets"><a href="/rules" data-nav="rules">${line('manual', 'Manual SL')}${line('algo', 'Algo SL')}</a></div>`;
+}
+
 function fundCard(d, key, label, value, foot, refresh = false, accent = 'acc-mint') {
   const hide = isHidden(key);
   return html`
@@ -113,6 +122,7 @@ export default {
           <div class="lbl">Daily loss limit</div>
           <div class="val">${!r.maxLoss.on ? 'Off' : d.limits.maxLoss ? inr(d.limits.maxLoss) : `${r.maxLoss.value}%`}</div>
           <div class="foot">${!r.maxLoss.on ? 'No stop-loss today' : d.limits.maxLoss ? "Today's stop-loss" : 'Waiting for starting capital'}</div>
+          ${d.stopLosses ? slSets(d.stopLosses) : ''}
         </div>
         ${fundCard(d, 'available', 'Available margin', d.funds?.available, d.funds ? `Free to trade · ${d.broker.label} ${d.broker.lastSyncAt ? `updated ${ago(d.broker.lastSyncAt)}` : ''}` : fundsMissing(d), true)}
         ${fundCard(d, 'opening', 'Opening balance', d.funds?.opening, d.funds ? 'Start of day' : fundsMissing(d), false, 'acc-ice')}

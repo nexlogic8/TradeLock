@@ -59,3 +59,14 @@ test('loosening the set not in force mid-session is not a loosening', t => {
   const d = JSON.parse(stmt("SELECT detail FROM audit_log WHERE user_id = ? AND action = 'rules.updated' ORDER BY id DESC").get(uid).detail);
   assert.equal(d.loosenedInSession, undefined);
 });
+
+test('the dashboard shows both rule sets\' daily stop-loss, and which one is in force', async () => {
+  const { getDashboard } = await import('../src/modules/risk/service.js');
+  const uid = createUser({ email: 'sl-sets@rules.test', password: null, name: 'Sets' });
+  const r = getRules(uid);
+  saveRules(uid, { ...r.manual, maxLoss: { on: true, mode: 'amount', value: 3000, action: 'exit' } }, undefined, null, 'manual');
+  saveRules(uid, { ...r.algo, maxLoss: { on: true, mode: 'amount', value: 9000, action: 'exit' } }, undefined, null, 'algo');
+  const sl = getDashboard(uid, null).stopLosses;
+  assert.equal(sl.mode, 'manual', 'no Algo Trading on: the Manual set is in force');
+  assert.deepEqual([sl.manual.on, sl.manual.amount, sl.algo.on, sl.algo.amount], [true, 3000, true, 9000]);
+});
