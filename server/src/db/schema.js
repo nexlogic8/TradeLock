@@ -751,4 +751,30 @@ export const MIGRATIONS = [
   );
   CREATE INDEX paper_trades_user ON paper_trades(user_id, day DESC);
   `,
+  // Paper mode for Algo Trading (AI Algo Trading: Real | Paper): the paper broker's wallet, orders and fills.
+  `
+  ALTER TABLE broker_accounts ADD COLUMN paper_mode INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE auto_trades ADD COLUMN paper INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE paper_wallet (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    balance REAL NOT NULL, start_balance REAL NOT NULL, sod_day TEXT, sod_balance REAL, ks_day TEXT, updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE paper_orders (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day TEXT NOT NULL, security_id TEXT NOT NULL, segment TEXT NOT NULL, symbol TEXT,
+    side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')), type TEXT NOT NULL, qty INTEGER NOT NULL CHECK (qty > 0),
+    trigger_price REAL, limit_price REAL, ref_price REAL, avg_price REAL, filled_qty INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'filled', 'cancelled', 'rejected')), reason TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX paper_orders_user ON paper_orders(user_id, day, status);
+  CREATE TABLE paper_fills (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day TEXT NOT NULL, order_id INTEGER NOT NULL, security_id TEXT NOT NULL, segment TEXT NOT NULL, symbol TEXT,
+    side TEXT NOT NULL, qty INTEGER NOT NULL, price REAL NOT NULL, charges REAL NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+  );
+  CREATE INDEX paper_fills_user ON paper_fills(user_id, day);
+  `,
 ];

@@ -32,3 +32,20 @@ export async function switchTradeVia(acct, on, { carryFlags = false, ip = null, 
   await sync(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), { force: true }).catch(() => {});
   return stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id);
 }
+
+/**
+ * Algo Trading on paper (on) or real money. Like switching brokers: real and paper keep their own switches, day P&L,
+ * trades and fills; the strategy switches in use now come along to paper (carry), so the same strategies run there.
+ */
+export async function switchPaper(acct, on, { ip = null, sync = syncAccount } = {}) {
+  const from = tradingBroker(acct), to = on ? 'paper' : acct.trade_via === 'stoxkart' ? 'stoxkart' : acct.broker;
+  if (from === to) return acct;
+  swapBrokerState(acct, from, to);
+  if (on) stmt(`UPDATE broker_accounts SET ${FLAGS.map(k => `${k} = ?`).join(', ')} WHERE id = ?`).run(...FLAGS.map(k => acct[k]), acct.id);
+  stmt('UPDATE broker_accounts SET paper_mode = ? WHERE id = ?').run(on ? 1 : 0, acct.id);
+  forgetDays(acct.user_id); clearBook(acct.user_id);
+  dropAdapter(acct.id);
+  audit(acct.user_id, 'algo.paper_mode', { on }, ip);
+  await sync(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), { force: true }).catch(() => {});
+  return stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id);
+}

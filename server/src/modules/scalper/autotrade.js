@@ -257,14 +257,14 @@ function update(id, patch) {
 }
 /** Today's auto trades, newest first (for the dashboard). */
 export function autoTradesToday(userId, day = ist().day) {
-  return stmt(`SELECT id, direction, status, reason, symbol, strike, expiry, lots, qty, entry_price AS entryPrice, sl_price AS slPrice,
+  return stmt(`SELECT id, paper, direction, status, reason, symbol, strike, expiry, lots, qty, entry_price AS entryPrice, sl_price AS slPrice,
       exit_price AS exitPrice, created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy
       FROM auto_trades WHERE user_id = ? AND day = ? ORDER BY id DESC`).all(userId, day);
 }
 
 /** Earlier days' automatic trades, newest first, with each one's P&L (before charges) when it has an entry and an exit. */
 export function autoTradeHistory(userId, today = ist().day, limit = 300) {
-  return stmt(`SELECT id, day, direction, status, reason, symbol, lots, qty, entry_price AS entryPrice, sl_price AS slPrice, exit_price AS exitPrice,
+  return stmt(`SELECT id, day, paper, direction, status, reason, symbol, lots, qty, entry_price AS entryPrice, sl_price AS slPrice, exit_price AS exitPrice,
       created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy
       FROM auto_trades WHERE user_id = ? AND day < ? ORDER BY day DESC, id DESC LIMIT ?`).all(userId, today, limit)
     .filter(t => !String(t.symbol || '').startsWith('TEST'))
@@ -727,8 +727,8 @@ async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, ui
   const key = (u.key === 'NIFTY' ? '' : `${u.key}:`) + (setup.strategy === 'Gap 09:15' ? `${day}:gap` : setup.strategy === 'ORB 5m' ? `${day}:${setup.breakoutAt}`
     : setup.strategy === EMA_TREND.name ? `${day}:t:${setup.crossAt}` : `${day}:x:${setup.breakoutAt}`);
   // Claim the signal before any order: a second pass (or a restart) can never trade it again.
-  const claim = stmt(`INSERT OR IGNORE INTO auto_trades (user_id, day, signal_key, direction, status, detail, created_at)
-    VALUES (?, ?, ?, ?, 'placing', ?, ?)`).run(uid, day, key, direction, JSON.stringify({ setup }), now);
+  const claim = stmt(`INSERT OR IGNORE INTO auto_trades (user_id, day, signal_key, direction, status, detail, created_at, paper)
+    VALUES (?, ?, ?, ?, 'placing', ?, ?, ?)`).run(uid, day, key, direction, JSON.stringify({ setup }), now, acct.paper_mode === 1 ? 1 : 0);
   if (!claim.changes) return { skipped: 'signal already handled' };
   const id = Number(claim.lastInsertRowid);
   try { return await (setup.strategy === 'Gap 09:15' ? enterGap : enter)(acct, adapter, id, setup, direction, { now, pause, instruments, gap }); }
@@ -1327,7 +1327,7 @@ function scheduleGap(now = Date.now()) {
 }
 
 const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} did not answer within ${ms / 1000} s`)), ms))]);
-const brokerName = b => (b === 'stoxkart' ? 'StoxKart' : 'Dhan');
+const brokerName = b => (b === 'stoxkart' ? 'StoxKart' : b === 'paper' ? 'Paper' : 'Dhan');
 const accountRow = id => stmt('SELECT * FROM broker_accounts WHERE id = ?').get(id);
 // The broker calls of the pre-open check and route; a mutable object so tests can stand in for the brokers.
 export const PREOPEN_IO = { sync: (acct, o) => syncAccount(acct, o), probe: (acct, via) => probeAdapter(acct, via), switchVia: (acct, on, o) => switchTradeVia(acct, on, o) };
@@ -1390,6 +1390,7 @@ export async function preopenCheck(acct) {
  */
 export async function preopenRoute(acct, { pause = sleep } = {}) {
   if (acct.algo_on !== 1 || acct.agent_on !== 1 || acct.gap_on !== 1) return { skipped: 'gap off' };
+  if (acct.paper_mode === 1) return { skipped: 'paper: no broker to fall back to' };
   const uid = acct.user_id;
   let h = await brokerHealth(acct);
   if (!h.connected) { await pause(AUTO.preopen.retryMs); h = await brokerHealth(h.acct); }

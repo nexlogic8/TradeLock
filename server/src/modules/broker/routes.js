@@ -17,7 +17,8 @@ import { guardBroker } from '../billing/trialguard.js';
 import { algoReadiness } from '../scalper/algo-live.js';
 import { stoxkartLink } from './stoxkart.js';
 import { getBook } from './book.js';
-import { brokerBusy, switchTradeVia } from './switch.js';
+import { brokerBusy, switchTradeVia, switchPaper } from './switch.js';
+import { paperWallet, setPaperBalance, resetPaperWallet, PAPER_DEFAULT, PAPER_MIN, PAPER_MAX } from './adapters/paper.js';
 import { staticIpView } from './static-ip.js';
 import { isAdminEmail } from '../../lib/access.js';
 
@@ -202,6 +203,37 @@ export function brokerRoutes(r) {
     const fresh = await switchTradeVia(acct, on, { ip: ctx.ip });
     emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
     return { link: stoxkartLink(ctx.user.id), account: accountSummary(fresh) };
+  });
+
+  // AI Algo Trading: Real (Dhan) or Paper (the paper wallet, simulated fills at live prices). Only with nothing open.
+  r.post('/api/brokers/:id/paper', async ctx => {
+    const on = v.bool(ctx.body.on, 'Paper trading');
+    const acct = ownAccount(ctx.user.id, ctx.params.id);
+    if ((acct.paper_mode === 1) === on) return { account: accountSummary(acct) };
+    const busy = brokerBusy(acct);
+    if (busy.length) throw conflict('BROKER_BUSY', `Close everything first: ${busy.join(', ')} ${on ? 'with real money' : 'on paper'}. Switching with anything open would leave it unmanaged.`);
+    const fresh = await switchPaper(acct, on, { ip: ctx.ip });
+    notify(ctx.user.id, on
+      ? { kind: 'risk', level: 'warn', title: 'Paper trading on', body: `Algo Trading now trades the paper wallet (₹${Math.round(paperWallet(ctx.user.id).balance).toLocaleString('en-IN')}) at live prices: no orders go to Dhan, and your Dhan account is not watched by TradeLock until you switch back to Real.` }
+      : { kind: 'risk', level: 'warn', title: 'Real trading on', body: 'Algo Trading trades your Dhan account with real money again, and TradeLock protects it.' });
+    emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
+    return { account: accountSummary(fresh) };
+  });
+
+  // The paper wallet: its balance, set to any amount from ₹10,000 to ₹1 crore, or reset to ₹10 lakh.
+  const walletView = userId => { const w = paperWallet(userId); return { balance: w.balance, startBalance: w.start_balance, todayOpening: w.sod_balance, default: PAPER_DEFAULT, min: PAPER_MIN, max: PAPER_MAX }; };
+  r.get('/api/paper/wallet', ctx => walletView(ctx.user.id));
+  r.put('/api/paper/wallet', ctx => {
+    try { setPaperBalance(ctx.user.id, v.num(ctx.body.balance, 'Paper balance', { min: PAPER_MIN, max: PAPER_MAX })); }
+    catch (e) { if (e.code === 'PAPER_BUSY') throw conflict('PAPER_BUSY', e.message); throw e.code === 'VALIDATION' ? bad('VALIDATION', e.message) : e; }
+    audit(ctx.user.id, 'paper.wallet_set', { balance: ctx.body.balance }, ctx.ip);
+    return walletView(ctx.user.id);
+  });
+  r.post('/api/paper/wallet/reset', ctx => {
+    try { resetPaperWallet(ctx.user.id); }
+    catch (e) { if (e.code === 'PAPER_BUSY') throw conflict('PAPER_BUSY', e.message); throw e; }
+    audit(ctx.user.id, 'paper.wallet_reset', {}, ctx.ip);
+    return walletView(ctx.user.id);
   });
 
   r.delete('/api/brokers/:id', ctx => {

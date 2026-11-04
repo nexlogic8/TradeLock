@@ -55,18 +55,18 @@ function paperSection(rows) {
 
 /** Earlier days' automatic trades: one row each, with its P&L (before charges), and the totals of the traded ones. */
 function historySection(rows) {
-  const traded = rows.filter(t => t.pnl != null), wins = traded.filter(t => t.pnl > 0).length;
+  const traded = rows.filter(t => t.pnl != null && !t.paper), wins = traded.filter(t => t.pnl > 0).length;   // real money only; paper trades are marked
   const total = traded.reduce((a, t) => a + t.pnl, 0), used = traded.reduce((a, t) => a + t.entryPrice * t.qty, 0);
   const money = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
   return html`
     <section class="panel pad algo-block">
       <h3 class="panel-title">History</h3>
       ${rows.length ? html`
-        <p class="muted small algo-history-sum">${traded.length} trade${traded.length === 1 ? '' : 's'} · ${wins} won · P&amp;L <b class="${total >= 0 ? 'pos' : 'neg'}">${money(total)}</b>${used ? ` (${(total / used * 100).toFixed(1)}% of the capital used)` : ''} · before charges</p>
+        <p class="muted small algo-history-sum">Real money: ${traded.length} trade${traded.length === 1 ? '' : 's'} · ${wins} won · P&amp;L <b class="${total >= 0 ? 'pos' : 'neg'}">${money(total)}</b>${used ? ` (${(total / used * 100).toFixed(1)}% of the capital used)` : ''} · before charges${rows.some(t => t.paper) ? ` · paper trades are marked Paper and not counted` : ''}</p>
         <div class="bt-table-wrap"><table class="bt-table algo-trades">
           <thead><tr><th>Date</th><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>%</th><th>Status</th></tr></thead>
           <tbody>${rows.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
-            <td class="num">${t.day}</td><td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${t.day}</td><td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnl == null ? '—' : money(t.pnl)}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnlPct == null ? '—' : `${t.pnlPct > 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%`}</td>
@@ -122,8 +122,13 @@ export default {
       <section class="panel pad algo-control ${running ? 'running' : ''}">
         <div class="algo-control-copy">
           <span class="pill ${running ? '' : 'ice'}"><span class="dot ${running && d.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
-          <h2>Algo Trading</h2>
+          <h2>Algo Trading${a?.paperMode ? html` <span class="pill ice">Paper</span>` : ''}</h2>
           <p>${state[1]}. Trading <b>${index}</b> options · ${activeStrats.length ? html`strategies on: <b>${activeStrats.join(' + ')}</b>.` : html`<b>no strategy is on</b>: switch one on below.`}</p>
+          ${a?.paperMode ? html`<p class="small algo-paper-note">Paper: trades fill at live Dhan prices with the <a href="/wallet" data-nav="wallet">paper wallet</a>'s money. No order goes to Dhan, and TradeLock is not watching your Dhan account until you switch back to Real.</p>` : ''}
+        </div>
+        <div class="seg algo-mode" role="group" aria-label="Real or paper trading">
+          <button type="button" data-paper-mode="real" aria-pressed="${!a?.paperMode}" ${a ? '' : 'disabled'}>Real</button>
+          <button type="button" data-paper-mode="paper" aria-pressed="${!!a?.paperMode}" ${a ? '' : 'disabled'}>Paper</button>
         </div>
         <button class="btn ${running ? 'btn-danger' : 'btn-primary'} algo-start" type="button" data-algo-start="${running ? 'stop' : 'start'}" ${!a || (!running && !d.ready) ? 'disabled' : ''}>
           ${icon(running ? 'stop' : 'play')}${running ? 'Stop Algo Trading' : 'Start Algo Trading'}</button>
@@ -176,7 +181,7 @@ export default {
         ${d.trades.length ? html`<div class="bt-table-wrap"><table class="bt-table algo-trades">
           <thead><tr><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>SL</th><th>Exit</th><th>Status</th></tr></thead>
           <tbody>${d.trades.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
-            <td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
           : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
@@ -262,6 +267,20 @@ export default {
         const { account } = await post(`/brokers/${id}/strategies`, { manual: next });
         syncTopbar(account);
         toast(next ? 'Manual trades allowed alongside Algo Trading.' : 'Manual trades blocked while Algo Trading is on.', 'ok');
+        await refresh();
+      } catch (err) { toastError(err); b.disabled = false; }
+    }, signal);
+
+    // Real | Paper: which account Algo Trading trades (only with nothing open; the server checks).
+    on(el, 'click', '[data-paper-mode]', async (_, b) => {
+      const id = ctx.data.account?.id, on_ = b.dataset.paperMode === 'paper';
+      if (!id || !!ctx.data.account?.paperMode === on_) return;
+      if (!on_ && !confirm('Switch Algo Trading back to REAL money on your Dhan account?')) return;
+      b.disabled = true;
+      try {
+        const { account } = await post(`/brokers/${id}/paper`, { on: on_ });
+        syncTopbar(account);
+        toast(on_ ? 'Paper trading on: the paper wallet, live prices, no orders to Dhan.' : 'Real trading on: your Dhan account, real money.', on_ ? 'ok' : 'warn');
         await refresh();
       } catch (err) { toastError(err); b.disabled = false; }
     }, signal);

@@ -18,6 +18,7 @@ import { config } from '../../config.js';
 import { createMockAdapter } from './adapters/mock.js';
 import { createDhanAdapter, tokenExpiry } from './adapters/dhan.js';
 import { createStoxkartAdapter } from './adapters/stoxkart.js';
+import { createPaperAdapter } from './adapters/paper.js';
 import { getBook, getPermissions, getKillStatus } from './book.js';
 import { withSharedData, feedCredentials } from './market-data.js';
 import { egressFor } from './static-ip.js';
@@ -47,11 +48,13 @@ export function adapterFor(acct) {
   let entry = live.get(acct.id);
   // Orders through StoxKart (trade_via): its link must be verified; its credentials can change on their own.
   const link = acct.trade_via === 'stoxkart' ? stmt(`SELECT creds_enc, status, updated_at FROM broker_links WHERE user_id = ? AND broker = 'stoxkart'`).get(acct.user_id) : null;
-  const via = link?.status === 'verified' ? `stoxkart:${link.updated_at}` : 'own';
+  // Paper mode (AI Algo Trading: Real | Paper): the paper broker trades, Dhan still supplies the prices.
+  const via = acct.paper_mode === 1 ? 'paper' : link?.status === 'verified' ? `stoxkart:${link.updated_at}` : 'own';
   // A new token (reconnect, or renewed by the token keeper service) means a fresh adapter.
   if (!entry || entry.tokenEnc !== acct.token_enc || entry.via !== via) {
     const own = ownAdapter(acct);
-    entry = { tokenEnc: acct.token_enc, via, adapter: withSharedData(via === 'own' ? own : tradeThroughStoxkart(own, JSON.parse(decrypt(link.creds_enc)))) };
+    entry = { tokenEnc: acct.token_enc, via, adapter: via === 'paper' ? createPaperAdapter({ userId: acct.user_id, data: withSharedData(own) })
+      : withSharedData(via === 'own' ? own : tradeThroughStoxkart(own, JSON.parse(decrypt(link.creds_enc)))) };
     live.set(acct.id, entry);
   }
   return entry.adapter;
@@ -124,6 +127,7 @@ export function accountSummary(acct) {
     manualOn: acct.manual_on === 1,
     gapLockOn: acct.gap_lock !== 0,
     retestPaperOn: acct.retest_paper_on === 1,
+    paperMode: acct.paper_mode === 1,
     tradeVia: acct.trade_via === 'stoxkart' ? 'stoxkart' : acct.broker,
     algoUnderlyings: String(acct.algo_underlying || 'NIFTY').split(','),
     lastSyncAt: getBook(acct.user_id).at ?? acct.last_sync_at,   // the DB copy is only refreshed every 30 s

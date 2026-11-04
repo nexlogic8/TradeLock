@@ -10,7 +10,7 @@ const FRESH = { agent_on: 0, algo_on: 0, cross_on: 0, orb_on: 0, gap_on: 0, ema9
 const TABLES = ['day_state', 'pnl_points', 'trades', 'broker_fills', 'broker_pnl_days', 'broker_sync'];
 const NEW_ID = { trades: 'id' };
 
-export const tradingBroker = acct => (acct?.trade_via === 'stoxkart' ? 'stoxkart' : acct?.broker);
+export const tradingBroker = acct => (acct?.paper_mode === 1 ? 'paper' : acct?.trade_via === 'stoxkart' ? 'stoxkart' : acct?.broker);
 
 const putStash = (userId, broker, kind, data) => stmt(`INSERT INTO broker_stash (user_id, broker, kind, data, saved_at) VALUES (?, ?, ?, ?, ?)
   ON CONFLICT(user_id, broker, kind) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at`).run(userId, broker, kind, JSON.stringify(data), Date.now());
