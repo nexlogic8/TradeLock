@@ -216,6 +216,8 @@ export function algoUnwatch(userId) {
 export const liveTick = (userId, key, opts) => feeds.get(userId)?.hub?.book.tick(key, opts) || null;
 /** The completed tick-built 1-minute candle starting at `minute` (ms), or null when the feed cannot vouch for it. */
 export const liveMinute = (userId, key, minute, now) => feeds.get(userId)?.hub?.book.minute(key, minute, now) || null;
+/** The 1-minute candle starting at `minute` (ms) as built so far from ticks (for the minute in progress), or null. */
+export const liveBar = (userId, key, minute) => feeds.get(userId)?.hub?.book.partial?.(key, minute) || null;
 /** fn(userId, key, minuteStart) when a key's 1-minute candle closes (its first tick of the next minute arrived). */
 export function onMinuteClose(fn) { minuteListeners.add(fn); return () => minuteListeners.delete(fn); }
 /** Feed status for a user: connected, since when, and how many keys Algo Trading watches. */

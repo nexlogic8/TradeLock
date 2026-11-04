@@ -21,7 +21,7 @@ const strategies = () => builtInFor(isAdmin()).filter(s => s.auto);
 
 const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
 
-/** Paper trades (Gap retest 09:15): each day's simulated trade with its P&L after charges, and the totals. */
+/** Paper trades (Gap wick 09:15): each day's simulated trade with its P&L after charges, and the totals. */
 function paperSection(rows) {
   const traded = rows.filter(t => t.pnl != null), wins = traded.filter(t => t.pnl > 0).length, total = traded.reduce((a, t) => a + t.pnl, 0);
   const money = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
@@ -38,7 +38,7 @@ function paperSection(rows) {
             <td class="num">${price(t.level)}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnl == null ? '—' : money(t.pnl)}</td>
             <td><span class="pill sm ${tone}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
-        : html`<p class="muted small" style="margin:0">No paper trades yet. Switch on Gap retest 09:15 above; it runs from the next 09:15.</p>`}
+        : html`<p class="muted small" style="margin:0">No paper trades yet. Switch on Gap wick 09:15 above and start Algo Trading; it runs from the next 09:15.</p>`}
     </section>`;
 }
 

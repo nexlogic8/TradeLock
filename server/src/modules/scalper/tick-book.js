@@ -33,6 +33,8 @@ export function createTickBook() {
       const t = last.get(key);
       return t && t.at >= since ? t : null;
     },
+    /** The 1-minute candle starting at `minute` (ms) as built so far (its open, high, low and last price), or null. */
+    partial(key, minute) { const bar = bars.get(key)?.get(minute); return bar ? { ...bar } : null; },
     /** The completed 1-minute candle starting at `minute` (ms) for key, or null when it may be partial. */
     minute(key, minute, now = Date.now()) {
       const bar = bars.get(key)?.get(minute);

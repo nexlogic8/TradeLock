@@ -16,7 +16,6 @@ const strategies = [
   ['ema45', 'EMA45 hammer + next-candle breakout'],
   [ORB5_KEY, ORB5_LABEL],
   [GAP_KEY, GAP_LABEL],
-  [GAP_RETEST_KEY, GAP_RETEST_LABEL],
   [EMA915_KEY, EMA915_LABEL],
   [CUSTOM_KEY, CUSTOM_LABEL],
 ];

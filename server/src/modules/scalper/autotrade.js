@@ -67,7 +67,7 @@ import { confirmedRangeBreakouts, orbEntryFilter } from '../../../../web/js/page
 import { indexOptionInstruments } from './instruments.js';
 import { underlyingFor } from './underlyings.js';
 import { normalizeScalperCandles } from './routes.js';
-import { algoUnwatch, algoWatch, liveMinute, liveTick, onMinuteClose } from './live.js';
+import { algoUnwatch, algoWatch, liveBar, liveMinute, liveTick, onMinuteClose } from './live.js';
 import { isAdminUser, withAllowedStrategies } from '../../lib/access.js';
 import { tryKillSwitch } from '../emergency/service.js';
 
@@ -120,7 +120,7 @@ const BAR_MS = 5 * 60_000;     // ORB 5m: signals come from 5-minute candles, as
 // Live ticks: the Dhan feed (live.js) is the first source for prices and for the gap exit's 1-minute candles;
 // Dhan's REST APIs stay the fallback whenever the feed has no fresh tick or cannot vouch for a candle.
 // (A mutable object so tests can stand in for the feed.)
-export const FEED = { tick: liveTick, minute: liveMinute, watch: algoWatch, unwatch: algoUnwatch };
+export const FEED = { tick: liveTick, minute: liveMinute, bar: liveBar, watch: algoWatch, unwatch: algoUnwatch };
 // Gap entry strike, in steps from the ATM (+ = ITM, − = OTM, 0 = ATM). A mutable object so tests can choose.
 export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400 };
 const FEED_FROM = 9 * 60 + 13, FEED_TO = 15 * 60 + 31;   // IST minutes: subscribed from just before the open to the close
