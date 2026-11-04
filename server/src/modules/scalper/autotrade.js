@@ -285,7 +285,7 @@ async function chainCall(userId, fn) {
 }
 
 /** Option lot and tick sizes for one index, keyed by security id (the exchange's instrument master). */
-const optionMeta = async u => new Map([...(await indexOptionInstruments())].filter(([k]) => k.startsWith(`${u.exchange}:`)).map(([k, m]) => [k.slice(u.exchange.length + 1), m]));
+export const optionMeta = async u => new Map([...(await indexOptionInstruments())].filter(([k]) => k.startsWith(`${u.exchange}:`)).map(([k, m]) => [k.slice(u.exchange.length + 1), m]));
 
 function candlesFor(adapter, securityId, { index = false, interval = '1', now = Date.now(), from = ist(now).day, segment = 'NSE_FNO' } = {}) {
   const day = from;
@@ -493,7 +493,7 @@ export function gapPrefetch(acct, adapter, u, now = Date.now()) {
 }
 
 /** The chain's strikes nearest a price, CE and PE security ids (the ATM at the open is among them). */
-const nearIds = (chain, spot, n = 8) => Object.entries(chain?.oc || {}).map(([k, s]) => [Number(k), s])
+export const nearIds = (chain, spot, n = 8) => Object.entries(chain?.oc || {}).map(([k, s]) => [Number(k), s])
   .filter(([k]) => Number.isFinite(k)).sort((a, b) => Math.abs(a[0] - spot) - Math.abs(b[0] - spot)).slice(0, n)
   .flatMap(([, s]) => [s?.ce?.security_id, s?.pe?.security_id]).filter(Boolean).map(String);
 

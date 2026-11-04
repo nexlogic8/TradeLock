@@ -12,6 +12,7 @@ import { startAlerts } from './modules/admin/alerts.js';
 import { startAlgoScanner } from './modules/algo/service.js';
 import { attachScalperWebSocket } from './modules/scalper/live.js';
 import { startAutoTrader } from './modules/scalper/autotrade.js';
+import { startPaperTrading } from './modules/scalper/paper-retest.js';
 import { startScalperWarmup } from './modules/scalper/routes.js';
 
 if (!config.isProd && stmt('SELECT COUNT(*) AS n FROM users').get().n === 0) {
@@ -31,6 +32,7 @@ const stopAlerts = startAlerts();
 const stopPnlSync = config.monitor ? startBrokerPnlSync() : () => {};
 const stopAlgoScanner = startAlgoScanner();
 const stopAutoTrader = config.monitor ? startAutoTrader() : () => {};
+const stopPaperTrading = config.monitor ? startPaperTrading() : () => {};
 const stopScalperWarmup = config.monitor ? startScalperWarmup() : () => {};
 detectServerIp().then(ip => ip && console.log(`Public IP for broker whitelisting: ${ip}`));
 detectServerIpv6().then(ip => ip && console.log(`Public IPv6 for broker whitelisting: ${ip}`));
@@ -45,6 +47,7 @@ function shutdown(signal) {
   stopPnlSync();
   stopAlgoScanner();
   stopAutoTrader();
+  stopPaperTrading();
   stopScalperWarmup();
   stopScalperFeed();
   server.close(() => { flushWrites(); db.close(); process.exit(0); });

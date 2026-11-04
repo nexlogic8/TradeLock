@@ -732,4 +732,23 @@ export const MIGRATIONS = [
   `,
   // Kill switch when the Gap open 09:15 strategy has no entry that day (on by default).
   `ALTER TABLE broker_accounts ADD COLUMN gap_lock INTEGER NOT NULL DEFAULT 1;`,
+  // Paper trading: strategies run on live prices with simulated fills, no orders (Gap retest 09:15 first).
+  `
+  ALTER TABLE broker_accounts ADD COLUMN retest_paper_on INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE broker_accounts ADD COLUMN retest_cfg TEXT;
+  CREATE TABLE paper_trades (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    direction TEXT, symbol TEXT, security_id TEXT, exchange_segment TEXT,
+    lots INTEGER, qty INTEGER,
+    level REAL, entry_price REAL, sl_price REAL, exit_price REAL, pnl REAL, charges REAL,
+    status TEXT NOT NULL CHECK (status IN ('watching', 'open', 'closed', 'skipped')),
+    reason TEXT, detail TEXT,
+    created_at INTEGER NOT NULL, entered_at INTEGER, closed_at INTEGER,
+    UNIQUE (user_id, day, strategy)
+  );
+  CREATE INDEX paper_trades_user ON paper_trades(user_id, day DESC);
+  `,
 ];

@@ -3,7 +3,7 @@ import { get, post } from '../core/api.js';
 import { icon } from '../ui/icons.js';
 import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from '../vendor/lightweight-charts.standalone.production.mjs';
 import { LEVEL_REJECT } from './scalper-chart-signals.js';
-import { GAP_KEY, GAP_LABEL, drawGapEquity, gapCsv, gapDefaults, gapFieldChange, gapFields, gapFromRun, gapNotes, gapPayload, gapResults, gapRunFacts, gapRunLabel } from './backtest-gap.js';
+import { GAP_KEY, GAP_LABEL, GAP_RETEST_KEY, GAP_RETEST_LABEL, drawGapEquity, gapCsv, gapDefaults, gapFieldChange, gapFields, gapFromRun, gapNotes, gapPayload, gapResults, gapRunFacts, gapRunLabel } from './backtest-gap.js';
 import { EMA915_KEY, EMA915_LABEL, drawEma915Equity, ema915Csv, ema915Defaults, ema915FieldChange, ema915Fields, ema915FromRun, ema915Notes, ema915Payload, ema915Results, ema915RunFacts, ema915RunLabel } from './backtest-ema915.js';
 import { CUSTOM_KEY, CUSTOM_LABEL, customCsv, customDefaults, customFieldChange, customFields, customFromRun, customNotes, customPayload, customResults, customRunFacts, customRunLabel, drawCustomEquity } from './backtest-custom.js';
 import { ORB5_KEY, ORB5_LABEL, downloadCsv, drawOrbEquity, drawOrbTradeChart, orbCsv, orbDefaults, orbFieldChange, orbFields, orbFromRun, orbNotes, orbPayload, orbResults, orbRunLabel } from './backtest-orb5.js';
@@ -16,6 +16,7 @@ const strategies = [
   ['ema45', 'EMA45 hammer + next-candle breakout'],
   [ORB5_KEY, ORB5_LABEL],
   [GAP_KEY, GAP_LABEL],
+  [GAP_RETEST_KEY, GAP_RETEST_LABEL],
   [EMA915_KEY, EMA915_LABEL],
   [CUSTOM_KEY, CUSTOM_LABEL],
 ];
@@ -181,7 +182,7 @@ export default {
           <label class="strategy-field"><span>Quick range</span><select class="input" data-bt-field="range" aria-label="Quick date range"><option value="1m" ${ui.range==='1m'?'selected':''}>1 month</option><option value="2m" ${ui.range==='2m'?'selected':''}>2 months</option><option value="6m" ${ui.range==='6m'?'selected':''}>6 months</option><option value="1y" ${ui.range==='1y'?'selected':''}>1 year</option><option value="5y" ${ui.range==='5y'?'selected':''}>5 years (max)</option><option value="custom" ${ui.range==='custom'?'selected':''}>Custom dates</option></select></label>
           <label class="strategy-field"><span>Start date</span><input class="input" type="date" data-bt-field="startDate" aria-label="Backtest start date" value="${ui.startDate}" min="${earliestIntradayDate()}" max="${ui.endDate}"></label>
           <label class="strategy-field"><span>End date</span><input class="input" type="date" data-bt-field="endDate" aria-label="Backtest end date" value="${ui.endDate}" min="${ui.startDate}" max="${todayIst()}"></label>
-          ${ui.strategy===ORB5_KEY?orbFields(ui,ui.caps):ui.strategy===GAP_KEY?gapFields(ui):ui.strategy===EMA915_KEY?ema915Fields(ui):ui.strategy===CUSTOM_KEY?customFields(ui,ui.caps):html`<label class="strategy-field"><span>Exit logic</span><select class="input" data-bt-field="exitLogic" aria-label="Exit logic">${exitRules.map(([value,label])=>html`<option value="${value}" ${ui.exitLogic===value?'selected':''} ${ui.resultMode==='option'&&value==='emaZone'?'disabled':''}>${label}${ui.resultMode==='option'&&value==='emaZone'?' (index only)':''}</option>`)}</select></label>
+          ${ui.strategy===ORB5_KEY?orbFields(ui,ui.caps):ui.strategy===GAP_KEY?gapFields(ui):ui.strategy===GAP_RETEST_KEY?gapFields(ui,true):ui.strategy===EMA915_KEY?ema915Fields(ui):ui.strategy===CUSTOM_KEY?customFields(ui,ui.caps):html`<label class="strategy-field"><span>Exit logic</span><select class="input" data-bt-field="exitLogic" aria-label="Exit logic">${exitRules.map(([value,label])=>html`<option value="${value}" ${ui.exitLogic===value?'selected':''} ${ui.resultMode==='option'&&value==='emaZone'?'disabled':''}>${label}${ui.resultMode==='option'&&value==='emaZone'?' (index only)':''}</option>`)}</select></label>
           <label class="strategy-field"><span>Stop loss</span><select class="input" data-bt-field="stopLogic" aria-label="Stop-loss rule" ${ui.strategy!=='openingRange'?'disabled':''}>${stopRules.map(([value,label])=>html`<option value="${value}" ${ui.stopLogic===value?'selected':''}>${label}</option>`)}</select></label>
           <label class="strategy-field"><span>Exit after signal</span><select class="input" data-bt-field="horizon" aria-label="Fixed exit horizon" ${ui.exitLogic!=='horizon'?'disabled':''}>${horizons.map(([value,label])=>html`<option value="${value}" ${ui.horizon===value?'selected':''}>${label} - close</option>`)}</select></label>
           <label class="strategy-field"><span>Results in</span><select class="input" data-bt-field="resultMode" aria-label="Backtest result mode"><option value="index" ${ui.resultMode==='index'?'selected':''}>Index points</option><option value="option" ${ui.resultMode==='option'?'selected':''}>ATM option ₹ (2nd expiry)</option></select></label>
@@ -191,8 +192,8 @@ export default {
         </div>
         ${ui.error?html`<div class="bt-error">${ui.error}</div>`:''}
         ${ui.chartError?html`<div class="bt-error">${ui.chartError}</div>`:''}
-        ${ui.strategy===ORB5_KEY?orbNotes(ui,ui.caps):ui.strategy===GAP_KEY?gapNotes(ui,ui.caps):ui.strategy===EMA915_KEY?ema915Notes(ui,ui.caps):ui.strategy===CUSTOM_KEY?customNotes(ui,ui.caps):''}
-        ${ui.strategy===ORB5_KEY||ui.strategy===GAP_KEY||ui.strategy===EMA915_KEY||ui.strategy===CUSTOM_KEY?'':html`<div>${''}
+        ${ui.strategy===ORB5_KEY?orbNotes(ui,ui.caps):ui.strategy===GAP_KEY?gapNotes(ui,ui.caps):ui.strategy===GAP_RETEST_KEY?gapNotes(ui,ui.caps,true):ui.strategy===EMA915_KEY?ema915Notes(ui,ui.caps):ui.strategy===CUSTOM_KEY?customNotes(ui,ui.caps):''}
+        ${ui.strategy===ORB5_KEY||ui.strategy===GAP_KEY||ui.strategy===GAP_RETEST_KEY||ui.strategy===EMA915_KEY||ui.strategy===CUSTOM_KEY?'':html`<div>${''}
         ${ui.strategy==='previousDay'?html`<p class="bt-muted">First completed 1-minute close above the previous trading session's high: CE. Below its low: PE. One trade per day, entered at the confirming close; opening gaps qualify. Up to 14 calendar days of prior history are loaded for reference levels.</p>`:''}
         ${ui.resultMode==='option'?html`<p class="bt-muted">Option rupees: each index signal buys the ATM CE/PE of the 2nd weekly expiry at that minute's option close and stays on that strike. Lots = capital ÷ (premium × lot size), whole lots only; trades that cannot afford one lot are skipped. ${ui.sizing==='compound'?'Compounding: each trade uses 100% of the running capital, so profits and losses change the size of the next trade.':'Fixed: every trade is sized from the same capital.'} The Capital column shows the running balance after each trade. ${ui.stopLogic==='breakoutCandle'?'SL is the option candle in the index breakout minute (its low, since the option is bought).':'Choose the breakout-candle stop loss to add an option SL.'} The exit time follows the exit rule on the index. Lot size follows NSE's revisions (75 until Jul 2021, 50, 25 from Apr 2024, 75 from Nov 2024, 65 from Dec 2025). Excludes brokerage, taxes and slippage.${dayCount(ui.startDate,ui.endDate)>OPTION_MAX_DAYS?html` <b>Choose up to ${OPTION_MAX_DAYS} days in this mode.</b>`:''}</p>`:''}
         ${ui.stopLogic==='breakoutCandle'?html`<p class="bt-muted">Stop loss: CE stop at the 1-minute breakout candle's low, PE stop at its high. Price coming back through it means the 5-minute range breakout was rejected. From the candle after entry, a wick touch exits at the stop and a gap through it fills at that candle's open. Checked alongside the exit rule; whichever is hit first closes the trade (the stop wins if both fall on the same candle).</p>`:''}
@@ -266,10 +267,10 @@ export default {
       ui.running=true;ui.error='';ui.chartError='';ui.result=null;ui.chartData=null;clearTradeChart(ui);ctx.paint();
       const {strategy,startDate,endDate,horizon,exitLogic,resultMode,capital,sizing}=ui,stopLogic=ui.strategy==='openingRange'?ui.stopLogic:'none';
       try {
-        const run=await post('/scalper/backtest-runs',strategy===ORB5_KEY?orbPayload(ui):strategy===GAP_KEY?gapPayload(ui):strategy===EMA915_KEY?ema915Payload(ui):strategy===CUSTOM_KEY?customPayload(ui):{strategy,startDate,endDate,horizon,exitLogic,stopLogic,resultMode,capital,sizing});
+        const run=await post('/scalper/backtest-runs',strategy===ORB5_KEY?orbPayload(ui):strategy===GAP_KEY?gapPayload(ui):strategy===GAP_RETEST_KEY?gapPayload(ui,true):strategy===EMA915_KEY?ema915Payload(ui):strategy===CUSTOM_KEY?customPayload(ui):{strategy,startDate,endDate,horizon,exitLogic,stopLogic,resultMode,capital,sizing});
         ui.savedRuns=[run,...(ui.savedRuns||[]).filter(row=>row.id!==run.id)].slice(0,20);
         if(strategy===ORB5_KEY&&ui.strategy===ORB5_KEY) ui.result=run;
-        if(strategy===GAP_KEY&&ui.strategy===GAP_KEY) ui.result=run;
+        if((strategy===GAP_KEY||strategy===GAP_RETEST_KEY)&&ui.strategy===strategy) ui.result=run;
         if(strategy===EMA915_KEY&&ui.strategy===EMA915_KEY) ui.result=run;
         if(strategy===CUSTOM_KEY&&ui.strategy===CUSTOM_KEY) ui.result=run;
         if(strategy===ui.strategy&&startDate===ui.startDate&&endDate===ui.endDate&&horizon===ui.horizon&&exitLogic===ui.exitLogic&&stopLogic===(ui.strategy==='openingRange'?ui.stopLogic:'none')) ui.result=run;

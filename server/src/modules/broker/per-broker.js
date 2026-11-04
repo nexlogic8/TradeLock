@@ -4,8 +4,8 @@
 // brings back the other broker's (or a fresh start, everything off).
 import { stmt, tx, flushWrites } from '../../db/index.js';
 
-export const FLAGS = ['agent_on', 'algo_on', 'cross_on', 'orb_on', 'gap_on', 'ema915_on', 'manual_on', 'gap_lock', 'algo_underlying'];
-const FRESH = { agent_on: 0, algo_on: 0, cross_on: 0, orb_on: 0, gap_on: 0, ema915_on: 0, manual_on: 0, gap_lock: 1, algo_underlying: 'NIFTY' };
+export const FLAGS = ['agent_on', 'algo_on', 'cross_on', 'orb_on', 'gap_on', 'ema915_on', 'manual_on', 'gap_lock', 'retest_paper_on', 'algo_underlying'];
+const FRESH = { agent_on: 0, algo_on: 0, cross_on: 0, orb_on: 0, gap_on: 0, ema915_on: 0, manual_on: 0, gap_lock: 1, retest_paper_on: 0, algo_underlying: 'NIFTY' };
 // Tables whose rows belong to the trading broker. trades.id is a plain rowid, so it is reassigned on the way back.
 const TABLES = ['day_state', 'pnl_points', 'trades', 'broker_fills', 'broker_pnl_days', 'broker_sync'];
 const NEW_ID = { trades: 'id' };

@@ -7,6 +7,9 @@ import { LineSeries, createChart } from '../vendor/lightweight-charts.standalone
 
 export const GAP_KEY = 'gap';
 export const GAP_LABEL = 'Gap open 09:15 (live Algo strategy)';
+// The same engine with the entry on the retest of the 09:15 open (Algo Trading runs it on paper): its own strategy entry.
+export const GAP_RETEST_KEY = 'gapRetest';
+export const GAP_RETEST_LABEL = 'Gap retest 09:15 (paper strategy)';
 const MODES = [['best', 'Best case', 'fill at the option’s 09:15 open'], ['worst', 'Worst case', 'fill at the 09:16 open']];
 /** Late entry % above the 09:15 open (live fills so far: +2.1% and +8.9%). */
 const LATE = [0, 2, 3, 4, 5, 7, 9, 10, 12, 15];
@@ -46,30 +49,31 @@ export function gapDefaults(ui, caps) {
 export function gapFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
   ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0, minGapPts:s.minGapPts ?? 0, tradeAmount:s.tradeAmount ?? 0, entryMode:s.entryMode ?? 'open', retestMin:s.retestMin ?? 15, retestSlPct:s.retestSlPct ?? 5 };
+  ui.strategy = s.entryMode === 'retest' ? GAP_RETEST_KEY : GAP_KEY;
 }
-export const gapPayload = ui => ({ strategy:GAP_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.gap });
+export const gapPayload = (ui, retest = false) => ({ strategy:GAP_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.gap, entryMode:retest ? 'retest' : 'open' });
 /** Apply a change from a [data-gap-field] control. Returns true when handled. */
 export function gapFieldChange(ui, field) {
   const key = field.dataset.gapField; if (!key) return false;
-  ui.gap[key] = key === 'squareOff' || key === 'exitCandle' || key === 'entryMode' ? field.value : key === 'compound' ? field.value === 'compound' : Number(field.value);
+  ui.gap[key] = key === 'squareOff' || key === 'exitCandle' ? field.value : key === 'compound' ? field.value === 'compound' : Number(field.value);
   return true;
 }
 export function gapRunLabel(run) {
   const m = run.metrics, s = m.settings || {}, b = m.best?.summary, w = m.worst?.summary;
   const first = s.lateEntryPct ? `+${s.lateEntryPct}% entry` : 'best', second = 'worst';
-  return `${GAP_LABEL} | ${run.startDate} to ${run.endDate} | ${inr(s.capital)}${s.compound ? ' compounded' : ''}, SL ${s.dailySlPct}% of capital${s.lotCap ? `, max ${s.lotCap} lots` : ''} | ${first} ${inr(b?.endCapital)} · ${second} ${inr(w?.endCapital)}`;
+  return `${s.entryMode === 'retest' ? GAP_RETEST_LABEL : GAP_LABEL} | ${run.startDate} to ${run.endDate} | ${inr(s.capital)}${s.compound ? ' compounded' : ''}, SL ${s.dailySlPct}% of capital${s.lotCap ? `, max ${s.lotCap} lots` : ''} | ${first} ${inr(b?.endCapital)} · ${second} ${inr(w?.endCapital)}`;
 }
 
 /** Settings and results of a saved run, for the saved-backtests table and the run details strip. */
 export function gapRunFacts(run) {
   const m = run.metrics, s = m.settings || {};
   const bound = (label, x) => ({ label, value: `${inr(x?.net, true)} (${pct(x?.returnPct)})`, sub: `${inr(x?.startCapital)} → ${inr(x?.endCapital)}`, tone: x?.net });
-  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, !s.compound && s.tradeAmount > 0 ? `${inr(s.tradeAmount)} per trade` : `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.entryMode === 'retest' ? `entry: retest of the 09:15 open within ${s.retestMin} min, SL ${s.retestSlPct}%` : s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
+  return { ...(s.entryMode === 'retest' ? { name: GAP_RETEST_LABEL } : {}), settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, !s.compound && s.tradeAmount > 0 ? `${inr(s.tradeAmount)} per trade` : `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.entryMode === 'retest' ? `entry: retest of the 09:15 open within ${s.retestMin} min, SL ${s.retestSlPct}%` : s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
     trades: `${m.best?.summary.trades ?? 0} (${s.lateEntryPct ? 'late' : 'best'}) · ${m.worst?.summary.trades ?? 0} (worst)`, signals: m.signals, sessions: m.sessions,
     results: s.entryMode === 'retest' ? [bound('Retest, best', m.best?.summary), bound('Retest, worst', m.worst?.summary)] : [bound(firstMode(s.lateEntryPct)[0], m.best?.summary), bound('Worst case', m.worst?.summary)] };
 }
 
-export function gapFields(ui) {
+export function gapFields(ui, retest = false) {
   const g = ui.gap, field = (label, control) => html`<label class="strategy-field"><span>${label}</span>${control}</label>`;
   return html`
     ${field('Starting capital ₹', html`<input class="input" type="number" min="1000" step="1000" data-gap-field="capital" value="${g.capital}" aria-label="Starting capital in rupees">`)}
@@ -80,18 +84,18 @@ export function gapFields(ui) {
     ${field('Lot cap (0 = none)', html`<input class="input" type="number" min="0" step="1" data-gap-field="lotCap" value="${g.lotCap}" aria-label="Maximum lots per trade, 0 for no cap">`)}
     ${field('Slippage ₹ / unit (entry)', html`<input class="input" type="number" min="0" max="50" step="0.25" data-gap-field="slippage" value="${g.slippage}" aria-label="Entry slippage in rupees per unit">`)}
     ${field('Square-off (IST)', html`<input class="input" type="time" min="09:20" max="15:29" data-gap-field="squareOff" value="${g.squareOff}" aria-label="Square-off time">`)}
-    ${field('Entry', html`<select class="input" data-gap-field="entryMode" aria-label="Entry"><option value="open" ${g.entryMode !== 'retest' ? 'selected' : ''}>At 09:15 (live)</option><option value="retest" ${g.entryMode === 'retest' ? 'selected' : ''}>Retest of the 09:15 open</option></select>`)}
-    ${g.entryMode === 'retest' ? html`${field('Retest window (minutes)', html`<input class="input" type="number" min="1" max="60" step="1" data-gap-field="retestMin" value="${g.retestMin ?? 15}" aria-label="Minutes after 09:15 to wait for the retest">`)}${field('Retest SL % below entry', html`<input class="input" type="number" min="0.5" max="50" step="0.5" data-gap-field="retestSlPct" value="${g.retestSlPct ?? 5}" aria-label="Stop-loss percent below the retest entry">`)}` : ''}
-    ${field('Late entry % (above 09:15 open)', html`<select class="input" data-gap-field="lateEntryPct" aria-label="How far above the option's 09:15 open the entry fills">${LATE.map(p => html`<option value="${p}" ${Number(g.lateEntryPct || 0) === p ? 'selected' : ''}>${p ? `+${p}%` : '0% (at the open)'}</option>`)}</select>`)}
+    ${retest ? html`${field('Retest window (minutes)', html`<input class="input" type="number" min="1" max="60" step="1" data-gap-field="retestMin" value="${g.retestMin ?? 15}" aria-label="Minutes after 09:15 to wait for the retest">`)}${field('Retest SL % below entry', html`<input class="input" type="number" min="0.5" max="50" step="0.5" data-gap-field="retestSlPct" value="${g.retestSlPct ?? 5}" aria-label="Stop-loss percent below the retest entry">`)}`
+      : field('Late entry % (above 09:15 open)', html`<select class="input" data-gap-field="lateEntryPct" aria-label="How far above the option's 09:15 open the entry fills">${LATE.map(p => html`<option value="${p}" ${Number(g.lateEntryPct || 0) === p ? 'selected' : ''}>${p ? `+${p}%` : '0% (at the open)'}</option>`)}</select>`)}
     ${field('Min NIFTY gap (points, 0 = any)', html`<input class="input" type="number" min="0" max="2000" step="5" data-gap-field="minGapPts" value="${g.minGapPts ?? 0}" aria-label="Trade only when NIFTY opens at least this many points above or below the previous close; 0 for any gap">`)}
     ${field('Strike', html`<select class="input" data-gap-field="strike" aria-label="Strike to trade">${STRIKES.map(k => html`<option value="${k}" ${Number(g.strike || 0) === k ? 'selected' : ''}>${strikeLabel(k)}${k === 2 ? ' (live)' : ''}</option>`)}</select>`)}
     ${field('Exit', html`<select class="input" data-gap-field="exitCandle" aria-label="Exit rule"><option value="1m" ${g.exitCandle === '1m' || !g.exitCandle ? 'selected' : ''}>Opposite 1-minute candle</option><option value="5m" ${g.exitCandle === '5m' ? 'selected' : ''}>Opposite 5-minute candle</option><option value="0916" ${g.exitCandle === '0916' ? 'selected' : ''}>At 09:16, any colour (live)</option></select>`)}
     ${field('Cost to cost at R (0 = off)', html`<input class="input" type="number" min="0" max="5" step="0.25" data-gap-field="costToCostR" value="${g.costToCostR}" aria-label="Move the stop to the entry price at this multiple of the risk; 0 for off">`)}`;
 }
 
-export function gapNotes(ui, caps) {
+export function gapNotes(ui, caps, retest = false) {
   const g = ui.gap, cov = caps?.gap?.coverage;
   const history = html`<p class="bt-muted">${cov ? `Uses the stored 1-minute option history on this server: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}. Runs in seconds and places no orders.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
+  if (retest) return html`<p class="bt-muted"><b>Gap retest 09:15 — the paper strategy.</b> The same 09:15 gap decision and ${strikeLabel(g.strike)} contract as Gap open 09:15, but no buy at 09:15: a limit buy at the option's 09:15 open, filled by the first minute from 09:16 whose low comes back to it within ${g.retestMin} minutes (no retest → no trade). Stop-loss ${g.retestSlPct}% below the entry (closer if your daily stop-loss allows less). Exit: ${g.exitCandle === '0916' ? 'the next minute’s open after the fill' : `the next minute’s open after the first opposite-colour NIFTY ${g.exitCandle === '5m' ? '5-minute' : '1-minute'} candle`}, the stop, or ${g.squareOff}. Two results for the fill minute: <b>best</b> = stopped there only if it closed below the stop, <b>worst</b> = on any touch.</p>${history}`;
   if (isUser(ui)) return html`<p class="bt-muted"><b>Gap open 09:15 — the strategy Algo Trading runs live</b>, replayed with the settings above. Two results: <b>${g.lateEntryPct ? 'late entry' : 'best case'}</b> and <b>worst case</b> (a fill one minute later); real trading lands in between. Charges as on each date.</p>${history}`;
   return html`<p class="bt-muted"><b>Gap open 09:15 — the strategy Algo Trading runs live.</b> Each day the ATM CE and PE of the nearest weekly expiry are checked at 09:15 (the side is chosen from the ATM; the trade uses the ${strikeLabel(g.strike)} strike of that side${g.strike ? ', fixed at 09:15' : ''}): the side whose premium opened above its previous close (gap up) and closed its first minute green is bought; both or neither → no trade. Size: ${g.fundsUse}% of ${g.compound ? 'the running' : 'the starting'} capital in whole lots${g.lotCap ? `, at most ${g.lotCap}` : ', no lot cap'}. Stop-loss: ${g.dailySlPct}% of capital ÷ the quantity, below the entry (your daily stop-loss, as live); hit when the option's 1-minute low reaches it. Exit: ${g.exitCandle === '0916' ? 'at the 09:16 open, whatever the colour of the 09:15 candle (worst case: one minute after its 09:16 fill, at the 09:17 open), or the stop inside that minute' : `the next minute's open after the first opposite-colour NIFTY ${g.exitCandle === '5m' ? '5-minute candle (09:15–09:19, 09:20–09:24, …; the one the entry is in counts)' : '1-minute candle'}, the stop, or ${g.squareOff}`}. Charges as on each date, ₹${g.slippage} slippage a unit on the entry.${g.costToCostR > 0 ? ` Cost to cost: after a minute whose option high reaches entry + ${g.costToCostR} × the risk, the stop is the entry price (as live).` : ''}</p>
     <p class="bt-muted"><b>Two results, because 1-minute candles cannot show the first 2 seconds.</b> Live buys at 09:15:02; the backtest gives the range it falls in: <b>${g.lateEntryPct ? `late entry` : 'best case'}</b> = filled ${g.lateEntryPct ? `${g.lateEntryPct}% above the option's 09:15 open (a market order fills during the 09:15 spike: live fills so far were 2.1% and 8.9% above it)` : "at the option's 09:15 open"} with the whole first minute's colour known; <b>worst case</b> = filled at the 09:16 open, after that minute. Real results land in between. Without a lot cap, sizes far beyond what the option trades at 09:15 are possible on paper; treat totals past about ₹1 crore as unreachable.</p>

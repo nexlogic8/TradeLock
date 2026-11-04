@@ -8,7 +8,9 @@ import { limitAmount } from '../rules/limits.js';
 import { dayState, capitalFor } from '../risk/service.js';
 import { marketOpen } from '../../lib/time.js';
 import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices } from './autotrade.js';
+import { paperTrades, retestConfig } from './paper-retest.js';
 import { UNDERLYINGS } from './underlyings.js';
+import { isAdminUser } from '../../lib/access.js';
 
 /** Everything Algo Trading needs before it may place orders, as a checklist (all ok = may start). */
 export function algoReadiness(userId, acct) {
@@ -31,7 +33,7 @@ export function algoLive(userId, acct) {
   const daily = rules.maxLoss?.on ? limitAmount(rules.maxLoss, capital) : null, pnl = s.realized + s.unrealized;
   const readiness = algoReadiness(userId, acct);
   return {
-    account: acct ? { id: acct.id, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, underlyings: algoIndices(acct) } : null,
+    account: acct ? { id: acct.id, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), underlyings: algoIndices(acct) } : null,
     underlyings: Object.values(UNDERLYINGS).map(({ key, label }) => ({ key, label })),
     ready: readiness.every(r => r.ok), readiness, marketOpen: marketOpen(),
     budget: { capital, daily, pnl, left: daily ? riskLeft(daily, pnl) : 0, lossLimitMode: rules.maxLoss?.mode, lossLimitValue: rules.maxLoss?.value },
@@ -39,5 +41,6 @@ export function algoLive(userId, acct) {
       killSwitch: !!rules.killSwitch?.on, locked: !!(s.paused || s.ks_active_at) },
     trades: autoTradesToday(userId).filter(t => !String(t.symbol || '').startsWith('TEST')),
     history: autoTradeHistory(userId),
+    paper: isAdminUser(userId) ? paperTrades(userId) : [],
   };
 }

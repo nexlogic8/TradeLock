@@ -151,7 +151,7 @@ export function brokerRoutes(r) {
     const acct = ownAccount(ctx.user.id, ctx.params.id);
     const change = {};
     // ORB, EMA 5/9 and EMA 9/15 are admin-only (lib/access.js): other users have Gap open 09:15 only.
-    if (!isAdminEmail(ctx.user.email) && ['emaCross', 'orb', 'ema915'].some(k => ctx.body[k] === true)) {
+    if (!isAdminEmail(ctx.user.email) && ['emaCross', 'orb', 'ema915', 'gapRetest'].some(k => ctx.body[k] === true)) {
       throw bad('VALIDATION', 'This strategy is not available on your account.');
     }
     if (ctx.body.emaCross !== undefined) change.cross_on = v.bool(ctx.body.emaCross, 'EMA 9/21 crossover') ? 1 : 0;
@@ -162,6 +162,13 @@ export function brokerRoutes(r) {
     if (ctx.body.manual !== undefined) change.manual_on = v.bool(ctx.body.manual, 'Manual trades') ? 1 : 0;
     // Kill switch on a day the Gap open 09:15 strategy has no entry.
     if (ctx.body.gapLock !== undefined) change.gap_lock = v.bool(ctx.body.gapLock, 'Kill switch if no Gap entry') ? 1 : 0;
+    // Gap retest 09:15 on paper (no orders): on or off, and its retest window and stop.
+    if (ctx.body.gapRetest !== undefined) change.retest_paper_on = v.bool(ctx.body.gapRetest, 'Gap retest 09:15 (paper)') ? 1 : 0;
+    if (ctx.body.retestCfg !== undefined) {
+      if (!isAdminEmail(ctx.user.email)) throw bad('VALIDATION', 'This strategy is not available on your account.');
+      const c = ctx.body.retestCfg || {};
+      change.retest_cfg = JSON.stringify({ windowMin: v.num(c.windowMin, 'Retest window (minutes)', { min: 1, max: 60, int: true }), slPct: v.num(c.slPct, 'Retest stop-loss %', { min: 0.5, max: 50 }) });
+    }
     // Indices to trade: any combination of NIFTY, BANKNIFTY and SENSEX, at least one.
     const picked = ctx.body.underlyings ?? (ctx.body.underlying !== undefined ? [ctx.body.underlying] : undefined);
     if (picked !== undefined) {

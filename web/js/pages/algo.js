@@ -21,6 +21,38 @@ const strategies = () => builtInFor(isAdmin()).filter(s => s.auto);
 
 const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
 
+/** Inside the Gap retest row: its retest window and stop, saved as they change. */
+function retestRow(a) {
+  const c = a?.retestCfg || { windowMin: 15, slPct: 3 };
+  return html`
+    <div class="algo-strat-head algo-strat-sub algo-retest-cfg">
+      <span class="algo-strat-name"><b>Paper settings</b><small>Simulated fills on live prices; no order goes to Dhan.</small></span>
+      <label>Window <input class="input" type="number" min="1" max="60" step="1" value="${c.windowMin}" data-retest-cfg="windowMin" aria-label="Retest window in minutes" ${a ? '' : 'disabled'}> min</label>
+      <label>Stop <input class="input" type="number" min="0.5" max="50" step="0.5" value="${c.slPct}" data-retest-cfg="slPct" aria-label="Stop-loss percent below the entry" ${a ? '' : 'disabled'}> %</label>
+    </div>`;
+}
+
+/** Paper trades (Gap retest 09:15): each day's simulated trade with its P&L after charges, and the totals. */
+function paperSection(rows) {
+  const traded = rows.filter(t => t.pnl != null), wins = traded.filter(t => t.pnl > 0).length, total = traded.reduce((a, t) => a + t.pnl, 0);
+  const money = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`;
+  const PAPER = { watching: ['Waiting', 'ice'], open: ['Open', ''], closed: ['Closed', 'grey'], skipped: ['No trade', 'amber'] };
+  return html`
+    <section class="panel pad algo-block">
+      <h3 class="panel-title">Paper trades <span class="pill sm ice">No orders</span></h3>
+      ${rows.length ? html`
+        <p class="muted small algo-history-sum">${traded.length} trade${traded.length === 1 ? '' : 's'} · ${wins} won · P&amp;L <b class="${total >= 0 ? 'pos' : 'neg'}">${money(total)}</b> after charges · ${rows.length - traded.length} day${rows.length - traded.length === 1 ? '' : 's'} without a trade</p>
+        <div class="bt-table-wrap"><table class="bt-table algo-trades">
+          <thead><tr><th>Date</th><th>Strategy</th><th>Contract</th><th>Lots</th><th>Waits for</th><th>Entry</th><th>Stop</th><th>Exit</th><th>P&amp;L</th><th>Status</th></tr></thead>
+          <tbody>${rows.map(t => { const [label, tone] = PAPER[t.status] || [t.status, '']; return html`<tr>
+            <td class="num">${t.day}</td><td>${t.strategy}${t.direction ? ` · ${t.direction}` : ''}</td><td>${t.symbol || '—'}</td><td class="num">${t.lots ?? '—'}</td>
+            <td class="num">${price(t.level)}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
+            <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnl == null ? '—' : money(t.pnl)}</td>
+            <td><span class="pill sm ${tone}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
+        : html`<p class="muted small" style="margin:0">No paper trades yet. Switch on Gap retest 09:15 above; it runs from the next 09:15.</p>`}
+    </section>`;
+}
+
 /** Earlier days' automatic trades: one row each, with its P&L (before charges), and the totals of the traded ones. */
 function historySection(rows) {
   const traded = rows.filter(t => t.pnl != null), wins = traded.filter(t => t.pnl > 0).length;
@@ -49,11 +81,12 @@ function strategyRow(s, a, open, rules) {
   return html`
     <div class="algo-strat ${on_ ? 'on' : ''}">
       <div class="algo-strat-head">
-        <span class="algo-strat-name"><b>${s.name}</b><small>${s.tag} · ${s.timeframe}</small></span>
+        <span class="algo-strat-name"><b>${s.name}${s.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</b><small>${s.tag} · ${s.timeframe}</small></span>
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
       ${s.key === 'gap' ? gapLockRow(a, rules) : ''}
+      ${s.key === 'gapRetest' ? retestRow(a) : ''}
     </div>`;
 }
 
@@ -148,7 +181,8 @@ export default {
             <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
           : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
       </section>
-      ${historySection(d.history || [])}`;
+      ${historySection(d.history || [])}
+      ${isAdmin() ? paperSection(d.paper || []) : ''}`;
   },
 
   // Follow the top-bar switch at once instead of waiting for the 15-second refresh.
@@ -230,6 +264,18 @@ export default {
         toast(next ? 'Manual trades allowed alongside Algo Trading.' : 'Manual trades blocked while Algo Trading is on.', 'ok');
         await refresh();
       } catch (err) { toastError(err); b.disabled = false; }
+    }, signal);
+
+    // Gap retest (paper): window and stop are saved together when either changes.
+    on(el, 'change', '[data-retest-cfg]', async () => {
+      const id = ctx.data.account?.id;
+      if (!id) return;
+      const val = k => Number(el.querySelector(`[data-retest-cfg="${k}"]`)?.value);
+      try {
+        await post(`/brokers/${id}/strategies`, { retestCfg: { windowMin: val('windowMin'), slPct: val('slPct') } });
+        toast('Paper settings saved.', 'ok');
+        await refresh();
+      } catch (err) { toastError(err); await refresh(); }
     }, signal);
 
     on(el, 'click', '[data-gap-lock-toggle]', async (_, b) => {

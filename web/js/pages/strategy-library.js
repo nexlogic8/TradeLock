@@ -33,6 +33,15 @@ export const BUILT_IN = [
     ['Stop-loss', 'From your Risk rules: the day’s stop-loss left (daily loss limit − today’s loss) ÷ the quantity, below the fill, placed at Dhan. A stop hit loses about your daily limit. If that is under 1% of the premium, no trade.'],
     ['Note', 'Size ignores the day’s stop-loss: a fall to the stop loses your daily stop-loss. Backtest: needs 10-second data we don’t have, so results are unproven.'],
   ] },
+  { key: 'gapRetest', flag: 'retestPaperOn', name: 'Gap retest 09:15', tag: 'Paper trading · retest of the 09:15 open', timeframe: '1-minute', auto: true, paper: true, rules: [
+    ['Paper only', 'Runs on live prices with simulated fills: no order ever goes to your broker. Its trades are listed under Paper trades on the AI Algo Trading page, apart from your real trades.'],
+    ['Signal', 'The same 09:15 decision as Gap open 09:15: the ATM CE or PE whose premium opened above its previous session’s last trade (one side only), and the same ITM2 contract.'],
+    ['Entry', 'Not at 09:15: from 09:16 it waits for that option to come back to its own 09:15 open, within the retest window (default 15 minutes), and buys there on paper. No retest in time → no trade.'],
+    ['Stop-loss', 'The retest stop % below the entry (default 3%), or closer if your day’s stop-loss allows less.'],
+    ['Exit', 'The first NIFTY 1-minute candle of the other colour (red for CE, green for PE) after the entry minute, the stop-loss, or your cutoff. P&L after charges.'],
+    ['Size', 'As Gap open 09:15: your Capital per trade (Risk rules), within what a market order could use.'],
+    ['Backtest', '1 Nov 2025 – 30 Oct 2026, ₹6.5 L fixed, 85%, SL 7%: every retest variant lost (best: window 15 min, stop 3%, about −₹37,000 / −₹1.3 L), as the retest mostly fills on gaps that are failing. Paper trade it before any real money.'],
+  ] },
   { key: 'hammer', name: 'Hammer 1m', tag: 'EMA45 wick rejection', timeframe: '1-minute', auto: false, rules: [
     ['CE setup', 'Hammer: body fully above EMA 45, lower wick touches EMA 45 and is at least as long as the body.'],
     ['PE setup', 'Inverted hammer: body fully below EMA 45, upper wick touches EMA 45 and is at least as long as the body.'],
