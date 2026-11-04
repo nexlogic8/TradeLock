@@ -177,7 +177,7 @@ export default {
           </table></div>` : html`<p class="muted" style="margin:0">No open positions or pending orders.</p>`}
       </div>
 
-      <div class="banner info mt">${icon('info')}<div><b>How protection works.</b> TradeLock checks your rules against your ${d.broker.label} positions on every sync. ${d.broker.capabilities.accountLock === 'killswitch'
+      <div class="banner info mt">${icon('info')}<div><b>How protection works.</b> TradeLock checks your rules against your ${d.broker.label} positions on every sync. ${d.broker.capabilities?.accountLock === 'killswitch'
         ? `When a limit is hit, it closes your positions and turns on the ${d.broker.label} kill switch, so no new trades can be placed in your ${d.broker.label} account until the next trading day.`
         : `When a limit is hit, it closes your positions. An account-wide lock is not available for ${d.broker.label}.`}</div></div>`;
   },

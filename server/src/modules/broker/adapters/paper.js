@@ -109,6 +109,7 @@ export function createPaperAdapter({ userId, data }) {
   const adapter = {
     ...data,
     label: 'Paper', tradingBroker: 'paper', paper: true,
+    capabilities: { positions: 'available', squareOff: 'available', accountLock: 'killswitch' },   // paper fills, exits and the paper day lock
     permissions: undefined, tradeHistory: undefined,   // no static-IP check or broker trade book on paper
     async verify() { return { ok: true }; },
     placeOrder: place,

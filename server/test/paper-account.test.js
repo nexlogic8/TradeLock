@@ -68,3 +68,11 @@ test('sign-up opens a Paper account; a connected broker takes priority over it',
   upsertAccount(id, { broker: 'dhan', clientId: 'C77', accessToken: 'test-token-not-real-0123456789' });
   assert.equal(accountFor(id).broker, 'dhan', 'the real broker comes first');
 });
+
+test('Overview data for a Paper account: the broker has capabilities (kill switch = the paper day lock)', async () => {
+  const { getDashboard } = await import('../src/modules/risk/service.js');
+  const d = getDashboard(uid);
+  assert.equal(d.broker.label, 'Paper');
+  assert.deepEqual(d.broker.capabilities, { positions: 'available', squareOff: 'available', accountLock: 'killswitch' });
+  assert.equal(d.killSwitch.supported, true);
+});
