@@ -14,6 +14,7 @@ import { validRefCode } from '../affiliate/service.js';
 import { guardDevice } from '../billing/trialguard.js';
 import { renderEmail } from '../../lib/emailtpl.js';
 import { deleteAccount } from './deletion.js';
+import { ensurePaperAccount } from '../broker/registry.js';
 
 export function authRoutes(r) {
   r.post('/api/auth/signup', ctx => {
@@ -27,6 +28,7 @@ export function authRoutes(r) {
       if (!refCode) throw bad('INVALID_REFERRAL', 'That referral code was not found. Check it, or leave the box empty.', { field: 'ref' });
     }
     const id = createUser({ email, password, name, refCode });
+    ensurePaperAccount(id);   // every new account starts with paper trading (₹10 lakh); connecting a broker takes over
     audit(id, 'auth.signup', {}, ctx.ip);
     startSession(ctx.res, id);
     guardDevice(ctx, id);

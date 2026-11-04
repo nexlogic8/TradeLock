@@ -62,7 +62,7 @@ test('link: saved encrypted, never returned; a test records the funds or the ref
     assert.ok(!raw.creds_enc.includes(secret), 'stored encrypted');
     assert.ok(!JSON.stringify(stoxkartLink(uid)).includes(secret), 'never sent to the page');
   }
-  assert.equal(stmt('SELECT COUNT(*) AS n FROM broker_accounts WHERE user_id = ?').get(uid).n, 0, 'not an active broker account');
+  assert.equal(stmt("SELECT COUNT(*) AS n FROM broker_accounts WHERE user_id = ? AND broker != 'paper'").get(uid).n, 0, 'not an active broker account (the Paper account from sign-up aside)');
 
   const ok = await testStoxkartLink(uid, null, { transport: fakeStoxkart().transport });
   assert.deepEqual([ok.status, ok.funds.available], ['verified', 124020.87]);

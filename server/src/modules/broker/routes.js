@@ -3,7 +3,7 @@ import { bad, notFound, HttpError } from '../../lib/errors.js';
 import { v } from '../../lib/validate.js';
 import { limit } from '../../lib/ratelimit.js';
 import { config } from '../../config.js';
-import { CATALOG, createAdapter, adapterFor, dropAdapter, accountFor, accountSummary, upsertAccount, accountsChanged } from './registry.js';
+import { CATALOG, createAdapter, adapterFor, dropAdapter, accountFor, accountSummary, upsertAccount, accountsChanged, ensurePaperAccount } from './registry.js';
 import { clearBook } from './book.js';
 import { syncAccount } from '../risk/monitor.js';
 import { dayState, getDashboard, agentLockReason, algoLocked, ALGO_LOCK_MESSAGE } from '../risk/service.js';
@@ -41,7 +41,7 @@ export function brokerRoutes(r) {
   // A Paper account (no broker) is not a broker connection: the page offers Connect, which replaces it.
   r.get('/api/brokers', ctx => ({
     catalog: CATALOG,
-    account: accountFor(ctx.user.id)?.broker === 'paper' ? null : accountSummary(accountFor(ctx.user.id)),
+    account: accountSummary(accountFor(ctx.user.id)),
     links: { stoxkart: stoxkartLink(ctx.user.id) },
     staticIp: staticIpView(ctx.user.id),
   }));
@@ -227,10 +227,7 @@ export function brokerRoutes(r) {
   r.post('/api/paper/account', async ctx => {
     const cur = accountFor(ctx.user.id);
     if (cur) return { account: accountSummary(cur) };
-    stmt(`INSERT INTO broker_accounts (user_id, broker, client_id, token_enc, status, created_at, paper_mode, agent_on, gap_on, orb_on, cross_on, ema915_on)
-      VALUES (?, 'paper', 'PAPER', NULL, 'connected', ?, 1, 1, 1, 0, 0, 0)
-      ON CONFLICT (user_id, broker) DO UPDATE SET status = 'connected', paper_mode = 1`).run(ctx.user.id, Date.now());
-    accountsChanged();
+    ensurePaperAccount(ctx.user.id);
     paperWallet(ctx.user.id);
     audit(ctx.user.id, 'paper.account', {}, ctx.ip);
     const acct = accountFor(ctx.user.id);

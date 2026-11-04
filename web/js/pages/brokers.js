@@ -1,6 +1,6 @@
 import { html, $, on } from '../core/dom.js';
 import { get, post, del } from '../core/api.js';
-import { ago, dateIST } from '../core/format.js';
+import { ago, dateIST, inr } from '../core/format.js';
 import { refreshUser } from '../core/session.js';
 import { store } from '../core/store.js';
 import { icon } from '../ui/icons.js';
@@ -47,6 +47,43 @@ function lockRow(a) {
     <p>Uses ${ownBroker(a)}'s kill switch, which also blocks orders from the ${ownBroker(a)} app. It needs a flat account to switch on.${ks ? ` Status read ${ago(ks.checkedAt)}.` : ''}</p></div>`;
 }
 
+// Paper trading as the first broker tab, with the paper wallet's balance.
+async function withPaper(d) {
+  d.catalog = [{ id: 'paper', name: 'Paper', status: 'available' }, ...d.catalog.filter(b => b.id !== 'paper')];
+  d.paper = await get('/paper/wallet').catch(() => null);
+  return d;
+}
+
+/** The Paper tab: in use or not, the paper wallet, and the switch between paper and real money. */
+function paperView(ctx, a, real) {
+  const p = ctx.data.paper, inUse = !a || a.broker === 'paper' || !!a.paperMode, name = real ? (ownBroker(real) === 'Paper' ? 'Dhan' : ownBroker(real)) : null;
+  return html`
+    <div class="panel pad" style="padding:26px">
+      ${brokerTabs(ctx)}
+      <div class="broker-pane ${ctx.ui.tabFrom ? 'enter' : ''}"><div class="mt">
+        <div class="acct-head">
+          <div class="acct-id ok">
+            ${brokerLogo('paper', 'Paper')}
+            <div class="grow"><h2>Paper trading ${inUse ? pill('In use', '', { dot: true, pulse: true }) : pill('Not in use', 'grey')}</h2>
+              <span class="muted small">${p ? html`Paper wallet <b class="num">${inr(p.balance)}</b> · ` : ''}live prices, simulated fills, no order goes to any broker</span></div>
+          </div>
+        </div>
+        <div class="mt">
+          <div class="cap"><b>Orders</b>${pill('Simulated')}<p>Filled at the live price with the paper wallet's money; stop-losses rest until the price reaches them, as at a broker.</p></div>
+          <div class="cap"><b>Prices</b>${pill('Live')}<p>From TradeLock's Dhan market data: option chain, quotes and the live feed. No broker account needed.</p></div>
+          <div class="cap"><b>Algo Trading and risk rules</b>${pill('Available')}<p>Strategies, stop-loss, exits, your Risk rules and the day lock run exactly as with real money; Overview and P&amp;L show the paper account.</p></div>
+        </div>
+        <div class="row mt">
+          ${!inUse ? html`<button class="btn btn-primary" id="paper-use">${icon('play')}Use paper trading</button>`
+            : real ? html`<button class="btn" id="paper-real">${icon('link')}Switch to real money (${name})</button>` : ''}
+          <a class="btn btn-ghost" href="/wallet" data-nav="wallet">${icon('wallet')}Set paper balance</a>
+          <a class="btn btn-ghost" href="/algo" data-nav="algo">AI Algo Trading</a>
+        </div>
+        ${!real ? html`<p class="muted small mt">To trade with real money, open the <b>Dhan</b> tab and connect your account. It starts on Paper, and Real is one switch away.</p>` : ''}
+      </div></div>
+    </div>`;
+}
+
 // The connected account's own broker name (its label turns into the trading broker's when orders go via StoxKart).
 const ownName = (catalog, a) => catalog.find(c => c.id === a.broker)?.name || a.label;
 
@@ -56,15 +93,18 @@ export default {
   layout: 'app',
   auth: true,
 
-  load: () => get('/brokers'),
+  // Paper trading is the first tab: the paper wallet at live prices (no broker needed), and the default.
+  async load() { return withPaper(await get('/brokers')); },
 
   view(ctx) {
     const { catalog } = ctx.data;
     const a = ctx.state.dash?.broker ?? ctx.data.account;
     const ui = ctx.ui;
-    if (a) ui.broker ??= a.tradeVia === 'stoxkart' ? 'stoxkart' : a.broker;
+    const real = a && a.broker !== 'paper' ? a : null;   // the broker connection, if any (else the Paper account)
+    ui.broker ??= !real || a.paperMode ? 'paper' : a.tradeVia === 'stoxkart' ? 'stoxkart' : a.broker;
     const soon = catalog.find(b => b.id === ui.broker && b.status !== 'available');
-    if (!a) return connectPanel(ctx);
+    if (ui.broker === 'paper') return paperView(ctx, a, real);
+    if (!real) return connectPanel(ctx);
     if (ui.switching) return connectPanel(ctx, { cancel: true });
     return html`
       <div class="panel pad" style="padding:26px">
@@ -137,11 +177,32 @@ export default {
     const account = () => ctx.state.dash?.broker ?? ctx.data.account;
     // Connect (no broker yet) or switch broker, right on this page.
     bindConnect(ctx, async () => {
-      ctx.data = await get('/brokers');
+      ctx.data = await withPaper(await get('/brokers')); ui.broker = undefined;
       Object.assign(ui, { switching: false, progress: null, error: null });
       toast('Broker connected. Monitoring is live.');
     });
     on(el, 'click', '#cancel-switch', () => { ui.switching = false; ui.error = null; ctx.paint(); }, signal);
+    // Paper tab: use paper trading (switch the broker account to Paper, or set up the Paper account), or go back to real.
+    const reloadAll = async () => { ctx.data = await withPaper(await get('/brokers')); store.set({ dash: await get('/dashboard') }); ctx.paint(); };
+    on(el, 'click', '#paper-use', async (_, b) => {
+      const real = account()?.broker !== 'paper' ? account() : null;
+      b.disabled = true;
+      try {
+        await (real ? post(`/brokers/${real.id}/paper`, { on: true }) : post('/paper/account'));
+        toast('Paper trading on: the paper wallet at live prices, no orders to any broker.', 'ok');
+        await reloadAll();
+      } catch (e) { toast(e.message, 'error'); b.disabled = false; }
+    }, signal);
+    on(el, 'click', '#paper-real', async (_, b) => {
+      if (!confirm('Switch to REAL money on your broker account?')) return;
+      b.disabled = true;
+      try {
+        await post(`/brokers/${account().id}/paper`, { on: false });
+        toast('Real trading on: your broker account, real money.', 'warn');
+        ui.broker = undefined;
+        await reloadAll();
+      } catch (e) { toast(e.message, 'error'); b.disabled = false; }
+    }, signal);
     bindStoxkart(ctx);
     const doReconnect = async body => {
       await post(`/brokers/${account().id}/reconnect`, body);
@@ -180,7 +241,7 @@ export default {
         // Drop the live broker right away (top bar, sidebar, this page); the server's snapshot follows.
         if (store.get().dash) store.set({ dash: { ...store.get().dash, broker: null } });
         await refreshUser();
-        ctx.data = await get('/brokers');
+        ctx.data = await withPaper(await get('/brokers'));
         Object.assign(ui, { confirmDisconnect: false, justConnected: false, broker: null, progress: null, error: null });
         toast('Broker disconnected. Monitoring has stopped.', 'warn');
       } catch (e) { toast(e.message, 'error'); }

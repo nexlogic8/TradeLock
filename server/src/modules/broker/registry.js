@@ -95,8 +95,18 @@ export const getAccountsVersion = () => accountsVersion;
 
 export const dropAdapter = accountId => { live.delete(accountId); accountsChanged(); };
 
+// A real broker comes first: the Paper account (made at sign-up) is used only while no broker is connected.
 export const accountFor = userId =>
-  stmt(`SELECT * FROM broker_accounts WHERE user_id = ? AND status != 'disconnected' ORDER BY created_at DESC LIMIT 1`).get(userId);
+  stmt(`SELECT * FROM broker_accounts WHERE user_id = ? AND status != 'disconnected' ORDER BY broker = 'paper', created_at DESC LIMIT 1`).get(userId);
+
+/** The Paper account for a user with no broker (sign-up, or Paper on the Algo page): ₹10 lakh paper wallet, Gap open 09:15 on. */
+export function ensurePaperAccount(userId) {
+  stmt(`INSERT INTO broker_accounts (user_id, broker, client_id, token_enc, status, created_at, paper_mode, agent_on, gap_on, orb_on, cross_on, ema915_on)
+    VALUES (?, 'paper', 'PAPER', NULL, 'connected', ?, 1, 1, 1, 0, 0, 0)
+    ON CONFLICT (user_id, broker) DO UPDATE SET status = 'connected', paper_mode = 1`).run(userId, Date.now());
+  accountsChanged();
+  return stmt(`SELECT * FROM broker_accounts WHERE user_id = ? AND broker = 'paper'`).get(userId);
+}
 
 // The market-feed socket logs in with the shared data account (MARKET_DATA_USER_ID), else the user's own Dhan token.
 // Keep the decryption server-side; never return these credentials from an HTTP route or websocket event.

@@ -10,7 +10,7 @@ import { limit } from '../../lib/ratelimit.js';
 import { randomToken, verifyTotp } from '../../lib/crypto.js';
 import { startSession, endAllSessions } from './session.js';
 import { createUser, findUserByEmail, publicUser } from './service.js';
-import { accountFor } from '../broker/registry.js';
+import { accountFor, ensurePaperAccount } from '../broker/registry.js';
 import { audit } from '../audit/service.js';
 import { guardDevice } from '../billing/trialguard.js';
 
@@ -79,7 +79,9 @@ function findOrCreate(claims, refCode) {
     return { id: existing.id, created: false };
   }
   const name = String(claims.name || email.split('@')[0]).slice(0, 80);
-  return { id: createUser({ email, password: null, name, refCode, googleSub: claims.sub }), created: true };
+  const id = createUser({ email, password: null, name, refCode, googleSub: claims.sub });
+  ensurePaperAccount(id);   // every new account starts with paper trading (₹10 lakh); connecting a broker takes over
+  return { id, created: true };
 }
 
 export function googleRoutes(r) {

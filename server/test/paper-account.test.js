@@ -27,7 +27,7 @@ const call = async (method, path, body) => {
   return { status: r.status, body: await r.json().catch(() => ({})) };
 };
 
-test('a user with no broker sets up paper trading: a Paper account, ₹10 lakh, ready on paper, not shown as a broker', async () => {
+test('a user with no broker sets up paper trading: a Paper account, ₹10 lakh, ready on paper', async () => {
   const r = await call('POST', '/paper/account');
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.account.label, 'Paper');
@@ -38,7 +38,7 @@ test('a user with no broker sets up paper trading: a Paper account, ₹10 lakh, 
   assert.ok(ready.find(x => x.id === 'paper').ok);
   assert.ok(!ready.some(x => x.id === 'dhan' || x.id === 'connected' || x.id === 'orders'), 'no Dhan checks on paper');
   assert.equal((await call('GET', '/paper/wallet')).body.balance, 1_000_000);
-  assert.equal((await call('GET', '/brokers')).body.account, null, 'Broker accounts still offers Connect');
+  assert.equal((await call('GET', '/brokers')).body.account.broker, 'paper', 'Broker accounts shows it (the Paper tab)');
   assert.equal((await call('POST', '/paper/account')).status, 200, 'twice is fine');
 });
 
@@ -56,4 +56,15 @@ test('normal users can switch on Gap retest (paper) and set it; Real needs a bro
   assert.equal(live.status, 200);
   assert.ok(Array.isArray(live.body.paper), 'paper trades for users too');
   assert.equal(live.body.account.paperMode, true);
+});
+
+test('sign-up opens a Paper account; a connected broker takes priority over it', async () => {
+  const res = await fetch(`${base}/api/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'fresh@example.com', password: 'longpassword' }) });
+  assert.equal(res.status, 201);
+  const id = stmt('SELECT id FROM users WHERE email = ?').get('fresh@example.com').id;
+  const { accountFor, upsertAccount } = await import('../src/modules/broker/registry.js');
+  const paper = accountFor(id);
+  assert.deepEqual([paper.broker, paper.paper_mode, paper.gap_on, paper.algo_on], ['paper', 1, 1, 0], 'paper trading from the first login (Algo Trading off until started)');
+  upsertAccount(id, { broker: 'dhan', clientId: 'C77', accessToken: 'test-token-not-real-0123456789' });
+  assert.equal(accountFor(id).broker, 'dhan', 'the real broker comes first');
 });
