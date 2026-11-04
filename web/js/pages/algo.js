@@ -109,7 +109,13 @@ export default {
   layout: 'app',
   auth: true,
 
-  load: () => get('/algo/live'),
+  // Paper is the default: with no broker connected, opening the page sets up the Paper account (₹10 lakh paper wallet,
+  // shared market data), so strategies can be switched on and Algo Trading started on paper at once.
+  async load() {
+    const d = await get('/algo/live');
+    if (d.account) return d;
+    try { await post('/paper/account'); return await get('/algo/live'); } catch { return d; }
+  },
 
   view(ctx) {
     const d = ctx.data, a = d.account, running = !!a?.algoOn;
