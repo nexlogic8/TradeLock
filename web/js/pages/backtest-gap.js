@@ -16,7 +16,9 @@ const modesFor = late => [['best', ...firstMode(late)], MODES[1]];
 // Users (not administrators) get the same form and results, with a short description instead of the rules text
 // (server: lib/access.js).
 const isUser = ui => ui?.caps?.admin === false;
-const modesOf = m => modesFor(m.settings.lateEntryPct);
+// Retest entries: both results fill at the 09:15 open; they differ in the fill minute's stop (close below vs any touch).
+const RETEST_MODES = [['best', 'Retest, best', 'stop in the fill minute only on a close below'], ['worst', 'Retest, worst', 'stop in the fill minute on any touch']];
+const modesOf = m => (m.settings.entryMode === 'retest' ? RETEST_MODES : modesFor(m.settings.lateEntryPct));
 
 const clock = s => new Intl.DateTimeFormat('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).format(new Date(s * 1000));
 const dayLabel = day => new Intl.DateTimeFormat('en-IN', { day:'numeric', month:'short', year:'numeric', timeZone:'UTC' }).format(new Date(`${day}T00:00:00Z`));
@@ -37,19 +39,19 @@ const STRIKES = [-3, -2, -1, 0, 1, 2, 3];
 
 export function gapDefaults(ui, caps) {
   const d = caps?.gap?.defaults || {};
-  ui.gap ??= { capital:d.capital ?? 100000, compound:d.compound ?? true, fundsUse:d.fundsUse ?? 90, dailySlPct:d.dailySlPct ?? 20, lotCap:d.lotCap ?? 0, slippage:d.slippage ?? 1, squareOff:d.squareOff ?? '15:15', costToCostR:d.costToCostR ?? 1, exitCandle:d.exitCandle ?? '0916', strike:d.strike ?? 0, lateEntryPct:d.lateEntryPct ?? 5, minGapPts:d.minGapPts ?? 0, tradeAmount:d.tradeAmount ?? 0 };
+  ui.gap ??= { capital:d.capital ?? 100000, compound:d.compound ?? true, fundsUse:d.fundsUse ?? 90, dailySlPct:d.dailySlPct ?? 20, lotCap:d.lotCap ?? 0, slippage:d.slippage ?? 1, squareOff:d.squareOff ?? '15:15', costToCostR:d.costToCostR ?? 1, exitCandle:d.exitCandle ?? '0916', strike:d.strike ?? 0, lateEntryPct:d.lateEntryPct ?? 5, minGapPts:d.minGapPts ?? 0, tradeAmount:d.tradeAmount ?? 0, entryMode:d.entryMode ?? 'open', retestMin:d.retestMin ?? 15, retestSlPct:d.retestSlPct ?? 5 };
   ui.gapView ??= 'best';
 }
 /** Restore the form from a saved run's settings. */
 export function gapFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
-  ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0, minGapPts:s.minGapPts ?? 0, tradeAmount:s.tradeAmount ?? 0 };
+  ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0, minGapPts:s.minGapPts ?? 0, tradeAmount:s.tradeAmount ?? 0, entryMode:s.entryMode ?? 'open', retestMin:s.retestMin ?? 15, retestSlPct:s.retestSlPct ?? 5 };
 }
 export const gapPayload = ui => ({ strategy:GAP_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.gap });
 /** Apply a change from a [data-gap-field] control. Returns true when handled. */
 export function gapFieldChange(ui, field) {
   const key = field.dataset.gapField; if (!key) return false;
-  ui.gap[key] = key === 'squareOff' || key === 'exitCandle' ? field.value : key === 'compound' ? field.value === 'compound' : Number(field.value);
+  ui.gap[key] = key === 'squareOff' || key === 'exitCandle' || key === 'entryMode' ? field.value : key === 'compound' ? field.value === 'compound' : Number(field.value);
   return true;
 }
 export function gapRunLabel(run) {
@@ -62,9 +64,9 @@ export function gapRunLabel(run) {
 export function gapRunFacts(run) {
   const m = run.metrics, s = m.settings || {};
   const bound = (label, x) => ({ label, value: `${inr(x?.net, true)} (${pct(x?.returnPct)})`, sub: `${inr(x?.startCapital)} → ${inr(x?.endCapital)}`, tone: x?.net });
-  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, !s.compound && s.tradeAmount > 0 ? `${inr(s.tradeAmount)} per trade` : `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
+  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, !s.compound && s.tradeAmount > 0 ? `${inr(s.tradeAmount)} per trade` : `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.entryMode === 'retest' ? `entry: retest of the 09:15 open within ${s.retestMin} min, SL ${s.retestSlPct}%` : s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
     trades: `${m.best?.summary.trades ?? 0} (${s.lateEntryPct ? 'late' : 'best'}) · ${m.worst?.summary.trades ?? 0} (worst)`, signals: m.signals, sessions: m.sessions,
-    results: [bound(firstMode(s.lateEntryPct)[0], m.best?.summary), bound('Worst case', m.worst?.summary)] };
+    results: s.entryMode === 'retest' ? [bound('Retest, best', m.best?.summary), bound('Retest, worst', m.worst?.summary)] : [bound(firstMode(s.lateEntryPct)[0], m.best?.summary), bound('Worst case', m.worst?.summary)] };
 }
 
 export function gapFields(ui) {
@@ -78,6 +80,8 @@ export function gapFields(ui) {
     ${field('Lot cap (0 = none)', html`<input class="input" type="number" min="0" step="1" data-gap-field="lotCap" value="${g.lotCap}" aria-label="Maximum lots per trade, 0 for no cap">`)}
     ${field('Slippage ₹ / unit (entry)', html`<input class="input" type="number" min="0" max="50" step="0.25" data-gap-field="slippage" value="${g.slippage}" aria-label="Entry slippage in rupees per unit">`)}
     ${field('Square-off (IST)', html`<input class="input" type="time" min="09:20" max="15:29" data-gap-field="squareOff" value="${g.squareOff}" aria-label="Square-off time">`)}
+    ${field('Entry', html`<select class="input" data-gap-field="entryMode" aria-label="Entry"><option value="open" ${g.entryMode !== 'retest' ? 'selected' : ''}>At 09:15 (live)</option><option value="retest" ${g.entryMode === 'retest' ? 'selected' : ''}>Retest of the 09:15 open</option></select>`)}
+    ${g.entryMode === 'retest' ? html`${field('Retest window (minutes)', html`<input class="input" type="number" min="1" max="60" step="1" data-gap-field="retestMin" value="${g.retestMin ?? 15}" aria-label="Minutes after 09:15 to wait for the retest">`)}${field('Retest SL % below entry', html`<input class="input" type="number" min="0.5" max="50" step="0.5" data-gap-field="retestSlPct" value="${g.retestSlPct ?? 5}" aria-label="Stop-loss percent below the retest entry">`)}` : ''}
     ${field('Late entry % (above 09:15 open)', html`<select class="input" data-gap-field="lateEntryPct" aria-label="How far above the option's 09:15 open the entry fills">${LATE.map(p => html`<option value="${p}" ${Number(g.lateEntryPct || 0) === p ? 'selected' : ''}>${p ? `+${p}%` : '0% (at the open)'}</option>`)}</select>`)}
     ${field('Min NIFTY gap (points, 0 = any)', html`<input class="input" type="number" min="0" max="2000" step="5" data-gap-field="minGapPts" value="${g.minGapPts ?? 0}" aria-label="Trade only when NIFTY opens at least this many points above or below the previous close; 0 for any gap">`)}
     ${field('Strike', html`<select class="input" data-gap-field="strike" aria-label="Strike to trade">${STRIKES.map(k => html`<option value="${k}" ${Number(g.strike || 0) === k ? 'selected' : ''}>${strikeLabel(k)}${k === 2 ? ' (live)' : ''}</option>`)}</select>`)}
@@ -116,7 +120,7 @@ export function gapResults(ui, result) {
     <div class="bt-orb-actions"><button class="btn bt-chart-btn" data-gap-csv>${icon('chart')} Export trades CSV</button></div>
     ${m.best.trades.length || m.worst.trades.length ? html`<h4 class="bt-orb-title">Capital after each trade <small class="bt-muted">· green: ${modesOf(m)[0][1].toLowerCase()} · amber: ${modesOf(m)[1][1].toLowerCase()}</small></h4><div id="bt-gap-equity" class="bt-chart-host bt-orb-equity" role="img" aria-label="Capital after each trade, both results"></div>` : html`<div class="bt-empty">${icon('radar')}<b>No trades.</b><span>${isUser(ui) ? 'The strategy found no trade in this range.' : 'No day in this range had exactly one ATM premium gap up and stay green.'}</span></div>`}
     ${months.length ? html`<h4 class="bt-orb-title">Month by month</h4><div class="bt-table-wrap"><table class="bt-table"><thead><tr><th rowspan="2">Month</th><th colspan="3">${modesOf(m)[0][1]}</th><th colspan="3">${modesOf(m)[1][1]}</th></tr><tr><th>Trades / won / stops</th><th>P&amp;L</th><th>Capital</th><th>Trades / won / stops</th><th>P&amp;L</th><th>Capital</th></tr></thead><tbody>${months.map(k => html`<tr><td>${monthLabel(k)}</td>${monthCell(mb[k])}${monthCell(mw[k])}</tr>`)}</tbody></table></div>` : ''}
-    ${m[view].trades.length ? html`<div class="bt-gap-tabs" role="tablist">${modesFor(m.settings.lateEntryPct).map(([k, t]) => html`<button class="btn bt-chart-btn ${view === k ? 'active' : ''}" role="tab" aria-selected="${view === k}" data-gap-view="${k}">${t} trades (${m[k].trades.length})</button>`)}</div>${tradeTable(m[view])}` : ''}
+    ${m[view].trades.length ? html`<div class="bt-gap-tabs" role="tablist">${modesOf(m).map(([k, t]) => html`<button class="btn bt-chart-btn ${view === k ? 'active' : ''}" role="tab" aria-selected="${view === k}" data-gap-view="${k}">${t} trades (${m[k].trades.length})</button>`)}</div>${tradeTable(m[view])}` : ''}
     ${noTrade.length ? html`<details class="bt-orb-days"><summary>Days without a trade (${noTrade.length})</summary><div class="bt-table-wrap"><table class="bt-table"><thead><tr><th>Date</th><th>CE: prev → open → 09:15 close</th><th>PE: prev → open → 09:15 close</th><th>Why</th></tr></thead><tbody>${noTrade.slice().reverse().map(d => html`<tr><td>${dayLabel(d.day)}</td><td>${side(d.ce)}</td><td>${side(d.pe)}</td><td>${d.reason}</td></tr>`)}</tbody></table></div></details>` : ''}`;
 }
 const side = x => x ? `${x.strike} · ${x.prev ?? '-'} → ${x.open} → ${x.close}` : '-';

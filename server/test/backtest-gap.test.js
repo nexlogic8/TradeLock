@@ -143,3 +143,24 @@ test('fixed sizing with a rupee amount: that much a trade (the % is not used); 0
   assert.equal(gapBacktest({ ...o, compound: true, tradeAmount: 30000 }, s).best.trades[0].lots, 12, 'compounding sizes by the %');
   s.close();
 });
+
+test('retest entry: a limit buy at the 09:15 open when the option comes back to it; small stop; no retest → no trade', () => {
+  // D2 as in store(), but the CE dips back to its 09:15 open (110) at 09:16, to 104 (below a 5% stop), closing at 116.
+  const s = openHistory(':memory:');
+  s.saveIndex('NIFTY', D1, D2, [bar(D1, '15:29', 22480, 22510, 22470, 22500),
+    bar(D2, '09:15', 22520, 22560, 22515, 22550), bar(D2, '09:16', 22550, 22580, 22545, 22575), bar(D2, '09:17', 22575, 22590, 22570, 22585), bar(D2, '09:18', 22585, 22590, 22580, 22588)]);
+  const opt = (side, rows) => s.saveOptions('NIFTY', 1, side, 0, D1, D2, rows.map(r => ({ strike: 22500, ...r })));
+  opt('CE', [bar(D1, '15:29', 98, 101, 97, 100), bar(D2, '09:15', 110, 125, 109, 124), bar(D2, '09:16', 122, 123, 104, 116), bar(D2, '09:17', 119, 126, 118, 125), bar(D2, '09:18', 125, 127, 124, 126)]);
+  opt('PE', [bar(D1, '15:29', 118, 121, 117, 120), bar(D2, '09:15', 110, 111, 104, 105), bar(D2, '09:16', 105, 106, 102, 103), bar(D2, '09:17', 103, 104, 101, 102), bar(D2, '09:18', 102, 103, 100, 101)]);
+  const o = { startDate: D2, endDate: D2, capital: 100000, dailySlPct: 20, fundsUse: 90, slippage: 0, exitCandle: '0916', entryMode: 'retest', retestMin: 15, retestSlPct: 5 };
+  const r = gapBacktest(o, s);
+  const [best] = r.best.trades, [worst] = r.worst.trades;
+  assert.deepEqual([best.entry, best.stop, best.exit], [110, 104.5, 119], 'filled at the 09:15 open, stop 5% below, out at the 09:17 open');
+  assert.equal(new Date((best.entryAt + 19800) * 1000).toISOString().slice(11, 16), '09:16', 'filled in the minute that came back to 110');
+  assert.deepEqual([worst.exit, worst.exitReason], [104.5, 'Stop-loss'], 'worst case: the 104 low in the fill minute counts');
+  // Never came back to 110 within 1 minute? (09:16 is minute 1, so a 1-minute window still sees it.) The store() day never does.
+  const none = gapBacktest({ ...o }, store());
+  assert.equal(none.best.trades.length, 0);
+  assert.match(none.best.skipped[0].reason, /no retest of the 09:15 open 110 within 15 min/);
+  s.close();
+});

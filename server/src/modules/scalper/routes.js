@@ -368,11 +368,15 @@ function gapSettings(body) {
   const b = body || {}, d = GAP_DEFAULTS;
   const s = { capital: Number(b.capital ?? d.capital), compound: b.compound === undefined ? d.compound : b.compound === true, fundsUse: Number(b.fundsUse ?? d.fundsUse),
     dailySlPct: Number(b.dailySlPct ?? d.dailySlPct), lotCap: Number(b.lotCap ?? d.lotCap), slippage: Number(b.slippage ?? d.slippage), squareOff: String(b.squareOff ?? d.squareOff),
-    costToCostR: Number(b.costToCostR ?? d.costToCostR), exitCandle: String(b.exitCandle ?? d.exitCandle), strike: Number(b.strike ?? d.strike), lateEntryPct: Number(b.lateEntryPct ?? d.lateEntryPct), minGapPts: Number(b.minGapPts ?? d.minGapPts), tradeAmount: Number(b.tradeAmount ?? d.tradeAmount) };
+    costToCostR: Number(b.costToCostR ?? d.costToCostR), exitCandle: String(b.exitCandle ?? d.exitCandle), strike: Number(b.strike ?? d.strike), lateEntryPct: Number(b.lateEntryPct ?? d.lateEntryPct), minGapPts: Number(b.minGapPts ?? d.minGapPts), tradeAmount: Number(b.tradeAmount ?? d.tradeAmount),
+    entryMode: String(b.entryMode ?? d.entryMode), retestMin: Number(b.retestMin ?? d.retestMin), retestSlPct: Number(b.retestSlPct ?? d.retestSlPct) };
   if (!intIn(s.strike, -3, 3)) throw bad('INVALID_GAP_STRIKE', 'Choose a strike from OTM3 to ITM3.');
   if (!numIn(s.lateEntryPct, 0, 15)) throw bad('INVALID_GAP_LATE_ENTRY', 'Late entry must be 0–15% above the 09:15 open.');
   if (!numIn(s.minGapPts, 0, 2000)) throw bad('INVALID_GAP_MIN_GAP', 'Minimum NIFTY gap must be 0–2,000 points (0 = any gap).');
   if (!numIn(s.tradeAmount, 0, 1e10)) throw bad('INVALID_GAP_TRADE_AMOUNT', 'Capital per trade must be ₹0 (use the %) or more.');
+  if (!['open', 'retest'].includes(s.entryMode)) throw bad('INVALID_GAP_ENTRY', 'Entry must be at 09:15 or on the retest of the 09:15 open.');
+  if (!intIn(s.retestMin, 1, 60)) throw bad('INVALID_GAP_RETEST_WINDOW', 'Retest window must be 1–60 minutes.');
+  if (!numIn(s.retestSlPct, 0.5, 50)) throw bad('INVALID_GAP_RETEST_SL', 'Retest stop-loss must be 0.5–50% below the entry.');
   if (!numIn(s.capital, 1000, 1e10)) throw bad('INVALID_GAP_CAPITAL', 'Starting capital must be between ₹1,000 and ₹1,000 crore.');
   if (!numIn(s.fundsUse, 1, 100)) throw bad('INVALID_GAP_FUNDS', 'Capital used per trade must be 1–100%.');
   if (!numIn(s.dailySlPct, 0.1, 100)) throw bad('INVALID_GAP_SL', 'Daily stop-loss must be 0.1–100% of capital.');

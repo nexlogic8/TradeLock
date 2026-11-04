@@ -25,7 +25,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { niftyLotSize, weeklyExpiry } from '../scalper/option-backtest.js';
 
-export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0 });   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
+export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0, entryMode: 'open', retestMin: 15, retestSlPct: 5 });   // ENTRY_MODE 'open' (live: at 09:15) or 'retest' (a limit buy at the 09:15 open when the option comes back to it within RETEST_MIN minutes, stop RETEST_SL_PCT below)   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
 export const GAP_MODES = Object.freeze({ best: 'Late entry: fill above the 09:15 open', worst: 'Worst case: fill at the 09:16 open' });
 
 const TICK = 0.05, UNDERLYING = 'NIFTY';
@@ -114,25 +114,43 @@ function run(store, startDate, endDate, s) {
     const strike = offset ? q.at.get(UNDERLYING, side, offset, t0)?.strike : S.strike;
     if (!strike) { for (const b of Object.values(book)) b.skipped.push({ day: d, reason: 'strike not in the stored history' }); continue; }
     const rows = new Map(q.day.all(UNDERLYING, side, strike, sec(d) + OPEN_S, sec(d) + CLOSE_S).map(r => [r.time, r]));
+    // ENTRY_MODE 'retest': after the 09:15 spike, a limit buy at the option's 09:15 open, filled by the first minute
+    // (09:16 on, within RETEST_MIN) whose low reaches it; no retest in time → no trade that day.
+    const retest = s.entryMode === 'retest';
+    let rk = -1, rFill = null;
+    if (retest) {
+      const level = rows.get(D[0].time)?.open;
+      for (let j = 1; level > 0 && j < D.length && j <= s.retestMin; j++) {
+        const r = rows.get(D[j].time);
+        if (r && r.low <= level) { rk = j; rFill = Math.min(level, r.open); break; }
+      }
+      if (rk < 0) { for (const b of Object.values(book)) b.skipped.push({ day: d, reason: level > 0 ? `no retest of the 09:15 open ${level} within ${s.retestMin} min` : 'option price missing' }); continue; }
+    }
     for (const [mode, b] of Object.entries(book)) {
-      const k = mode === 'best' ? 0 : 1, e = D[k] && rows.get(D[k].time);
+      const k = retest ? rk : mode === 'best' ? 0 : 1, e = D[k] && rows.get(D[k].time);
       if (!e) { b.skipped.push({ day: d, reason: 'option price missing' }); continue; }
-      const lotSize = niftyLotSize(d), entry = r2(tick(e.open * (k ? 1 : 1 + (Number(s.lateEntryPct) || 0) / 100) + s.slippage)), basis = s.compound ? b.capital : s.capital;
+      const lotSize = niftyLotSize(d), entry = r2(tick((retest ? rFill : e.open * (k ? 1 : 1 + (Number(s.lateEntryPct) || 0) / 100)) + s.slippage)), basis = s.compound ? b.capital : s.capital;
       // Fixed sizing with a rupee amount: that much a trade, never more than the account holds that day.
       const spend = !s.compound && s.tradeAmount > 0 ? Math.min(s.tradeAmount, b.capital) : basis * s.fundsUse / 100;
       const lots = Math.min(Math.floor(spend / (entry * lotSize)), s.lotCap > 0 ? s.lotCap : Infinity);
       if (!(lots >= 1)) { b.skipped.push({ day: d, reason: 'capital too small for 1 lot' }); continue; }
       const qty = lots * lotSize, room = basis * s.dailySlPct / 100 / qty;
       if (room < entry * s.minStopPct / 100) { b.skipped.push({ day: d, reason: 'stop too tight' }); continue; }
-      const stop = r2(Math.max(TICK, Math.ceil((entry - room) / TICK - 1e-9) * TICK));
+      // Retest: the stop RETEST_SL_PCT below the entry, or closer when the day's stop-loss allows less.
+      const stop = r2(Math.max(TICK, Math.ceil((retest ? Math.max(entry - room, entry * (1 - s.retestSlPct / 100)) : entry - room) / TICK - 1e-9) * TICK));
       let exit = null, stopNow = stop, atCost = false;
       const costAt = s.costToCostR > 0 ? entry + s.costToCostR * (entry - stop) : Infinity;
       for (let j = k; j < D.length; j++) {
         const c = D[j], r = rows.get(c.time);
         if (hm(c.time) >= s.squareOff) { exit = { price: r?.open ?? r?.close, at: c.time, reason: `Square-off ${s.squareOff}` }; break; }
         if (s.exitCandle === '0916' && j === k + 1) { exit = { price: r?.open ?? r?.close, at: c.time, reason: `Fixed exit ${hm(c.time)} (1 minute, any colour)` }; break; }
-        if (r && r.low <= stopNow) { exit = { price: Math.min(stopNow, r.open), at: c.time, reason: atCost ? 'Stop at cost' : 'Stop-loss' }; break; }
-        const b5 = s.exitCandle === '5m' ? five.get(bucketOf(c.time)) : null, bar = s.exitCandle === '0916' ? null : b5 ? (b5.last === c.time ? b5 : null) : c;
+        // The retest's own minute: the fill came inside it, so 1-minute candles cannot tell whether its low came before or
+        // after. Best case: stopped only when it closed below the stop; worst case: when its low reached it.
+        const fillMinute = retest && j === k;
+        if (fillMinute ? r && (mode === 'best' ? r.close : r.low) <= stopNow : r && r.low <= stopNow) {
+          exit = { price: fillMinute ? stopNow : Math.min(stopNow, r.open), at: c.time, reason: atCost ? 'Stop at cost' : 'Stop-loss' }; break;
+        }
+        const b5 = s.exitCandle === '5m' ? five.get(bucketOf(c.time)) : null, bar = s.exitCandle === '0916' || fillMinute ? null : b5 ? (b5.last === c.time ? b5 : null) : c;
         if (bar && (side === 'CE' ? bar.close < bar.open : bar.close > bar.open)) {
           const n = D[j + 1], r1 = n && rows.get(n.time);
           exit = { price: r1?.open ?? r?.close, at: n?.time ?? c.time, reason: `First ${side === 'CE' ? 'red' : 'green'} ${b5 ? '5-min' : '1-min'} candle ${hm(b5 ? bucketOf(c.time) : c.time)}` }; break;
@@ -155,7 +173,7 @@ function run(store, startDate, endDate, s) {
       m.trades++; if (x.net > 0) m.wins++; if (x.exitReason === 'Stop-loss') m.stops++; m.net = r2(m.net + x.net); m.end = x.capitalAfter;
     }
     const sum = a => r2(a.reduce((acc, x) => acc + x.net, 0));
-    return [mode, { label: mode === 'best' ? (s.lateEntryPct ? `Late entry: fill ${s.lateEntryPct}% above the 09:15 open` : 'Best case: fill at the 09:15 open') : GAP_MODES[mode], summary: { trades: t.length, wins: wins.length, winRate: t.length ? wins.length / t.length * 100 : 0,
+    return [mode, { label: s.entryMode === 'retest' ? (mode === 'best' ? 'Retest: stopped in the fill minute only on a close below' : 'Retest: stopped in the fill minute on any touch') : mode === 'best' ? (s.lateEntryPct ? `Late entry: fill ${s.lateEntryPct}% above the 09:15 open` : 'Best case: fill at the 09:15 open') : GAP_MODES[mode], summary: { trades: t.length, wins: wins.length, winRate: t.length ? wins.length / t.length * 100 : 0,
       stops: t.filter(x => x.exitReason === 'Stop-loss').length, atCost: t.filter(x => x.exitReason === 'Stop at cost').length, startCapital: s.capital, endCapital: b.capital, net: sum(t),
       returnPct: (b.capital / s.capital - 1) * 100, maxDrawdownPct: b.maxDrawdownPct, charges: r2(t.reduce((a, x) => a + x.charges, 0)),
       averageWin: wins.length ? sum(wins) / wins.length : 0, averageLoss: losses.length ? sum(losses) / losses.length : 0, skipped: b.skipped.length },
