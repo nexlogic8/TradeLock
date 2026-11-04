@@ -70,3 +70,12 @@ test('the dashboard shows both rule sets\' daily stop-loss, and which one is in 
   assert.equal(sl.mode, 'manual', 'no Algo Trading on: the Manual set is in force');
   assert.deepEqual([sl.manual.on, sl.manual.amount, sl.algo.on, sl.algo.amount], [true, 3000, true, 9000]);
 });
+
+test('Overview chart: a second stop-loss line only when the other set\'s stop-loss is on and differs', async () => {
+  const { otherSl } = await import('../../web/js/pages/overview-sl.js');
+  const d = (manual, algo, mode = 'algo') => ({ limits: { maxLoss: (mode === 'algo' ? algo : manual).amount }, stopLosses: { mode, manual, algo } });
+  assert.deepEqual(otherSl(d({ on: true, amount: 41298 }, { on: true, amount: 57817 })), { key: 'manual', amount: 41298 });
+  assert.equal(otherSl(d({ on: true, amount: 57817 }, { on: true, amount: 57817 })), null, 'same amount: one line');
+  assert.equal(otherSl(d({ on: false, amount: null }, { on: true, amount: 57817 })), null, 'other set off: one line');
+  assert.deepEqual(otherSl(d({ on: true, amount: 41298 }, { on: true, amount: 57817 }, 'manual')), { key: 'algo', amount: 57817 });
+});

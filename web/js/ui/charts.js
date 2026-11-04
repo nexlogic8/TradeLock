@@ -61,10 +61,11 @@ export function lineChart(svg, pts, o) {
     }
     for (const [v, label] of o.xTicks || []) text(svg, X(v), H - 6, label, { anchor: 'middle' });
     for (const h of o.hlines || []) {
-      el('line', { x1: m.l, x2: W - m.r, y1: Y(h.y), y2: Y(h.y), stroke: h.color, 'stroke-width': 1.5, 'stroke-dasharray': '6 4', 'stroke-opacity': 0.9 }, svg);
+      el('line', { x1: m.l, x2: W - m.r, y1: Y(h.y), y2: Y(h.y), stroke: h.color, 'stroke-width': 1.5, 'stroke-dasharray': h.dash || '6 4', 'stroke-opacity': h.opacity ?? 0.9 }, svg);
       // Label just inside the plot, above the line (below it when the line is at the very top).
       const ly = Y(h.y) - 6 < m.t + 10 ? Y(h.y) + 14 : Y(h.y) - 6;
-      if (h.label) text(svg, m.l + 8, ly, h.label, { color: h.color, weight: 600 });
+      // h.end: the label at the right end (a second level close to the first keeps both readable).
+      if (h.label) text(svg, h.end ? W - m.r - 8 : m.l + 8, ly, h.label, { color: h.color, weight: 600, ...(h.end ? { anchor: 'end' } : {}) });
     }
     for (const n of o.notes || []) {
       text(svg, m.l + 8, n.at === 'bottom' ? H - m.b - 8 : m.t + 12, n.text, { color: n.color, weight: 600 });

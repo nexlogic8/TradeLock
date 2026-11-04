@@ -6,6 +6,7 @@ import { pill, meter, empty, statusOf, toneClass } from '../ui/parts.js';
 import { lineChart, ring, niceScale } from '../ui/charts.js';
 import { toast, toastError } from '../ui/toast.js';
 import { mountKillSwitch } from '../ui/killswitch.js';
+import { otherSl } from './overview-sl.js';
 
 const OPEN = 555, CLOSE = 930; // 09:15 – 15:30 IST
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -136,7 +137,7 @@ export default {
         <div class="panel pad chart-panel">
           <div class="panel-head">
             <h3 class="panel-title">Intraday P&amp;L</h3>
-            <div class="legend"><span><i class="l-mint"></i>Day P&amp;L</span>${d.limits?.maxLoss ? html`<span><i class="l-red dashed"></i>Stop-loss −${inr(d.limits.maxLoss)}</span>` : !r.maxLoss.on ? html`<span><i class="l-red dashed"></i>No stop-loss</span>` : ''}${d.limits?.profitLock ? html`<span><i class="l-mint dashed"></i>Target ${inr(d.limits.profitLock)}</span>` : !r.profitLock.on ? html`<span><i class="l-mint dashed"></i>No profit limit</span>` : ''}${r.cutoff.on ? html`<span><i class="l-amber"></i>Cutoff ${fmt12(r.cutoff.value)}</span>` : ''}<span><i class="l-red dot"></i>Day low</span></div>
+            <div class="legend"><span><i class="l-mint"></i>Day P&amp;L</span>${d.limits?.maxLoss ? html`<span><i class="l-red dashed"></i>${otherSl(d) ? (d.stopLosses.mode === 'algo' ? 'Algo SL' : 'Manual SL') : 'Stop-loss'} −${inr(d.limits.maxLoss)}</span>${otherSl(d) ? html`<span><i class="l-amber dashed"></i>${otherSl(d).key === 'algo' ? 'Algo SL' : 'Manual SL'} −${inr(otherSl(d).amount)}</span>` : ''}` : !r.maxLoss.on ? html`<span><i class="l-red dashed"></i>No stop-loss</span>` : ''}${d.limits?.profitLock ? html`<span><i class="l-mint dashed"></i>Target ${inr(d.limits.profitLock)}</span>` : !r.profitLock.on ? html`<span><i class="l-mint dashed"></i>No profit limit</span>` : ''}${r.cutoff.on ? html`<span><i class="l-amber"></i>Cutoff ${fmt12(r.cutoff.value)}</span>` : ''}<span><i class="l-red dot"></i>Day low</span></div>
           </div>
           <svg class="chart" id="intraday" role="img" aria-label="Intraday P&L, now ${inr(d.pnl, { sign: true })}, low ${inr(d.worst)}"></svg>
         </div>
@@ -203,8 +204,11 @@ export default {
     const sl = d.limits?.maxLoss ? -d.limits.maxLoss : null;
     const target = d.limits?.profitLock || null;
     const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    // The other rule set's stop-loss (Manual / Algo), when it differs: a second, fainter line labelled at the right end.
+    const other = otherSl(d), names = { manual: 'Manual SL', algo: 'Algo SL' };
     const hlines = [
-      sl != null && { y: sl, color: css('--red'), label: `Stop-loss ${inr(sl)}` },
+      sl != null && { y: sl, color: css('--red'), label: other ? `${names[d.stopLosses.mode]} ${inr(sl)} (active)` : `Stop-loss ${inr(sl)}` },
+      other && { y: -other.amount, color: css('--amber'), label: `${names[other.key]} ${inr(-other.amount)}`, dash: '3 5', opacity: 0.75, end: true },
       target && { y: target, color: css('--mint'), label: `Target ${inr(target, { sign: true })}` },
     ].filter(Boolean);
     // A level that is switched off is stated on the chart instead of drawn.
@@ -213,7 +217,7 @@ export default {
       !d.rules.maxLoss.on && { text: 'No stop-loss ↓', color: css('--red'), at: 'bottom' },
     ].filter(Boolean);
     // Zero always sits in the middle: the scale runs the same distance up and down.
-    const reach = Math.max(1, ...[...ys, d.worst, sl ?? 0, target ?? 0].map(Math.abs));
+    const reach = Math.max(1, ...[...ys, d.worst, sl ?? 0, other ? other.amount : 0, target ?? 0].map(Math.abs));
     const sc = niceScale(-reach, reach, 6);
     const x0 = Math.min(OPEN, pts[0][0]), x1 = Math.max(CLOSE, pts.at(-1)[0]);
     const low = pts.reduce((a, p) => (p[1] < a[1] ? p : a), pts[0]);
