@@ -21,17 +21,6 @@ const strategies = () => builtInFor(isAdmin()).filter(s => s.auto);
 
 const STATUS = { open: ['Open', ''], closing: ['Exiting', 'ice'], closed: ['Closed', 'grey'], skipped: ['Skipped', 'amber'], failed: ['Failed', 'red'], placing: ['Placing', 'ice'] };
 
-/** Inside the Gap retest row: its retest window and stop, saved as they change. */
-function retestRow(a) {
-  const c = a?.retestCfg || { windowMin: 15, slPct: 3 };
-  return html`
-    <div class="algo-strat-head algo-strat-sub algo-retest-cfg">
-      <span class="algo-strat-name"><b>Paper settings</b><small>Simulated fills on live prices; no order goes to Dhan.</small></span>
-      <label>Window <input class="input" type="number" min="1" max="60" step="1" value="${c.windowMin}" data-retest-cfg="windowMin" aria-label="Retest window in minutes" ${a ? '' : 'disabled'}> min</label>
-      <label>Stop <input class="input" type="number" min="0.5" max="50" step="0.5" value="${c.slPct}" data-retest-cfg="slPct" aria-label="Stop-loss percent below the entry" ${a ? '' : 'disabled'}> %</label>
-    </div>`;
-}
-
 /** Paper trades (Gap retest 09:15): each day's simulated trade with its P&L after charges, and the totals. */
 function paperSection(rows) {
   const traded = rows.filter(t => t.pnl != null), wins = traded.filter(t => t.pnl > 0).length, total = traded.reduce((a, t) => a + t.pnl, 0);
@@ -81,12 +70,11 @@ function strategyRow(s, a, open, rules) {
   return html`
     <div class="algo-strat ${on_ ? 'on' : ''}">
       <div class="algo-strat-head">
-        <span class="algo-strat-name"><b>${s.name}${s.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</b><small>${s.tag} · ${s.timeframe}</small></span>
+        <span class="algo-strat-name"><b>${s.name}</b><small>${s.tag} · ${s.timeframe}</small></span>
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
       ${s.key === 'gap' ? gapLockRow(a, rules) : ''}
-      ${s.key === 'gapRetest' ? retestRow(a) : ''}
     </div>`;
 }
 
