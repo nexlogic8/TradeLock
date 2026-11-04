@@ -1969,10 +1969,9 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .algo-setup-row > .panel { height: 100%; }
 .algo-manual-card { padding-top: 18px; padding-bottom: 18px; }
 .algo-manual-card .algo-strat { border: 0; padding: 0; background: none; }
-/* Wallet: paper wallet (Paper mode on the AI Algo Trading page) */
-.paper-wallet-head { display: flex; gap: 24px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
-.paper-wallet-head .panel-title { display: flex; align-items: center; gap: 8px; }
-.paper-wallet-bal { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 4px 0 6px; }
-.paper-wallet-bal b { font-size: 30px; }
-.paper-wallet-set { display: grid; gap: 8px; min-width: 260px; }
-.paper-wallet-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Wallet: the paper wallet card (Paper mode on the AI Algo Trading page), third in the row */
+.wallet-cards.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .wallet-cards.three { grid-template-columns: minmax(0, 1fr); } }
+.paper-wallet-set { display: flex; gap: 8px; align-items: center; margin-top: 10px; position: relative; z-index: 1; }
+.paper-wallet-set .input-wrap { flex: 1; min-width: 0; }
+.paper-wallet-set .input { height: 34px; }

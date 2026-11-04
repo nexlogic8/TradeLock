@@ -16,19 +16,26 @@ const STATUS = { requested: ['Processing', 'ice'], paid: ['Paid', ''], rejected:
 
 function balanceCards(w, d) {
   const b = w.balances;
-  const f = d?.funds;
+  const f = d?.funds, paperOn = !!d?.broker?.paperMode;
   return html`
-    <div class="wallet-cards two">
+    <div class="wallet-cards ${w.paper ? 'three' : 'two'}">
       <div class="panel kpi wallet-total">
         <div class="lbl">TradeLock wallet</div>
         <div class="val val-ic">${icon('wallet')}${paise(b.total)}</div>
         <div class="foot">Added funds ${paise(b.funds)} · Earnings ${paise(b.earnings)}</div>
       </div>
+      ${paperOn ? html`
+      <div class="panel kpi">
+        <div class="lbl lbl-start">${brokerMark('dhan', 'Dhan')}Dhan available margin</div>
+        <div class="val val-ic">${icon('wallet')}–</div>
+        <div class="foot">Not read while Paper trading is on: switch to Real on the AI Algo Trading page to see it.</div>
+      </div>` : html`
       <div class="panel kpi">
         <div class="lbl lbl-start">${w.broker ? brokerMark(w.broker.broker, w.broker.label) : ''}${w.broker?.label || 'Broker'} available margin</div>
         <div class="val val-ic">${icon('wallet')}${f?.available != null ? inr(f.available, { dp: 2 }) : w.broker?.available != null ? inr(w.broker.available, { dp: 2 }) : '–'}</div>
         <div class="foot">${w.broker ? `Your trading money stays with ${w.broker.label}. TradeLock never moves it.` : 'Connect a broker to see your margin.'}</div>
-      </div>
+      </div>`}
+      ${w.paper ? paperCard(w.paper, paperOn) : ''}
     </div>`;
 }
 
@@ -101,28 +108,19 @@ function activityPanel(ctx) {
 }
 
 /** Paper wallet: the money Algo Trading uses in Paper mode. Any amount from ₹10,000 to ₹1 crore, or reset to ₹10 lakh. */
-function paperPanel(ctx) {
-  const p = ctx.data.paper, paperOn = !!ctx.state.dash?.broker?.paperMode;
+function paperCard(p, paperOn) {
   const change = p.balance - p.startBalance;
   return html`
-    <section class="panel pad mt paper-wallet" id="sec-paper">
-      <div class="paper-wallet-head">
-        <div>
-          <h3 class="panel-title">${icon('wallet')} Paper wallet ${pill(paperOn ? 'Paper trading on' : 'Not in use', paperOn ? 'ice' : 'grey', { sm: true })}</h3>
-          <div class="paper-wallet-bal"><b class="num">${inr(p.balance)}</b>
-            <small class="${change > 0 ? 'pos' : change < 0 ? 'neg' : 'muted'}">${change ? `${change > 0 ? '+' : '−'}${inr(Math.abs(change))} since set to ${inr(p.startBalance)}` : `set to ${inr(p.startBalance)}`}</small></div>
-          <p class="muted small">Pretend money for Paper mode on the AI Algo Trading page: trades fill at live Dhan prices and the P&amp;L (after charges) lands here. It is not real money and can't be withdrawn.</p>
-        </div>
-        <div class="paper-wallet-set">
-          <label class="muted small" for="paper-amount">Set balance (₹10,000 – ₹1 crore)</label>
-          <div class="input-wrap"><span class="affix">₹</span><input class="input num" id="paper-amount" inputmode="numeric" value="${Math.round(p.balance)}" aria-label="Paper wallet balance"></div>
-          <div class="paper-wallet-btns">
-            <button class="btn btn-primary btn-sm" type="button" id="paper-set">Set balance</button>
-            <button class="btn btn-ghost btn-sm" type="button" id="paper-reset">Reset to ${inr(p.default)}</button>
-          </div>
-        </div>
+    <div class="panel kpi paper-wallet" id="sec-paper">
+      <div class="lbl lbl-start">Paper wallet ${pill(paperOn ? 'In use' : 'Not in use', paperOn ? 'ice' : 'grey', { sm: true })}</div>
+      <div class="val val-ic">${icon('wallet')}${inr(p.balance, { dp: 2 })}</div>
+      <div class="foot"><span class="${change > 0 ? 'pos' : change < 0 ? 'neg' : ''}">${change ? `${change > 0 ? '+' : '−'}${inr(Math.abs(change))} since set to ${inr(p.startBalance)}` : `Set to ${inr(p.startBalance)}`}</span> · not real money</div>
+      <div class="paper-wallet-set">
+        <div class="input-wrap"><span class="affix">₹</span><input class="input num" id="paper-amount" inputmode="numeric" value="${Math.round(p.balance)}" aria-label="Paper wallet balance, ₹10,000 to ₹1 crore" title="₹10,000 to ₹1 crore"></div>
+        <button class="btn btn-primary btn-sm" type="button" id="paper-set">Set</button>
+        <button class="btn btn-ghost btn-sm" type="button" id="paper-reset" title="Reset to ${inr(p.default)}">Reset</button>
       </div>
-    </section>`;
+    </div>`;
 }
 
 export default {
@@ -140,7 +138,6 @@ export default {
   view(ctx) {
     return html`
       ${balanceCards(ctx.data, ctx.state.dash)}
-      ${ctx.data.paper ? paperPanel(ctx) : ''}
       <div class="halves fill mt">${addPanel(ctx)}${withdrawPanel(ctx)}</div>
       <div class="mt">${activityPanel(ctx)}</div>`;
   },
