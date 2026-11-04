@@ -25,7 +25,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { niftyLotSize, weeklyExpiry } from '../scalper/option-backtest.js';
 
-export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5 });   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
+export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0 });   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
 export const GAP_MODES = Object.freeze({ best: 'Late entry: fill above the 09:15 open', worst: 'Worst case: fill at the 09:16 open' });
 
 const TICK = 0.05, UNDERLYING = 'NIFTY';
@@ -98,9 +98,13 @@ function run(store, startDate, endDate, s) {
       const prev = p >= MIN_PREV ? p : null;
       sides[side] = { strike: a.strike, prev, open: a.open, close: a.close, ok: prev > 0 && a.open > prev && a.close > a.open };
     }
-    const ok = Object.keys(sides).filter(x => sides[x].ok);
-    const decision = { day: d, ce: sides.CE || null, pe: sides.PE || null, side: ok.length === 1 ? ok[0] : null,
-      reason: !Object.keys(sides).length ? 'no option data'
+    // The index gap: today's 09:15 open against the previous session's last close, in points.
+    const yd = byDay.get(y), indexGap = yd?.length ? r2(D[0].open - yd[yd.length - 1].close) : null;
+    const small = s.minGapPts > 0 && !(Math.abs(indexGap) >= s.minGapPts);
+    const ok = small ? [] : Object.keys(sides).filter(x => sides[x].ok);
+    const decision = { day: d, ce: sides.CE || null, pe: sides.PE || null, indexGap, side: ok.length === 1 ? ok[0] : null,
+      reason: small ? (indexGap == null ? 'NIFTY previous close not found' : `NIFTY gap ${Math.abs(indexGap)} pts, below the ${s.minGapPts}-point threshold`)
+        : !Object.keys(sides).length ? 'no option data'
         : Object.values(sides).some(x => x.prev == null) && !ok.length ? 'previous close not found (expiry rollover)' : ok.length > 1 ? 'both premiums gapped up green' : ok.length ? '' : 'no premium gapped up and stayed green' };
     decisions.push(decision);
     if (!decision.side) continue;

@@ -119,3 +119,16 @@ test('late entry: the best case fills that % above the 09:15 open (default 5%, a
   assert.equal(two.best.trades[0].entry, 113.2, '110 × 1.02 + 1');
   assert.equal(two.worst.trades[0].entry, late.worst.trades[0].entry);
 });
+
+test('minimum NIFTY gap: below the threshold (points, up or down) is no trade; at or above it trades as before', () => {
+  const s = store();
+  const o = { lateEntryPct: 0, startDate: D2, endDate: D2, capital: 100000, exitCandle: '1m' };
+  const below = gapBacktest({ ...o, minGapPts: 30 }, s);
+  assert.equal(below.best.trades.length, 0);
+  const d2 = below.days.find(d => d.day === D2);
+  assert.equal(d2.indexGap, 20, 'D2 opened 22520 against the 22500 close');
+  assert.match(d2.reason, /NIFTY gap 20 pts, below the 30-point threshold/);
+  assert.equal(gapBacktest({ ...o, minGapPts: 20 }, s).best.trades.length, 1, 'a 20-point gap meets a 20-point threshold');
+  assert.equal(gapBacktest({ ...o, minGapPts: 0 }, s).best.trades.length, 1, '0 = any gap');
+  s.close();
+});

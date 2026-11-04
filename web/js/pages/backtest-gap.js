@@ -37,13 +37,13 @@ const STRIKES = [-3, -2, -1, 0, 1, 2, 3];
 
 export function gapDefaults(ui, caps) {
   const d = caps?.gap?.defaults || {};
-  ui.gap ??= { capital:d.capital ?? 100000, compound:d.compound ?? true, fundsUse:d.fundsUse ?? 90, dailySlPct:d.dailySlPct ?? 20, lotCap:d.lotCap ?? 0, slippage:d.slippage ?? 1, squareOff:d.squareOff ?? '15:15', costToCostR:d.costToCostR ?? 1, exitCandle:d.exitCandle ?? '0916', strike:d.strike ?? 0, lateEntryPct:d.lateEntryPct ?? 5 };
+  ui.gap ??= { capital:d.capital ?? 100000, compound:d.compound ?? true, fundsUse:d.fundsUse ?? 90, dailySlPct:d.dailySlPct ?? 20, lotCap:d.lotCap ?? 0, slippage:d.slippage ?? 1, squareOff:d.squareOff ?? '15:15', costToCostR:d.costToCostR ?? 1, exitCandle:d.exitCandle ?? '0916', strike:d.strike ?? 0, lateEntryPct:d.lateEntryPct ?? 5, minGapPts:d.minGapPts ?? 0 };
   ui.gapView ??= 'best';
 }
 /** Restore the form from a saved run's settings. */
 export function gapFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
-  ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0 };
+  ui.gap = { capital:s.capital, compound:s.compound, fundsUse:s.fundsUse, dailySlPct:s.dailySlPct, lotCap:s.lotCap, slippage:s.slippage, squareOff:s.squareOff, costToCostR:s.costToCostR ?? 0, exitCandle:s.exitCandle ?? '1m', strike:s.strike ?? 0, lateEntryPct:s.lateEntryPct ?? 0, minGapPts:s.minGapPts ?? 0 };
 }
 export const gapPayload = ui => ({ strategy:GAP_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.gap });
 /** Apply a change from a [data-gap-field] control. Returns true when handled. */
@@ -62,7 +62,7 @@ export function gapRunLabel(run) {
 export function gapRunFacts(run) {
   const m = run.metrics, s = m.settings || {};
   const bound = (label, x) => ({ label, value: `${inr(x?.net, true)} (${pct(x?.returnPct)})`, sub: `${inr(x?.startCapital)} → ${inr(x?.endCapital)}`, tone: x?.net });
-  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : [])],
+  return { settings: [`${inr(s.capital)} ${s.compound ? 'compounded' : 'fixed'}`, `${s.fundsUse}% per trade`, `strike ${strikeLabel(s.strike)}`, s.lateEntryPct ? `entry +${s.lateEntryPct}% late` : 'entry at the open', `SL ${s.dailySlPct}% of capital`, s.lotCap ? `max ${s.lotCap} lots` : 'no lot cap', `₹${s.slippage} slippage`, `square-off ${s.squareOff}`, (s.exitCandle === '0916' ? 'exit: 09:16, any colour' : `exit: opposite ${s.exitCandle === '5m' ? '5' : '1'}-min candle`), ...(s.costToCostR > 0 ? [`cost to cost at ${s.costToCostR}R`] : []), ...(s.minGapPts > 0 ? [`NIFTY gap ≥ ${s.minGapPts} pts`] : [])],
     trades: `${m.best?.summary.trades ?? 0} (${s.lateEntryPct ? 'late' : 'best'}) · ${m.worst?.summary.trades ?? 0} (worst)`, signals: m.signals, sessions: m.sessions,
     results: [bound(firstMode(s.lateEntryPct)[0], m.best?.summary), bound('Worst case', m.worst?.summary)] };
 }
@@ -78,6 +78,7 @@ export function gapFields(ui) {
     ${field('Slippage ₹ / unit (entry)', html`<input class="input" type="number" min="0" max="50" step="0.25" data-gap-field="slippage" value="${g.slippage}" aria-label="Entry slippage in rupees per unit">`)}
     ${field('Square-off (IST)', html`<input class="input" type="time" min="09:20" max="15:29" data-gap-field="squareOff" value="${g.squareOff}" aria-label="Square-off time">`)}
     ${field('Late entry % (above 09:15 open)', html`<select class="input" data-gap-field="lateEntryPct" aria-label="How far above the option's 09:15 open the entry fills">${LATE.map(p => html`<option value="${p}" ${Number(g.lateEntryPct || 0) === p ? 'selected' : ''}>${p ? `+${p}%` : '0% (at the open)'}</option>`)}</select>`)}
+    ${field('Min NIFTY gap (points, 0 = any)', html`<input class="input" type="number" min="0" max="2000" step="5" data-gap-field="minGapPts" value="${g.minGapPts ?? 0}" aria-label="Trade only when NIFTY opens at least this many points above or below the previous close; 0 for any gap">`)}
     ${field('Strike', html`<select class="input" data-gap-field="strike" aria-label="Strike to trade">${STRIKES.map(k => html`<option value="${k}" ${Number(g.strike || 0) === k ? 'selected' : ''}>${strikeLabel(k)}${k === 2 ? ' (live)' : ''}</option>`)}</select>`)}
     ${field('Exit', html`<select class="input" data-gap-field="exitCandle" aria-label="Exit rule"><option value="1m" ${g.exitCandle === '1m' || !g.exitCandle ? 'selected' : ''}>Opposite 1-minute candle</option><option value="5m" ${g.exitCandle === '5m' ? 'selected' : ''}>Opposite 5-minute candle</option><option value="0916" ${g.exitCandle === '0916' ? 'selected' : ''}>At 09:16, any colour (live)</option></select>`)}
     ${field('Cost to cost at R (0 = off)', html`<input class="input" type="number" min="0" max="5" step="0.25" data-gap-field="costToCostR" value="${g.costToCostR}" aria-label="Move the stop to the entry price at this multiple of the risk; 0 for off">`)}`;
