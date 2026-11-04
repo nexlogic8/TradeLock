@@ -52,7 +52,7 @@ export function adapterFor(acct) {
   const via = acct.paper_mode === 1 ? 'paper' : link?.status === 'verified' ? `stoxkart:${link.updated_at}` : 'own';
   // A new token (reconnect, or renewed by the token keeper service) means a fresh adapter.
   if (!entry || entry.tokenEnc !== acct.token_enc || entry.via !== via) {
-    const own = ownAdapter(acct);
+    const own = acct.broker === 'paper' ? {} : ownAdapter(acct);   // a Paper account (no broker): shared market data only
     entry = { tokenEnc: acct.token_enc, via, adapter: via === 'paper' ? createPaperAdapter({ userId: acct.user_id, data: withSharedData(own) })
       : withSharedData(via === 'own' ? own : tradeThroughStoxkart(own, JSON.parse(decrypt(link.creds_enc)))) };
     live.set(acct.id, entry);

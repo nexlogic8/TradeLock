@@ -127,8 +127,8 @@ export default {
           ${a?.paperMode ? html`<p class="small algo-paper-note">Paper: trades fill at live Dhan prices with the <a href="/wallet" data-nav="wallet">paper wallet</a>'s money. No order goes to Dhan, and TradeLock is not watching your Dhan account until you switch back to Real.</p>` : ''}
         </div>
         <div class="seg algo-mode" role="group" aria-label="Real or paper trading">
-          <button type="button" data-paper-mode="real" aria-pressed="${!a?.paperMode}" ${a ? '' : 'disabled'}>Real</button>
-          <button type="button" data-paper-mode="paper" aria-pressed="${!!a?.paperMode}" ${a ? '' : 'disabled'}>Paper</button>
+          <button type="button" data-paper-mode="paper" aria-pressed="${!a || !!a.paperMode}">Paper</button>
+          <button type="button" data-paper-mode="real" aria-pressed="${!!a && !a.paperMode}" ${a && a.broker !== 'paper' ? '' : 'disabled title="Connect your Dhan account to trade with real money"'}>Real</button>
         </div>
         <button class="btn ${running ? 'btn-danger' : 'btn-primary'} algo-start" type="button" data-algo-start="${running ? 'stop' : 'start'}" ${!a || (!running && !d.ready) ? 'disabled' : ''}>
           ${icon(running ? 'stop' : 'play')}${running ? 'Stop Algo Trading' : 'Start Algo Trading'}</button>
@@ -187,7 +187,7 @@ export default {
           : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
       </section>
       ${historySection(d.history || [])}
-      ${isAdmin() ? paperSection(d.paper || []) : ''}`;
+      ${paperSection(d.paper || [])}`;
   },
 
   // Follow the top-bar switch at once instead of waiting for the 15-second refresh.
@@ -271,9 +271,16 @@ export default {
       } catch (err) { toastError(err); b.disabled = false; }
     }, signal);
 
-    // Real | Paper: which account Algo Trading trades (only with nothing open; the server checks).
+    // Paper | Real: which account Algo Trading trades (only with nothing open; the server checks). Without a broker,
+    // Paper sets up a Paper account (prices from TradeLock's market data).
     on(el, 'click', '[data-paper-mode]', async (_, b) => {
       const id = ctx.data.account?.id, on_ = b.dataset.paperMode === 'paper';
+      if (!id && on_) {
+        b.disabled = true;
+        try { const { account } = await post('/paper/account'); syncTopbar(account); toast('Paper trading is set up: ₹10,00,000 in the paper wallet. Switch on a strategy and Start Algo Trading.', 'ok'); await refresh(); }
+        catch (err) { toastError(err); b.disabled = false; }
+        return;
+      }
       if (!id || !!ctx.data.account?.paperMode === on_) return;
       if (!on_ && !confirm('Switch Algo Trading back to REAL money on your Dhan account?')) return;
       b.disabled = true;

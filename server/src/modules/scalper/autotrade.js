@@ -148,6 +148,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const round2 = n => Math.round(n * 100) / 100;
 // A Gap entry whose order status shows no fill: Dhan's positions are asked HELD_TRIES times, HELD_WAIT_MS apart.
 const HELD_TRIES = 4, HELD_WAIT_MS = 1_000;
+// Accounts Algo Trading runs: Dhan with a token, or a Paper account (no broker: paper fills, shared market data).
+const TRADES = `(broker = 'paper' OR (broker = 'dhan' AND token_enc IS NOT NULL))`;
 const roundTick = (n, tick) => Math.round(Math.round(n / tick) * tick * 10_000) / 10_000;
 
 /** The expiry after the nearest upcoming one (today counts as upcoming on expiry day). */
@@ -1299,7 +1301,7 @@ function scheduleGap(now = Date.now()) {
   gapTimersDay = day;
   const gapAccounts = () => {
     // 'delayed' / 'degraded' too: a sync blip must not drop the trade silently (the entry checks the book itself).
-    try { return stmt(`SELECT * FROM broker_accounts WHERE gap_on = 1 AND algo_on = 1 AND agent_on = 1 AND broker = 'dhan' AND status IN ('connected', 'delayed', 'degraded') AND token_enc IS NOT NULL`).all(); }
+    try { return stmt(`SELECT * FROM broker_accounts WHERE gap_on = 1 AND algo_on = 1 AND agent_on = 1 AND ${TRADES} AND status IN ('connected', 'delayed', 'degraded')`).all(); }
     catch (e) { console.error('[autotrade] gap', e.message); return []; }
   };
   setTimeout(() => {
@@ -1418,7 +1420,7 @@ function schedulePreopen(now = Date.now()) {
   preopenDay = day;
   const each = fn => {
     let rows;
-    try { rows = stmt(`SELECT * FROM broker_accounts WHERE broker = 'dhan' AND gap_on = 1 AND status != 'disconnected'`).all(); }
+    try { rows = stmt(`SELECT * FROM broker_accounts WHERE broker IN ('dhan', 'paper') AND gap_on = 1 AND status != 'disconnected'`).all(); }
     catch (e) { console.error('[autotrade] pre-open', e.message); return; }
     for (const a of rows) fn(a).catch(e => console.error('[autotrade] pre-open', a.user_id, e.message));
   };
@@ -1464,13 +1466,13 @@ export function startAutoTrader({ tickMs = AUTO.tickMs } = {}) {
     try {
       for (const trade of stmt(`SELECT * FROM auto_trades WHERE user_id = ? AND status IN ('open', 'closing')`).all(userId)) manage(trade);
       if (marketOpen())
-        for (const acct of stmt(`SELECT * FROM broker_accounts WHERE user_id = ? AND algo_on = 1 AND agent_on = 1 AND broker = 'dhan' AND status = 'connected' AND token_enc IS NOT NULL`).all(userId)) scan(acct);
+        for (const acct of stmt(`SELECT * FROM broker_accounts WHERE user_id = ? AND algo_on = 1 AND agent_on = 1 AND ${TRADES} AND status = 'connected'`).all(userId)) scan(acct);
     } catch (e) { console.error('[autotrade] minute close', e.message); }
   });
   const timer = setInterval(() => {
     let accounts, active;
     try {
-      accounts = stmt(`SELECT * FROM broker_accounts WHERE algo_on = 1 AND agent_on = 1 AND broker = 'dhan' AND status = 'connected' AND token_enc IS NOT NULL`).all();
+      accounts = stmt(`SELECT * FROM broker_accounts WHERE algo_on = 1 AND agent_on = 1 AND ${TRADES} AND status = 'connected'`).all();
       active = stmt(`SELECT * FROM auto_trades WHERE status IN ('placing', 'open', 'closing')`).all();
     } catch (e) { console.error('[autotrade]', e.message); return; }
     for (const trade of active) manage(trade);

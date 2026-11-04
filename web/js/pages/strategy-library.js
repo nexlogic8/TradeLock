@@ -69,8 +69,14 @@ export const PUBLIC_SHARED_RULES = [
   ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch, one trade at a time.'],
   ['Phone alarm', 'Each entry rings the TradeLock Android app like an alarm, even closed, on silent or in DND.'],
 ];
-/** The built-in strategies this user may see: all of them for administrators, else the public Gap card only. */
-export const builtInFor = admin => (admin ? BUILT_IN : [PUBLIC_GAP]);
+// Users also get the paper strategy (it only ever trades on paper), described without its rules.
+const PUBLIC_RETEST = { key: 'gapRetest', flag: 'retestPaperOn', name: 'Gap retest 09:15', tag: 'Paper trading', timeframe: 'fully automatic', auto: true, paper: true, public: true, rules: [
+  ['Paper only', 'Runs on live prices with simulated fills: no order ever goes to your broker. Its trades are listed under Paper trades on the AI Algo Trading page.'],
+  ['What it does', 'After the 09:15 opening move it waits for a pullback to the opening price before buying, with a small stop-loss.'],
+  ['Settings', 'The retest window (minutes) and the stop-loss % below the entry, on the AI Algo Trading page.'],
+] };
+/** The built-in strategies this user may see: all of them for administrators, else the public Gap and Gap retest cards. */
+export const builtInFor = admin => (admin ? BUILT_IN : [PUBLIC_GAP, PUBLIC_RETEST]);
 export const sharedRulesFor = admin => (admin ? SHARED_RULES : PUBLIC_SHARED_RULES);
 
 // What every automatic trade does, whichever strategy fired.

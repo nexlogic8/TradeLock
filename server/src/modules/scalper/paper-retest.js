@@ -12,7 +12,6 @@ import { capitalLimit } from '../rules/limits.js';
 import { dayState, capitalFor } from '../risk/service.js';
 import { notify } from '../notifications/service.js';
 import { audit } from '../audit/service.js';
-import { isAdminUser } from '../../lib/access.js';
 import { underlyingFor } from './underlyings.js';
 import { optionCharges } from './orb5-options.js';
 import { AUTO, FEED, GAP_LIVE, algoIndices, atmContract, gapPick, gapPrefetch, nearIds, optionMeta, riskLeft, squareOffTime, strikeFrom } from './autotrade.js';
@@ -183,17 +182,17 @@ export async function paperStep(acct, { now = Date.now(), adapter = adapterFor(a
   return { closed: exit, pnl };
 }
 
-/** Run the paper strategy for every account that has it on (administrators), once a second through the session. */
+/** Run the paper strategy for every account that has it on, once a second through the session. */
 export function startPaperTrading({ tickMs = P.tickMs } = {}) {
   const busy = new Set(), memos = new Map();
   const timer = setInterval(() => {
     const now = Date.now(), t = ist(now);
     if (!isTradingDay(now) || t.minutes < 9 * 60 + 13 || (!marketOpen(now) && t.minutes > 9 * 60 + 30)) return;
     let accounts;
-    try { accounts = stmt(`SELECT * FROM broker_accounts WHERE retest_paper_on = 1 AND broker = 'dhan' AND status IN ('connected', 'delayed', 'degraded') AND token_enc IS NOT NULL`).all(); }
+    try { accounts = stmt(`SELECT * FROM broker_accounts WHERE retest_paper_on = 1 AND (broker = 'paper' OR (broker = 'dhan' AND token_enc IS NOT NULL)) AND status IN ('connected', 'delayed', 'degraded')`).all(); }
     catch (e) { console.error('[paper]', e.message); return; }
     for (const acct of accounts) {
-      if (!isAdminUser(acct.user_id) || busy.has(acct.user_id)) continue;
+      if (busy.has(acct.user_id)) continue;
       const key = `${acct.user_id}:${t.day}`;
       if (!memos.has(key)) memos.set(key, {});
       busy.add(acct.user_id);

@@ -38,9 +38,10 @@ async function verifyCreds(broker, clientId, accessToken) {
 }
 
 export function brokerRoutes(r) {
+  // A Paper account (no broker) is not a broker connection: the page offers Connect, which replaces it.
   r.get('/api/brokers', ctx => ({
     catalog: CATALOG,
-    account: accountSummary(accountFor(ctx.user.id)),
+    account: accountFor(ctx.user.id)?.broker === 'paper' ? null : accountSummary(accountFor(ctx.user.id)),
     links: { stoxkart: stoxkartLink(ctx.user.id) },
     staticIp: staticIpView(ctx.user.id),
   }));
@@ -57,8 +58,9 @@ export function brokerRoutes(r) {
     stmt(`UPDATE broker_accounts SET status = 'disconnected', token_enc = NULL WHERE user_id = ? AND broker != ?`).run(ctx.user.id, broker);
     const isNew = !stmt('SELECT 1 FROM broker_accounts WHERE user_id = ? AND broker = ?').get(ctx.user.id, broker);
     const acct = upsertAccount(ctx.user.id, { broker, clientId, accessToken });
-    // A new account starts with the default strategy only: Gap open 09:15 (Algo Trading itself stays off until switched on).
-    if (isNew) stmt('UPDATE broker_accounts SET gap_on = 1, orb_on = 0, cross_on = 0, ema915_on = 0 WHERE id = ?').run(acct.id);
+    // A new account starts with the default strategy only, Gap open 09:15, on Paper (Algo Trading itself stays off until
+    // switched on; Real is one switch away on the AI Algo Trading page).
+    if (isNew) stmt('UPDATE broker_accounts SET gap_on = 1, orb_on = 0, cross_on = 0, ema915_on = 0, paper_mode = 1 WHERE id = ?').run(acct.id);
     guardBroker(ctx.user.id, broker, clientId);   // one free trial per broker account
     await syncAccount(acct, { force: true });
     const fresh = stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id);
@@ -152,7 +154,7 @@ export function brokerRoutes(r) {
     const acct = ownAccount(ctx.user.id, ctx.params.id);
     const change = {};
     // ORB, EMA 5/9 and EMA 9/15 are admin-only (lib/access.js): other users have Gap open 09:15 only.
-    if (!isAdminEmail(ctx.user.email) && ['emaCross', 'orb', 'ema915', 'gapRetest'].some(k => ctx.body[k] === true)) {
+    if (!isAdminEmail(ctx.user.email) && ['emaCross', 'orb', 'ema915'].some(k => ctx.body[k] === true)) {
       throw bad('VALIDATION', 'This strategy is not available on your account.');
     }
     if (ctx.body.emaCross !== undefined) change.cross_on = v.bool(ctx.body.emaCross, 'EMA 9/21 crossover') ? 1 : 0;
@@ -166,7 +168,6 @@ export function brokerRoutes(r) {
     // Gap retest 09:15 on paper (no orders): on or off, and its retest window and stop.
     if (ctx.body.gapRetest !== undefined) change.retest_paper_on = v.bool(ctx.body.gapRetest, 'Gap retest 09:15 (paper)') ? 1 : 0;
     if (ctx.body.retestCfg !== undefined) {
-      if (!isAdminEmail(ctx.user.email)) throw bad('VALIDATION', 'This strategy is not available on your account.');
       const c = ctx.body.retestCfg || {};
       change.retest_cfg = JSON.stringify({ windowMin: v.num(c.windowMin, 'Retest window (minutes)', { min: 1, max: 60, int: true }), slPct: v.num(c.slPct, 'Retest stop-loss %', { min: 0.5, max: 50 }) });
     }
@@ -210,6 +211,7 @@ export function brokerRoutes(r) {
     const on = v.bool(ctx.body.on, 'Paper trading');
     const acct = ownAccount(ctx.user.id, ctx.params.id);
     if ((acct.paper_mode === 1) === on) return { account: accountSummary(acct) };
+    if (!on && acct.broker === 'paper') throw bad('NO_BROKER', 'Connect your Dhan account (Broker accounts) to trade with real money.');
     const busy = brokerBusy(acct);
     if (busy.length) throw conflict('BROKER_BUSY', `Close everything first: ${busy.join(', ')} ${on ? 'with real money' : 'on paper'}. Switching with anything open would leave it unmanaged.`);
     const fresh = await switchPaper(acct, on, { ip: ctx.ip });
@@ -218,6 +220,23 @@ export function brokerRoutes(r) {
       : { kind: 'risk', level: 'warn', title: 'Real trading on', body: 'Algo Trading trades your Dhan account with real money again, and TradeLock protects it.' });
     emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
     return { account: accountSummary(fresh) };
+  });
+
+  // Paper trading without a broker: a Paper account (prices from TradeLock's shared Dhan market data). Connecting a
+  // broker later replaces it (the connect route disconnects other brokers).
+  r.post('/api/paper/account', async ctx => {
+    const cur = accountFor(ctx.user.id);
+    if (cur) return { account: accountSummary(cur) };
+    stmt(`INSERT INTO broker_accounts (user_id, broker, client_id, token_enc, status, created_at, paper_mode, agent_on, gap_on, orb_on, cross_on, ema915_on)
+      VALUES (?, 'paper', 'PAPER', NULL, 'connected', ?, 1, 1, 1, 0, 0, 0)
+      ON CONFLICT (user_id, broker) DO UPDATE SET status = 'connected', paper_mode = 1`).run(ctx.user.id, Date.now());
+    accountsChanged();
+    paperWallet(ctx.user.id);
+    audit(ctx.user.id, 'paper.account', {}, ctx.ip);
+    const acct = accountFor(ctx.user.id);
+    await syncAccount(acct, { force: true }).catch(() => {});
+    emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
+    return { account: accountSummary(accountFor(ctx.user.id)) };
   });
 
   // The paper wallet: its balance, set to any amount from ₹10,000 to ₹1 crore, or reset to ₹10 lakh.

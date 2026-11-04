@@ -10,12 +10,18 @@ import { marketOpen } from '../../lib/time.js';
 import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices } from './autotrade.js';
 import { paperTrades, retestConfig } from './paper-retest.js';
 import { UNDERLYINGS } from './underlyings.js';
-import { isAdminUser } from '../../lib/access.js';
 
 /** Everything Algo Trading needs before it may place orders, as a checklist (all ok = may start). */
 export function algoReadiness(userId, acct) {
   const rules = getRules(userId).active;
   const perms = getPermissions(userId);
+  // Paper mode (a Paper account, or Dhan switched to Paper): no broker connection or static IP is needed to trade.
+  if (acct?.paper_mode === 1) return [
+    { id: 'paper', label: 'Paper trading', ok: true, detail: `Simulated fills at live prices with the paper wallet${acct.broker === 'paper' ? ' (no broker connected)' : ''}` },
+    { id: 'protection', label: 'Protection on', ok: acct.agent_on !== 0, detail: acct.agent_on !== 0 ? 'Risk rules are enforced on every entry' : 'Turn protection on first: automatic entries only run with your risk rules enforced.' },
+    { id: 'subscription', label: 'Subscription', ok: !!getSubscription(userId)?.active, detail: getSubscription(userId)?.active ? 'Active' : 'An active TradeLock subscription is needed.' },
+    { id: 'lossLimit', label: 'Daily loss limit', ok: !!rules.maxLoss?.on, detail: rules.maxLoss?.on ? 'Sets how much each automatic trade may risk' : 'Turn on the daily loss limit in Risk rules: it sets how much each automatic trade may risk.' },
+  ];
   return [
     { id: 'dhan', label: 'Dhan account', ok: acct?.broker === 'dhan', detail: acct?.broker === 'dhan' ? 'Connected broker is Dhan' : 'Algo Trading needs a Dhan account.' },
     { id: 'connected', label: 'Dhan connection', ok: acct?.status === 'connected' && !!acct?.token_enc, detail: acct?.status === 'connected' ? 'Token valid, synced' : 'Reconnect Dhan first.' },
@@ -33,7 +39,7 @@ export function algoLive(userId, acct) {
   const daily = rules.maxLoss?.on ? limitAmount(rules.maxLoss, capital) : null, pnl = s.realized + s.unrealized;
   const readiness = algoReadiness(userId, acct);
   return {
-    account: acct ? { id: acct.id, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), paperMode: acct.paper_mode === 1, underlyings: algoIndices(acct) } : null,
+    account: acct ? { id: acct.id, broker: acct.broker, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), paperMode: acct.paper_mode === 1, underlyings: algoIndices(acct) } : null,
     underlyings: Object.values(UNDERLYINGS).map(({ key, label }) => ({ key, label })),
     ready: readiness.every(r => r.ok), readiness, marketOpen: marketOpen(),
     budget: { capital, daily, pnl, left: daily ? riskLeft(daily, pnl) : 0, lossLimitMode: rules.maxLoss?.mode, lossLimitValue: rules.maxLoss?.value },
@@ -41,6 +47,6 @@ export function algoLive(userId, acct) {
       killSwitch: !!rules.killSwitch?.on, locked: !!(s.paused || s.ks_active_at) },
     trades: autoTradesToday(userId).filter(t => !String(t.symbol || '').startsWith('TEST')),
     history: autoTradeHistory(userId),
-    paper: isAdminUser(userId) ? paperTrades(userId) : [],
+    paper: paperTrades(userId),
   };
 }
