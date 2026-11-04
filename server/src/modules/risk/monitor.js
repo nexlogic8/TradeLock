@@ -203,9 +203,13 @@ function fillsFor(uid, m, day) {
 }
 
 /** Update today's numbers from a broker snapshot. Writes only what changed; returns the day state. */
-function applySnapshot(uid, t, snap, m) {
-  const realized = snap.positions.reduce((a, p) => a + (p.realized || 0), 0);
-  const unrealized = snap.positions.reduce((a, p) => a + (p.unrealized || 0), 0);
+export function applySnapshot(uid, t, snap, m) {
+  // Before the open the broker still reports the previous session's closed positions and their P&L (Dhan resets in
+  // the morning; 5 Nov 00:01 read 4 Nov's −₹1,70,128): today counts only positions still open until 09:15.
+  const preOpen = t.minutes < config.market.open;
+  const counted = preOpen ? snap.positions.filter(p => p.qty !== 0) : snap.positions;
+  const realized = counted.reduce((a, p) => a + (p.realized || 0), 0);
+  const unrealized = counted.reduce((a, p) => a + (p.unrealized || 0), 0);
   const pnl = realized + unrealized;
   const s = dayState(uid, t.day);
   const fills = fillsFor(uid, m, t.day);
@@ -213,8 +217,9 @@ function applySnapshot(uid, t, snap, m) {
   const next = {
     capital: nextCapital(uid, s, snap, realized),
     realized, unrealized,
-    worst: Math.min(s.worst, pnl),
-    peak: Math.max(s.peak, pnl),
+    // Before the open the day has not started: its low and high are today's numbers only (clears an earlier reading).
+    worst: preOpen ? Math.min(0, pnl) : Math.min(s.worst, pnl),
+    peak: preOpen ? Math.max(0, pnl) : Math.max(s.peak, pnl),
     entries: countEntries(fills),
     wins: closed.filter(c => c.pnl > 0).length,
     losses: closed.filter(c => c.pnl < 0).length,
@@ -234,7 +239,12 @@ function applySnapshot(uid, t, snap, m) {
   patchDay(uid, t.day, patch, { defer: true });
 
   // Day P&L starts at zero, so anchor the curve at the open the first time we see this day.
-  if (firstOfDay) recordPoint(uid, t.day, Math.min(config.market.open, t.minutes), 0);
+  if (firstOfDay) recordPoint(uid, t.day, config.market.open, 0);
+  // The intraday curve starts at the open: points from before it (the previous session's P&L) are dropped, once a day.
+  if (preOpen) {
+    if (m.clearedDay !== t.day) { m.clearedDay = t.day; stmt('DELETE FROM pnl_points WHERE user_id = ? AND day = ? AND minute < ?').run(uid, t.day, config.market.open); }
+    return { ...s, ...patch };
+  }
   if (!m.point || m.point.minute !== t.minutes || m.point.pnl !== pnl) {
     recordPoint(uid, t.day, t.minutes, pnl);
     m.point = { minute: t.minutes, pnl };
