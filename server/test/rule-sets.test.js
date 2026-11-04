@@ -79,3 +79,15 @@ test('Overview chart: a second stop-loss line only when the other set\'s stop-lo
   assert.equal(otherSl(d({ on: false, amount: null }, { on: true, amount: 57817 })), null, 'other set off: one line');
   assert.deepEqual(otherSl(d({ on: true, amount: 41298 }, { on: true, amount: 57817 }, 'manual')), { key: 'algo', amount: 57817 });
 });
+
+test('Power Scalper sizes manual orders from the Manual set\'s Option SL room, also while the Algo set is in force', async () => {
+  const { scalperSignalRisk } = await import('../src/modules/scalper/signals.js');
+  const uid = createUser({ email: 'optsl@rules.test', password: null, name: 'O' });
+  upsertAccount(uid, { broker: 'dhan', clientId: 'C31', accessToken: 'test-token-not-real-0123456789' });
+  stmt('UPDATE broker_accounts SET algo_on = 1, agent_on = 1 WHERE user_id = ?').run(uid);
+  const r = getRules(uid);
+  saveRules(uid, { ...r.manual, optionSl: { on: true, value: 25 } }, undefined, null, 'manual');
+  saveRules(uid, { ...r.algo, optionSl: { on: false, value: 20 } }, undefined, null, 'algo');
+  assert.equal(ruleMode(uid), 'algo');
+  assert.equal(scalperSignalRisk(uid).optionSlPct, 25, 'the Manual set\'s 25%, not the Algo set (off)');
+});

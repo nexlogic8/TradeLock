@@ -32,9 +32,11 @@ function row(key, title, line, r, input, tv) {
 }
 
 /** Start / Stop Protection, like Start / Stop Algo Trading: the same switch as "Protection" in the top bar. */
-function protCard(d, f) {
+function protCard(d, f, set = 'manual') {
   const broker = d?.broker, label = broker?.label || 'broker', running = !!broker && broker.agentOn !== false;
-  const on = ['maxLoss', 'capitalUse', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', 'optionSl', 'cutoff', 'killSwitch'].filter(k => f?.[k]?.on).length;
+  // Option SL room sizes manual Power Scalper orders only: not a rule of the Algo Trading set.
+  const keys = ['maxLoss', 'capitalUse', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', ...(set === 'algo' ? [] : ['optionSl']), 'cutoff', 'killSwitch'];
+  const on = keys.filter(k => f?.[k]?.on).length;
   const locked = running && d?.agentLock;
   const state = !broker ? ['Not connected', 'grey'] : locked ? ['Locked today', 'amber'] : running ? ['Protecting', ''] : ['Stopped', 'ice'];
   const text = !broker ? 'Connect a broker so TradeLock can watch your trades against these rules.'
@@ -46,7 +48,7 @@ function protCard(d, f) {
       <div class="algo-control-copy">
         <span class="pill ${state[1]}"><span class="dot ${running && d?.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
         <h2>Protection</h2>
-        <p>${text} <span class="prot-count">${on} of 9 rules on.</span></p>
+        <p>${text} <span class="prot-count">${on} of ${keys.length} rules on.</span></p>
       </div>
       ${locked ? html`<button class="btn btn-ghost algo-start prot-locked" type="button" data-prot="locked">${icon('lock')}Locked until next trading day</button>`
         : html`<button class="btn ${running ? 'btn-danger' : 'btn-primary'} algo-start" type="button" data-prot="${running ? 'stop' : 'start'}" ${broker ? '' : 'disabled'}>
@@ -139,7 +141,7 @@ export default {
     const broker = d?.broker?.label || 'broker';
     const tv = tipValues(f, capital, limitOf, broker);   // numbers for the (i) diagrams
     return html`
-      ${protCard(d, f)}
+      ${protCard(d, f, ctx.ui.set)}
       ${ctx.data.pending ? html`<div class="banner amber mb" id="rules-pending">${icon('clock')}<div><b>Changes scheduled for ${longDay(ctx.data.pendingFrom)}.</b> You loosened a limit during market hours, so the new rules start next session.</div></div>` : ''}
       <div class="panel pad srules">
         ${setSwitch(ctx)}
@@ -151,7 +153,7 @@ export default {
         ${row('lossStreak', 'Losing streak', LINES.lossStreak(), f.lossStreak, countInput('lossStreak', f.lossStreak, 'losses'), tv)}
         ${row('giveback', 'Profit give-back', LINES.giveback(f, capital), f.giveback,
           html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-giveback" data-value="giveback" inputmode="numeric" value="${f.giveback.value}" aria-label="Give-back percent"></div>`, tv)}
-        ${row('optionSl', 'Option SL room', LINES.optionSl(f, capital), f.optionSl,
+        ${ctx.ui.set === 'algo' ? '' : row('optionSl', 'Option SL room', LINES.optionSl(f, capital), f.optionSl,
           html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-optionSl" data-value="optionSl" inputmode="decimal" value="${f.optionSl.value}" aria-label="Option stop-loss room percent"></div>`, tv)}
         ${row('cutoff', 'Cutoff time', LINES.cutoff(), f.cutoff,
           html`<select class="input num" id="v-cutoff" data-cutoff aria-label="Cutoff time">${[...new Set([...CUTOFFS, f.cutoff.value])].sort().map(t => html`<option value="${t}" ${f.cutoff.value === t ? 'selected' : ''}>${label12(t)}</option>`)}</select>`, tv)}
@@ -165,7 +167,7 @@ export default {
     const ks = $('#line-killSwitch', ctx.el);
     if (ks) ks.innerHTML = String(killLine(patch.dash));
     const card = $('#prot-card', ctx.el);
-    if (card) card.outerHTML = String(protCard(patch.dash, ctx.ui.form));   // only the card: unsaved edits stay
+    if (card) card.outerHTML = String(protCard(patch.dash, ctx.ui.form, ctx.ui.set));   // only the card: unsaved edits stay
     const sets = $('#rule-sets', ctx.el);
     if (sets) sets.outerHTML = String(setSwitch(ctx));   // Algo switched on / off: "Active now" moves
   },

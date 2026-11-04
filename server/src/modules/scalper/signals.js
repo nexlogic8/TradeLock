@@ -23,8 +23,9 @@ export function scalperSignalRisk(userId) {
   else if (!(book.funds?.available > 0)) reason = 'Available broker funds are unknown or insufficient.';
   const scanReason = !config.openai.apiKey ? 'Configure the server OpenAI API key to generate AI signals.'
     : !marketOpen() ? 'Market closed. Scan during market hours.' : '';
-  // Power Scalper sizes lots with this stop distance (Risk rules › Option SL room); null = sizing off.
-  const optionSl = rules.optionSl ?? DEFAULT_RULES.optionSl, optionSlPct = optionSl.on ? optionSl.value : null;
+  // Power Scalper (manual orders) sizes lots with this stop distance: the Manual trading set's Option SL room, also while
+  // Algo Trading is on (Algo Trading's own entries set their stops themselves). null = sizing off.
+  const optionSl = getRules(userId).manual?.optionSl ?? DEFAULT_RULES.optionSl, optionSlPct = optionSl.on ? optionSl.value : null;
   return { budget, optionSlPct, reason, scanReason, scanAllowed:!scanReason, timeframe: '1m', swing: 'Two completed 1-minute candles on each side; stop one tick below the pre-breakout option swing low.' };
 }
 
