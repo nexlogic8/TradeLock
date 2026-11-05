@@ -80,6 +80,24 @@ function run(store, startDate, endDate, s) {
     prev: store.db.prepare('SELECT close FROM option_1m WHERE underlying = ? AND expiry_code = ? AND side = ? AND strike = ? AND time >= ? AND time < ? ORDER BY time DESC LIMIT 1'),
     day: store.db.prepare('SELECT time, open, high, low, close FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND strike = ? AND time >= ? AND time < ? ORDER BY time'),
     at: store.db.prepare('SELECT strike FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND offset = ? AND time = ?'),
+    // The stored strike of that contract nearest to `strike` in the session's last stored minute.
+    near: store.db.prepare(`SELECT strike, close FROM option_1m WHERE underlying = ? AND expiry_code = ? AND side = ? AND time =
+      (SELECT MAX(time) FROM option_1m WHERE underlying = ? AND expiry_code = ? AND side = ? AND time >= ? AND time < ?) ORDER BY ABS(strike - ?) LIMIT 1`),
+  };
+  // Dhan's history has ATM ±10 strikes (±3 for the next expiry), so after a big gap, or the day after an expiry, today's
+  // ATM strike may not be stored for yesterday. Its close is then estimated from the nearest stored strike of the same
+  // contract, on the high side: an option is worth at most the nearer strike's premium plus the strike difference when it
+  // is deeper in the money, and at most the nearer strike's premium when it is further out of the money. A high previous
+  // close makes "opened above the previous close" stricter, so the estimate can only drop a signal, never invent one.
+  const prevClose = (code, side, strike, y) => {
+    const from = sec(y) + OPEN_S, to = sec(y) + CLOSE_S;
+    const p = q.prev.get(UNDERLYING, code, side, strike, from, to)?.close ?? null;
+    if (p >= MIN_PREV) return { prev: p, estimated: false };
+    const n = q.near.get(UNDERLYING, code, side, UNDERLYING, code, side, from, to, strike);
+    if (!(n?.close >= MIN_PREV)) return { prev: null, estimated: false };
+    const deeper = side === 'CE' ? n.strike - strike : strike - n.strike;   // > 0: today's strike is deeper in the money
+    // The true close lies between the nearer strike's premium and that ± the strike difference (never under a tick).
+    return { prev: r2(n.close + Math.max(0, deeper)), low: r2(Math.max(TICK, n.close + Math.min(0, deeper))), estimated: true, from: n.strike };
   };
   // The previous close must be today's own contract's. Slot 1 is the nearest weekly expiry on each day (NSE calendar:
   // Thursday, Tuesday from 1 Sep 2025, earlier for a holiday), so after an expiry today's slot-1 contract was
@@ -100,9 +118,10 @@ function run(store, startDate, endDate, s) {
     const sides = {};
     for (const side of ['CE', 'PE']) {
       const a = q.atm.get(UNDERLYING, side, t0); if (!a) continue;
-      const p = prevCode ? q.prev.get(UNDERLYING, prevCode, side, a.strike, sec(y) + OPEN_S, sec(y) + CLOSE_S)?.close ?? null : null;
-      const prev = p >= MIN_PREV ? p : null;
-      sides[side] = { strike: a.strike, prev, open: a.open, close: a.close, ok: prev > 0 && a.open > prev && a.close > a.open };
+      const pc = prevCode ? prevClose(prevCode, side, a.strike, y) : { prev: null, estimated: false }, prev = pc.prev;
+      sides[side] = { strike: a.strike, prev, ...(pc.estimated ? { prevEstimated: true, prevLow: pc.low, prevFrom: pc.from } : {}), open: a.open, close: a.close, ok: prev > 0 && a.open > prev && a.close > a.open };
+      // Estimated close: a gap up only against the low end of its range is uncertain (not traded, reported as such).
+      sides[side].uncertain = !!pc.estimated && !sides[side].ok && a.open > pc.low && a.close > a.open;
     }
     // The index gap: today's 09:15 open against the previous session's last close, in points.
     const yd = byDay.get(y), indexGap = yd?.length ? r2(D[0].open - yd[yd.length - 1].close) : null;
@@ -111,7 +130,7 @@ function run(store, startDate, endDate, s) {
     const decision = { day: d, ce: sides.CE || null, pe: sides.PE || null, indexGap, side: ok.length === 1 ? ok[0] : null,
       reason: small ? (indexGap == null ? `${label} previous close not found` : `${label} gap ${Math.abs(indexGap)} pts, below the ${s.minGapPts}-point threshold`)
         : !Object.keys(sides).length ? 'no option data'
-        : Object.values(sides).some(x => x.prev == null) && !ok.length ? 'previous close not found (expiry rollover)' : ok.length > 1 ? 'both premiums gapped up green' : ok.length ? '' : 'no premium gapped up and stayed green' };
+        : Object.values(sides).some(x => x.prev == null) && !ok.length ? (prevCode ? 'previous close not in the stored history' : 'previous close not found (expiry rollover)') : ok.length > 1 ? 'both premiums gapped up green' : ok.length ? '' : Object.values(sides).some(x => x.uncertain) ? `gap uncertain: ${Object.keys(sides).filter(x => sides[x].uncertain).join(' and ')} previous close estimated (strike beyond the stored history)` : 'no premium gapped up and stayed green' };
     decisions.push(decision);
     if (!decision.side) continue;
     const side = decision.side, S = sides[side];
@@ -167,7 +186,7 @@ function run(store, startDate, endDate, s) {
       const gross = (exit.price - entry) * qty, charges = optionCharges(d, entry * qty, exit.price * qty).total, net = r2(gross - charges), before = b.capital;
       b.capital = r2(b.capital + net); b.peak = Math.max(b.peak, b.capital);
       b.maxDrawdownPct = Math.max(b.maxDrawdownPct, (b.peak - b.capital) / b.peak * 100);
-      b.trades.push({ day: d, side, strike, prev: S.prev, open: S.open, entryAt: D[k].time, entry, stop, exitAt: exit.at, exit: r2(exit.price), exitReason: exit.reason,
+      b.trades.push({ day: d, side, strike, prev: S.prev, ...(S.prevEstimated ? { prevEstimated: true } : {}), open: S.open, entryAt: D[k].time, entry, stop, exitAt: exit.at, exit: r2(exit.price), exitReason: exit.reason,
         lots, lotSize, qty, gross: r2(gross), charges: r2(charges), net, capitalBefore: before, capitalAfter: b.capital });
       b.equity.push({ time: exit.at, value: b.capital });
     }

@@ -103,7 +103,7 @@ test('previous close: an expiry rollover without the right contract, or a close 
   s.db.prepare('DELETE FROM option_1m WHERE expiry_code = 2').run();
   const d3 = gapBacktest({ lateEntryPct: 0, startDate: D3, endDate: D3, exitCandle: '1m' }, s).days.find(d => d.day === D3);
   assert.equal(d3.side, null);
-  assert.equal(d3.reason, 'previous close not found (expiry rollover)');
+  assert.equal(d3.reason, 'previous close not in the stored history');
   const t2 = store();
   t2.db.prepare("UPDATE option_1m SET close = 0.05 WHERE side = 'CE' AND time = ?").run(t(D1, '15:29'));
   const d2 = gapBacktest({ lateEntryPct: 0, startDate: D2, endDate: D2, exitCandle: '1m' }, t2).days.find(d => d.day === D2);

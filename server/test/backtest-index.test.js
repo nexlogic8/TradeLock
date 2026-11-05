@@ -70,3 +70,34 @@ test('Gap backtest on SENSEX: 20 a lot, and the gap threshold names the index', 
   assert.match(small.days[0].reason, /^SENSEX gap 300 pts, below the 500-point threshold/);
   s.close();
 });
+
+test('previous close beyond the stored strikes: estimated on the high side from the nearest strike', () => {
+  const s = openHistory(':memory:'), D1 = '2026-03-02', D2 = '2026-03-03';
+  // A 1,000-point gap: today's ATM 81000 was not stored yesterday (stored up to 80500).
+  s.saveIndex('SENSEX', D1, D2, [bar(D1, '15:29', 80000, 80000, 80000, 80000), bar(D2, '09:15', 81000, 81100, 80990, 81080), bar(D2, '09:16', 81080, 81090, 81000, 81010)]);
+  s.saveOptions('SENSEX', 1, 'CE', 5, D1, D1, [bar(D1, '15:29', 90, 90, 90, 90, { strike: 80500 })]);
+  s.saveOptions('SENSEX', 1, 'PE', 5, D1, D1, [bar(D1, '15:29', 560, 560, 560, 560, { strike: 80500 })]);
+  s.saveOptions('SENSEX', 1, 'CE', 0, D2, D2, [bar(D2, '09:15', 300, 330, 295, 320, { strike: 81000 }), bar(D2, '09:16', 320, 325, 310, 322, { strike: 81000 })]);
+  s.saveOptions('SENSEX', 1, 'PE', 0, D2, D2, [bar(D2, '09:15', 280, 300, 270, 290, { strike: 81000 }), bar(D2, '09:16', 290, 295, 280, 285, { strike: 81000 })]);
+  const r = gapBacktest({ underlying: 'SENSEX', lateEntryPct: 0, startDate: D2, endDate: D2, capital: 200000, exitCandle: '0916', costToCostR: 0 }, s);
+  const [day] = r.days;
+  // CE 81000 was further out of the money than 80500: at most 90. PE 81000 was deeper in the money: at most 560 + 500.
+  assert.deepEqual([day.ce.prev, day.ce.prevEstimated, day.pe.prev, day.pe.prevEstimated], [90, true, 1060, true]);
+  assert.equal(day.side, 'CE', 'CE opened 300 > 90 and closed green; PE 280 < 1060');
+  assert.equal(r.best.trades[0].prevEstimated, true);
+  s.close();
+});
+
+test('an estimated previous close that only the low end of its range would beat is reported as uncertain, not traded', () => {
+  const s = openHistory(':memory:'), D1 = '2026-03-02', D2 = '2026-03-03';
+  s.saveIndex('SENSEX', D1, D2, [bar(D1, '15:29', 80000, 80000, 80000, 80000), bar(D2, '09:15', 79400, 79450, 79300, 79350)]);
+  // PE 79400 was 600 further out of the money than the stored 80000 (close 400): its close lay between 0.05 and 400.
+  s.saveOptions('SENSEX', 1, 'PE', 0, D1, D1, [bar(D1, '15:29', 400, 400, 400, 400, { strike: 80000 })]);
+  s.saveOptions('SENSEX', 1, 'CE', 0, D1, D1, [bar(D1, '15:29', 380, 380, 380, 380, { strike: 80000 })]);
+  s.saveOptions('SENSEX', 1, 'PE', 0, D2, D2, [bar(D2, '09:15', 300, 330, 295, 320, { strike: 79400 })]);
+  s.saveOptions('SENSEX', 1, 'CE', 0, D2, D2, [bar(D2, '09:15', 350, 352, 300, 310, { strike: 79400 })]);
+  const [day] = gapBacktest({ underlying: 'SENSEX', startDate: D2, endDate: D2 }, s).days;
+  assert.deepEqual([day.pe.prev, day.pe.prevLow, day.pe.uncertain, day.side], [400, 0.05, true, null]);
+  assert.match(day.reason, /^gap uncertain: PE previous close estimated/);
+  s.close();
+});
