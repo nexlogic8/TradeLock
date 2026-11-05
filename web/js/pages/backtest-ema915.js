@@ -59,7 +59,7 @@ export function ema915Fields(ui) {
 }
 
 export function ema915Notes(ui, caps) {
-  const g = ui.ema915, cov = caps?.gap?.coverage;
+  const g = ui.ema915, cov = caps?.gap?.indices ? caps.gap.indices[ui.underlying || 'NIFTY'] : caps?.gap?.coverage;
   return html`<p class="bt-muted"><b>EMA 9/15 5m — the strategy Algo Trading runs live.</b> NIFTY 5-minute candles; EMA 9, EMA 15 and ATR 14 run across sessions, as on the chart. When EMA 9 crosses above EMA 15 (CE) or below it (PE), the first candle of that trend, the crossover candle or up to ${g.afterCross} after it, on which EMA 9 moves at ${g.minAngle}° or steeper (angle = atan(EMA 9’s change ÷ ATR 14)) is the signal. One chance per crossover, as live: if a trade is still open or it is after ${g.lastEntry}, that crossover is skipped. Entry: the ATM option of the next expiry at the next minute's open + ₹${g.slippage}. Stop: 1 tick below the option's low during the signal candle.${g.costToCostR > 0 ? ` Cost to cost at ${g.costToCostR}R.` : ''} Exit: the next minute's open after the first opposite-colour 5-minute candle (red for CE, green for PE), the stop, or ${g.squareOff}. Charges as on each date.</p>
     <p class="bt-muted">${cov ? `Uses the stored 1-minute option history on this server: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}. Runs in seconds and places no orders.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
 }

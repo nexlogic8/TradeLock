@@ -23,12 +23,15 @@
 import { Worker } from 'node:worker_threads';
 import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
-import { niftyLotSize, weeklyExpiry } from '../scalper/option-backtest.js';
+import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
 
-export const GAP_DEFAULTS = Object.freeze({ capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0, entryMode: 'open', retestMin: 15, retestSlPct: 5 });   // ENTRY_MODE 'open' (live: at 09:15) or 'retest' (a limit buy at the 09:15 open when the option comes back to it within RETEST_MIN minutes, stop RETEST_SL_PCT below)   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
+export const GAP_DEFAULTS = Object.freeze({ underlying: 'NIFTY', capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0, entryMode: 'open', retestMin: 15, retestSlPct: 5 });   // ENTRY_MODE 'open' (live: at 09:15) or 'retest' (a limit buy at the 09:15 open when the option comes back to it within RETEST_MIN minutes, stop RETEST_SL_PCT below)   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
 export const GAP_MODES = Object.freeze({ best: 'Late entry: fill above the 09:15 open', worst: 'Worst case: fill at the 09:16 open' });
 
-const TICK = 0.05, UNDERLYING = 'NIFTY';
+const TICK = 0.05;
+/** The stored-history index a run uses: NIFTY, BANKNIFTY or SENSEX (default NIFTY). */
+export const BACKTEST_INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
+const indexKey = u => (BACKTEST_INDICES.includes(String(u || '').toUpperCase()) ? String(u).toUpperCase() : 'NIFTY');
 const sec = day => Date.parse(`${day}T00:00:00+05:30`) / 1000;
 // The session, 09:15–15:30 IST. Dhan pads older history with flat candles outside it (and a few after 15:30):
 // only session candles count, for the 09:15 candle, the exit path and the previous close.
@@ -40,8 +43,10 @@ const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x
 const tick = x => Math.round(x / TICK) * TICK;
 const r2 = x => Math.round(x * 100) / 100;
 
-/** First and last day with NIFTY 1-minute candles in the history store, or null. */
-export function gapCoverage(store) {
+/** First and last day with the index's 1-minute candles and its ATM options in the history store, or null. */
+export function gapCoverage(store, underlying = 'NIFTY') {
+  const UNDERLYING = indexKey(underlying);
+  if (!store.db.prepare('SELECT 1 FROM option_1m WHERE underlying = ? LIMIT 1').get(UNDERLYING)) return null;
   const row = store.db.prepare('SELECT MIN(time) AS first, MAX(time) AS last FROM index_1m WHERE underlying = ?').get(UNDERLYING);
   return row?.first ? { from: dayOf(row.first), to: dayOf(row.last) } : null;
 }
@@ -64,6 +69,7 @@ export function gapBacktest({ startDate, endDate, ...options }, store) {
 }
 
 function run(store, startDate, endDate, s) {
+  const UNDERLYING = indexKey(s.underlying), label = UNDERLYING === 'BANKNIFTY' ? 'BANK NIFTY' : UNDERLYING;
   const idx = store.index(UNDERLYING, sec(addDays(startDate, -10)), sec(addDays(endDate, 1))).filter(c => inSession(c.time)), byDay = new Map();
   for (const c of idx) { const d = dayOf(c.time); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(c); }
   const days = [...byDay.keys()].sort();
@@ -80,7 +86,7 @@ function run(store, startDate, endDate, s) {
   // yesterday's slot 2. Matched by expiry date; no match → no previous close (that day is not traded). A guess from
   // the premiums (ATM CE + PE nearly worthless at the close) missed some expiries and read the expired contract's ₹0.05.
   const tradingDays = new Set(days);
-  const expiryOf = (day, n) => weeklyExpiry(day, n, tradingDays).date;
+  const expiryOf = (day, n) => indexExpiry(UNDERLYING, day, n, tradingDays).date;
   const prevSlot = (d, y) => { const e = expiryOf(d, 1); return e === expiryOf(y, 1) ? 1 : e === expiryOf(y, 2) ? 2 : null; };
   const MIN_PREV = 1;   // an ATM premium's close below ₹1 is a wrong contract, not a real close
   const book = Object.fromEntries(Object.keys(GAP_MODES).map(m => [m, { capital: s.capital, peak: s.capital, maxDrawdownPct: 0, trades: [], skipped: [], equity: [] }]));
@@ -103,7 +109,7 @@ function run(store, startDate, endDate, s) {
     const small = s.minGapPts > 0 && !(Math.abs(indexGap) >= s.minGapPts);
     const ok = small ? [] : Object.keys(sides).filter(x => sides[x].ok);
     const decision = { day: d, ce: sides.CE || null, pe: sides.PE || null, indexGap, side: ok.length === 1 ? ok[0] : null,
-      reason: small ? (indexGap == null ? 'NIFTY previous close not found' : `NIFTY gap ${Math.abs(indexGap)} pts, below the ${s.minGapPts}-point threshold`)
+      reason: small ? (indexGap == null ? `${label} previous close not found` : `${label} gap ${Math.abs(indexGap)} pts, below the ${s.minGapPts}-point threshold`)
         : !Object.keys(sides).length ? 'no option data'
         : Object.values(sides).some(x => x.prev == null) && !ok.length ? 'previous close not found (expiry rollover)' : ok.length > 1 ? 'both premiums gapped up green' : ok.length ? '' : 'no premium gapped up and stayed green' };
     decisions.push(decision);
@@ -129,7 +135,7 @@ function run(store, startDate, endDate, s) {
     for (const [mode, b] of Object.entries(book)) {
       const k = retest ? rk : mode === 'best' ? 0 : 1, e = D[k] && rows.get(D[k].time);
       if (!e) { b.skipped.push({ day: d, reason: 'option price missing' }); continue; }
-      const lotSize = niftyLotSize(d), entry = r2(tick((retest ? rFill : e.open * (k ? 1 : 1 + (Number(s.lateEntryPct) || 0) / 100)) + s.slippage)), basis = s.compound ? b.capital : s.capital;
+      const lotSize = lotSizeOn(UNDERLYING, d), entry = r2(tick((retest ? rFill : e.open * (k ? 1 : 1 + (Number(s.lateEntryPct) || 0) / 100)) + s.slippage)), basis = s.compound ? b.capital : s.capital;
       // Fixed sizing with a rupee amount: that much a trade, never more than the account holds that day.
       const spend = !s.compound && s.tradeAmount > 0 ? Math.min(s.tradeAmount, b.capital) : basis * s.fundsUse / 100;
       const lots = Math.min(Math.floor(spend / (entry * lotSize)), s.lotCap > 0 ? s.lotCap : Infinity);

@@ -21,7 +21,8 @@
 import { Worker } from 'node:worker_threads';
 import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
-import { niftyLotSize } from '../scalper/option-backtest.js';
+import { lotSizeOn } from '../scalper/option-backtest.js';
+import { BACKTEST_INDICES } from './gap.js';
 
 export const CUSTOM_DEFAULTS = Object.freeze({ lots: 1, slippage: 0.5, brokeragePerOrder: 15, measure: 'premium', oppositeExit: true, maxTrades: 100 });
 // Built-in strategies offered next to the user's own (ids are strings; saved strategies have numeric ids).
@@ -37,7 +38,7 @@ export const CUSTOM_BUILT_IN = Object.freeze({
 });
 export const CUSTOM_TIMEFRAMES = Object.freeze({ '1m': 1, '3m': 3, '5m': 5, '15m': 15 });
 
-const TICK = 0.05, UNDERLYING = 'NIFTY';
+const TICK = 0.05;
 const sec = day => Date.parse(`${day}T00:00:00+05:30`) / 1000;
 const OPEN_S = (9 * 60 + 15) * 60, CLOSE_S = (15 * 60 + 30) * 60;
 const inSession = t => { const s = (t + 19_800) % 86_400; return s >= OPEN_S && s < CLOSE_S; };
@@ -108,6 +109,7 @@ export function ruleStates(bars, strategy) {
 }
 
 function run(store, startDate, endDate, strategy, s) {
+  const UNDERLYING = BACKTEST_INDICES.includes(s.underlying) ? s.underlying : 'NIFTY';
   const tf = CUSTOM_TIMEFRAMES[strategy.timeframe];
   const e = strategy.entries;
   // Warm-up: 10 calendar days before the start seed the EMAs / RSI / breakout lookback.
@@ -140,7 +142,7 @@ function run(store, startDate, endDate, strategy, s) {
       if (entries >= s.maxTrades) { skipped.push({ day: d, at: sig.at, side: sig.side, reason: `max ${s.maxTrades} trades a day` }); continue; }
       const atm = q.atm.get(UNDERLYING, sig.side, sig.at);
       if (!atm) { skipped.push({ day: d, at: sig.at, side: sig.side, reason: 'option price missing' }); continue; }
-      const rows = q.day.all(UNDERLYING, sig.side, atm.strike, sig.at, close), lotSize = niftyLotSize(d), qty = s.lots * lotSize;
+      const rows = q.day.all(UNDERLYING, sig.side, atm.strike, sig.at, close), lotSize = lotSizeOn(UNDERLYING, d), qty = s.lots * lotSize;
       if (!rows.length || rows[0].time !== sig.at) { skipped.push({ day: d, at: sig.at, side: sig.side, reason: 'option price missing' }); continue; }
       const entry = r2(tick(rows[0].open + s.slippage)), idxEntry = minute.get(sig.at)?.open ?? sig.spot;
       // Levels: on the premium (price p) or on the index (CE gains when NIFTY rises, PE when it falls).
@@ -183,8 +185,8 @@ function run(store, startDate, endDate, strategy, s) {
   for (const t of trades) { const r = (days[t.day] ??= { day: t.day, trades: 0, wins: 0, net: 0, charges: 0 }); r.trades++; if (t.net > 0) r.wins++; r.net = r2(r.net + t.net); r.charges = r2(r.charges + t.charges); }
   const sessions = new Set(idx.map(c => dayOf(c.time)).filter(d => d >= startDate && d <= endDate));
   const notes = [];
-  if (e.volume) notes.push('Volume rule not applied: the NIFTY index has no volume.');
-  if (strategy.market === 'equity') notes.push('Saved for equity; tested on NIFTY options (the stored history).');
+  if (e.volume) notes.push('Volume rule not applied: the index has no volume.');
+  if (strategy.market === 'equity') notes.push(`Saved for equity; tested on ${UNDERLYING} options (the stored history).`);
   if (s.measure === 'index' && x.stopMode === 'amount') notes.push('A ₹ stop is always on the premium (the whole quantity).');
   return {
     strategy, settings: s, sessions: sessions.size, signals: signals.length,

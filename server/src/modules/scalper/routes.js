@@ -16,7 +16,7 @@ import { OPTION_BACKTEST, optionTrades } from './option-backtest.js';
 import { ORB5_DEFAULTS, orb5Backtest } from './orb5.js';
 import { ORB5_EXPIRIES, ORB5_OPTION_DEFAULTS, orb5OptionTrades } from './orb5-options.js';
 import { stmt, tx } from '../../db/index.js';
-import { GAP_DEFAULTS, gapBacktestInWorker, gapCoverage } from '../backtest/gap.js';
+import { BACKTEST_INDICES, GAP_DEFAULTS, gapBacktestInWorker, gapCoverage } from '../backtest/gap.js';
 import { EMA915_DEFAULTS, ema915BacktestInWorker } from '../backtest/ema915.js';
 import { CUSTOM_BUILT_IN, CUSTOM_DEFAULTS, CUSTOM_TIMEFRAMES, customBacktestInWorker } from '../backtest/custom.js';
 import { listStrategies, normalizeStrategy } from '../strategy/service.js';
@@ -358,9 +358,26 @@ function gapDefaults(userId) {
   if (r?.cutoff?.on && /^\d{2}:\d{2}$/.test(r.cutoff.value)) d.squareOff = r.cutoff.value;
   return d;
 }
+/** The index a history backtest runs on (body.underlying): NIFTY (default), BANKNIFTY or SENSEX. */
+function backtestIndex(body) {
+  const u = String(body?.underlying ?? 'NIFTY').toUpperCase();
+  if (!BACKTEST_INDICES.includes(u)) throw bad('INVALID_BACKTEST_INDEX', 'Choose NIFTY, BANK NIFTY or SENSEX.');
+  return u;
+}
+/** Stored-history range of each index ({ NIFTY: { from, to } | null, … }). */
+const indexCoverage = store => Object.fromEntries(BACKTEST_INDICES.map(u => [u, gapCoverage(store, u)]));
+/** The index's stored range, checked against the requested dates. */
+function historyRange(underlying, startDate, endDate) {
+  const store = openHistory();
+  let coverage;
+  try { coverage = gapCoverage(store, underlying); } finally { store.close(); }
+  if (!coverage) throw bad('GAP_HISTORY_MISSING', `The ${underlyingFor(underlying).label} 1-minute option history is not downloaded on this server yet.`);
+  if (endDate < coverage.from || startDate > coverage.to) throw bad('GAP_RANGE_OUTSIDE_HISTORY', `Stored ${underlyingFor(underlying).label} history covers ${coverage.from} to ${coverage.to}; choose dates inside it.`);
+  return coverage;
+}
 function gapCapabilities(userId) {
   let store;
-  try { store = openHistory(); const coverage = gapCoverage(store); return { available: !!coverage, coverage, defaults: gapDefaults(userId) }; }
+  try { store = openHistory(); const coverage = gapCoverage(store); return { available: !!coverage, coverage, indices: indexCoverage(store), defaults: gapDefaults(userId) }; }
   catch (e) { return { available: false, reason: e.message, defaults: gapDefaults(userId) }; }
   finally { store?.close(); }
 }
@@ -372,7 +389,7 @@ function gapSettings(body) {
     entryMode: String(b.entryMode ?? d.entryMode), retestMin: Number(b.retestMin ?? d.retestMin), retestSlPct: Number(b.retestSlPct ?? d.retestSlPct) };
   if (!intIn(s.strike, -3, 3)) throw bad('INVALID_GAP_STRIKE', 'Choose a strike from OTM3 to ITM3.');
   if (!numIn(s.lateEntryPct, 0, 15)) throw bad('INVALID_GAP_LATE_ENTRY', 'Late entry must be 0–15% above the 09:15 open.');
-  if (!numIn(s.minGapPts, 0, 2000)) throw bad('INVALID_GAP_MIN_GAP', 'Minimum NIFTY gap must be 0–2,000 points (0 = any gap).');
+  if (!numIn(s.minGapPts, 0, 5000)) throw bad('INVALID_GAP_MIN_GAP', 'Minimum index gap must be 0–5,000 points (0 = any gap).');
   if (!numIn(s.tradeAmount, 0, 1e10)) throw bad('INVALID_GAP_TRADE_AMOUNT', 'Capital per trade must be ₹0 (use the %) or more.');
   if (!['open', 'retest'].includes(s.entryMode)) throw bad('INVALID_GAP_ENTRY', 'Entry must be at 09:15 or on the retest of the 09:15 open.');
   if (!intIn(s.retestMin, 1, 60)) throw bad('INVALID_GAP_RETEST_WINDOW', 'Retest window must be 1–60 minutes.');
@@ -390,12 +407,8 @@ function gapSettings(body) {
 async function runGapBacktest(ctx) {
   const { startDate, endDate } = ctx.body || {}, now = Date.now();
   backtestRange(startDate, endDate, ist(now).day);
-  const settings = gapSettings(ctx.body);
-  const store = openHistory();
-  let coverage;
-  try { coverage = gapCoverage(store); } finally { store.close(); }
-  if (!coverage) throw bad('GAP_HISTORY_MISSING', 'The 1-minute option history is not downloaded on this server yet.');
-  if (endDate < coverage.from || startDate > coverage.to) throw bad('GAP_RANGE_OUTSIDE_HISTORY', `Stored history covers ${coverage.from} to ${coverage.to}; choose dates inside it.`);
+  const settings = { underlying: backtestIndex(ctx.body), ...gapSettings(ctx.body) };
+  const coverage = historyRange(settings.underlying, startDate, endDate);
   const run = await gapBacktestInWorker({ startDate, endDate, ...settings });
   const metrics = { gap: true, coverage, ...run };
   const saved = tx(() => {
@@ -432,12 +445,8 @@ function ema915Settings(body) {
 async function runEma915Backtest(ctx) {
   const { startDate, endDate } = ctx.body || {}, now = Date.now();
   backtestRange(startDate, endDate, ist(now).day);
-  const settings = ema915Settings(ctx.body);
-  const store = openHistory();
-  let coverage;
-  try { coverage = gapCoverage(store); } finally { store.close(); }
-  if (!coverage) throw bad('GAP_HISTORY_MISSING', 'The 1-minute option history is not downloaded on this server yet.');
-  if (endDate < coverage.from || startDate > coverage.to) throw bad('GAP_RANGE_OUTSIDE_HISTORY', `Stored history covers ${coverage.from} to ${coverage.to}; choose dates inside it.`);
+  const settings = { underlying: backtestIndex(ctx.body), ...ema915Settings(ctx.body) };
+  const coverage = historyRange(settings.underlying, startDate, endDate);
   const run = await ema915BacktestInWorker({ startDate, endDate, ...settings });
   const metrics = { ema915: true, coverage, ...run };
   const saved = tx(() => {
@@ -481,13 +490,9 @@ async function runCustomBacktest(ctx) {
   if (!CUSTOM_TIMEFRAMES[strategy.timeframe]) throw bad('INVALID_CUSTOM_TIMEFRAME', 'Daily-timeframe strategies cannot be backtested on the 1-minute history; choose 1, 3, 5 or 15 minutes in the strategy.');
   const e = strategy.entries;
   if (!e.ema && !e.vwap && !e.rsi && !e.breakout) throw bad('CUSTOM_NO_ENTRY_RULE', 'Switch on at least one entry rule (EMA, VWAP, RSI or breakout) in the strategy.');
-  const settings = customSettings(ctx.body);
+  const settings = { underlying: backtestIndex(ctx.body), ...customSettings(ctx.body) };
   if (builtIn) settings.oppositeExit = true;   // its only exit besides the square-off
-  const store = openHistory();
-  let coverage;
-  try { coverage = gapCoverage(store); } finally { store.close(); }
-  if (!coverage) throw bad('GAP_HISTORY_MISSING', 'The 1-minute option history is not downloaded on this server yet.');
-  if (endDate < coverage.from || startDate > coverage.to) throw bad('GAP_RANGE_OUTSIDE_HISTORY', `Stored history covers ${coverage.from} to ${coverage.to}; choose dates inside it.`);
+  const coverage = historyRange(settings.underlying, startDate, endDate);
   const run = await customBacktestInWorker({ startDate, endDate, strategy, ...settings });
   const metrics = { custom: true, strategyId: builtIn ? strategyId : Number(strategyId), coverage, ...run };
   const saved = tx(() => {

@@ -15,13 +15,14 @@
 import { Worker } from 'node:worker_threads';
 import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
-import { niftyLotSize } from '../scalper/option-backtest.js';
+import { lotSizeOn } from '../scalper/option-backtest.js';
+import { BACKTEST_INDICES } from './gap.js';
 
 // As EMA_TREND in scalper/autotrade.js (not imported: that module opens the database, and this runs in a worker).
 const EMA_TREND = Object.freeze({ fast: 9, slow: 15, minAngle: 30, atrPeriod: 14, afterCross: 3 });
 export const EMA915_DEFAULTS = Object.freeze({ lots: 1, slippage: 1, minAngle: EMA_TREND.minAngle, afterCross: EMA_TREND.afterCross, costToCostR: 1, lastEntry: '15:00', squareOff: '15:15' });
 
-const TICK = 0.05, UNDERLYING = 'NIFTY', BAR = 300;
+const TICK = 0.05, BAR = 300;
 const sec = day => Date.parse(`${day}T00:00:00+05:30`) / 1000;
 const OPEN_S = (9 * 60 + 15) * 60, CLOSE_S = (15 * 60 + 30) * 60;
 const inSession = t => { const s = (t + 19_800) % 86_400; return s >= OPEN_S && s < CLOSE_S; };
@@ -48,6 +49,7 @@ export function ema915Backtest({ startDate, endDate, ...options }, store) {
 }
 
 function run(store, startDate, endDate, s) {
+  const UNDERLYING = BACKTEST_INDICES.includes(s.underlying) ? s.underlying : 'NIFTY';
   // 10 days before the start seed the averages; 1-minute candles by day for the trade path.
   const idx = store.index(UNDERLYING, sec(addDays(startDate, -10)), sec(addDays(endDate, 1))).filter(c => inSession(c.time));
   const five = [], minutes = new Map();
@@ -102,7 +104,7 @@ function run(store, startDate, endDate, s) {
       if (!atCost && r && r.high >= costAt) { atCost = true; sl = entry; }
     }
     if (!exit) exit = { price: lastClose, at: path.at(-1)?.time ?? at, reason: 'Session close' };
-    const lotSize = niftyLotSize(c.day), qty = s.lots * lotSize, gross = (exit.price - entry) * qty;
+    const lotSize = lotSizeOn(UNDERLYING, c.day), qty = s.lots * lotSize, gross = (exit.price - entry) * qty;
     const charges = optionCharges(c.day, entry * qty, exit.price * qty).total, net = r2(gross - charges);
     cum = r2(cum + net); peak = Math.max(peak, cum); maxDrawdown = Math.max(maxDrawdown, peak - cum);
     trades.push({ ...base, strike, entryAt: at, entry, stop, exitAt: exit.at, exit: r2(exit.price), exitReason: exit.reason, r: r2((exit.price - entry) / risk),

@@ -1,4 +1,5 @@
-// History backfill: downloads NIFTY 1-minute history into data/history.db for fast backtests.
+// History backfill: downloads an index's 1-minute history (NIFTY, BANKNIFTY or SENSEX) into data/history.db for fast backtests.
+//   --underlying BANKNIFTY: that index (default NIFTY). BANK NIFTY has monthly expiries only: slot 1 = this month's, 2 = next month's.
 //   node server/src/workers/history-backfill.js                 last 365 days, up to yesterday
 //   node server/src/workers/history-backfill.js --days 180 --to 2026-10-23 --codes 1,2 --pause 1500 --window 10
 //   node server/src/workers/history-backfill.js --status        what is stored so far
@@ -20,13 +21,16 @@ import { stmt } from '../db/index.js';
 import { adapterFor } from '../modules/broker/registry.js';
 import { normalizeScalperCandles } from '../modules/scalper/routes.js';
 import { openHistory } from '../modules/backtest/history-store.js';
+import { UNDERLYINGS } from '../modules/scalper/underlyings.js';
 
 const arg = (name, dflt) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : dflt; };
 const has = name => process.argv.includes(`--${name}`);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const istDay = ms => new Date(ms + 19_800_000).toISOString().slice(0, 10);
 const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
-const UNDERLYING = 'NIFTY';
+const UNDERLYING = String(arg('underlying', 'NIFTY')).toUpperCase(), U = UNDERLYINGS[UNDERLYING];
+if (!U) { console.error(`Unknown --underlying ${UNDERLYING}: use ${Object.keys(UNDERLYINGS).join(', ')}`); process.exit(1); }
+const EXPIRY_FLAG = UNDERLYING === 'BANKNIFTY' ? 'MONTH' : 'WEEK';
 const store = openHistory();
 // The broker transport can leave nothing on the event loop while a request is in flight; keep the
 // process alive until the run ends (otherwise Node exits with code 13 mid-await).
@@ -34,7 +38,7 @@ const keepAlive = setInterval(() => {}, 60_000);
 
 if (has('status')) {
   const s = store.summary(), d = t => (t ? istDay(t * 1000) : '-');
-  for (const o of s.options) console.log(`options slot ${o.code}: ${o.rows} rows, ${d(o.first)} … ${d(o.last)}`);
+  for (const o of s.options) console.log(`options ${o.underlying} slot ${o.code}: ${o.rows} rows, ${d(o.first)} … ${d(o.last)}`);
   for (const i of s.index) console.log(`index ${i.underlying}: ${i.rows} rows, ${d(i.first)} … ${d(i.last)}`);
   console.log(`requests done: ${s.requests}`);
   store.close(); process.exit(0);
@@ -99,7 +103,7 @@ console.log(`[backfill] ${UNDERLYING} ${FROM} … ${TO}, expiry slots ${CODES.jo
 for (let a = FROM; a <= TO; a = addDays(a, 80)) {
   const b = addDays(a, 79) < TO ? addDays(a, 79) : TO;
   if (store.fetched('index', UNDERLYING, 0, '', 0, a, b)) { skipped++; continue; }
-  const raw = await request(`index ${a}…${b}`, ad => ad.intradayCandles({ securityId: '13', exchangeSegment: 'IDX_I', instrument: 'INDEX', interval: '1', fromDate: `${a} 09:00:00`, toDate: `${b} 15:30:00` }));
+  const raw = await request(`index ${a}…${b}`, ad => ad.intradayCandles({ securityId: U.securityId, exchangeSegment: 'IDX_I', instrument: 'INDEX', interval: '1', fromDate: `${a} 09:00:00`, toDate: `${b} 15:30:00` }));
   if (!raw) { failed++; continue; }
   const rows = normalizeScalperCandles(raw).map(c => ({ ...c, time: Math.round(c.time / 1000) }));
   store.saveIndex(UNDERLYING, a, b, rows); done++; rowsTotal += rows.length;
@@ -117,7 +121,7 @@ for (const { code, side, off, a, b } of jobs) {
   if (store.fetched('option', UNDERLYING, code, side, off, a, b)) { skipped++; continue; }
   const label = `slot ${code} ${side} ${slotName(off)} ${a}…${b}`;
   let raw;
-  try { raw = await request(label, ad => ad.rollingOption({ expiryFlag: 'WEEK', expiryCode: code, strike: slotName(off), option: side, fromDate: a, toDate: b, interval: '1', full: true, timeoutMs: 45_000 })); }
+  try { raw = await request(label, ad => ad.rollingOption({ securityId: U.securityId, exchangeSegment: U.optionSegment, expiryFlag: EXPIRY_FLAG, expiryCode: code, strike: slotName(off), option: side, fromDate: a, toDate: b, interval: '1', full: true, timeoutMs: 45_000 })); }
   catch (e) { console.log(`[backfill] stopped: ${e.message}`); break; }
   if (!raw) { failed++; continue; }
   const rows = raw.filter(r => { const d = istDay(r.time * 1000); return d >= a && d < b; });
@@ -126,6 +130,6 @@ for (const { code, side, off, a, b } of jobs) {
 }
 const s = store.summary();
 console.log(`[backfill] finished in ${Math.round((Date.now() - started) / 60_000)} min: ${done} requests stored (${rowsTotal} rows), ${skipped} already stored, ${failed} failed (re-run to retry)`);
-for (const o of s.options) console.log(`[backfill] options slot ${o.code}: ${o.rows} rows, ${istDay(o.first * 1000)} … ${istDay(o.last * 1000)}`);
+for (const o of s.options) console.log(`[backfill] options ${o.underlying} slot ${o.code}: ${o.rows} rows, ${istDay(o.first * 1000)} … ${istDay(o.last * 1000)}`);
 store.close();
 process.exit(0);

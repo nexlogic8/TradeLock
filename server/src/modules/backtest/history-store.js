@@ -73,7 +73,7 @@ export function openHistory(file = historyPath()) {
       .all(underlying, fromSec, toSec),
     /** Row counts and covered range, for a quick status line. */
     summary: () => ({
-      options: h.prepare('SELECT expiry_code AS code, COUNT(*) AS rows, MIN(time) AS first, MAX(time) AS last FROM option_1m GROUP BY expiry_code').all(),
+      options: h.prepare('SELECT underlying, expiry_code AS code, COUNT(*) AS rows, MIN(time) AS first, MAX(time) AS last FROM option_1m GROUP BY underlying, expiry_code').all(),
       index: h.prepare('SELECT underlying, COUNT(*) AS rows, MIN(time) AS first, MAX(time) AS last FROM index_1m GROUP BY underlying').all(),
       requests: h.prepare('SELECT COUNT(*) AS n FROM fetch_log').get().n,
     }),

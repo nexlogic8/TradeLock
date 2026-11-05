@@ -138,9 +138,9 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
     // expiryCode 1 = nearest weekly expiry, 2 = the one after; strike 'ATM', 'ATM+1' (= ATM + 1 step) ... ±10.
     // Every row carries the actual strike, so callers can follow one fixed contract as the ATM rolls.
     // `full` also asks for volume, open interest and IV (the history backfill stores them).
-    async rollingOption({ expiryFlag = 'WEEK', expiryCode, strike = 'ATM', option, fromDate, toDate, interval = '1', full = false, timeoutMs = 20_000 }) {
-      const r = await intradayRequest(clientId, () => call('POST', '/charts/rollingoption', { exchangeSegment: 'NSE_FNO', interval: String(interval),
-        securityId: 13, instrument: 'OPTIDX', expiryFlag, expiryCode, strike, drvOptionType: option === 'CE' ? 'CALL' : 'PUT',
+    async rollingOption({ expiryFlag = 'WEEK', expiryCode, strike = 'ATM', option, fromDate, toDate, interval = '1', full = false, timeoutMs = 20_000, securityId = 13, exchangeSegment = 'NSE_FNO' }) {
+      const r = await intradayRequest(clientId, () => call('POST', '/charts/rollingoption', { exchangeSegment, interval: String(interval),
+        securityId: Number(securityId), instrument: 'OPTIDX', expiryFlag, expiryCode, strike, drvOptionType: option === 'CE' ? 'CALL' : 'PUT',
         requiredData: full ? ['open', 'high', 'low', 'close', 'strike', 'spot', 'volume', 'oi', 'iv'] : ['open', 'high', 'low', 'close', 'strike', 'spot'],
         fromDate, toDate }, timeoutMs));
       const d = r?.data?.[option === 'CE' ? 'ce' : 'pe'] || {};

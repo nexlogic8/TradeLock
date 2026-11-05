@@ -23,6 +23,31 @@ const NIFTY_LOT_SIZES = [
   ['0000-00-00', 75],
 ];
 export const niftyLotSize = day => NIFTY_LOT_SIZES.find(([from]) => day >= from)[1];
+// BANK NIFTY and SENSEX lot sizes by trade date (exchange revisions; current: 30 and 20).
+const LOT_SIZES = {
+  NIFTY: NIFTY_LOT_SIZES,
+  BANKNIFTY: [['2025-12-30', 30], ['2025-04-25', 35], ['2024-11-20', 30], ['2023-07-01', 15], ['0000-00-00', 25]],
+  SENSEX: [['2024-11-20', 20], ['0000-00-00', 10]],
+};
+/** Lot size of an index's options on a trade date (NIFTY, BANKNIFTY, SENSEX). */
+export const lotSizeOn = (underlying, day) => (LOT_SIZES[underlying] || NIFTY_LOT_SIZES).find(([from]) => day >= from)[1];
+// Expiry weekday (0 = Sunday) by date. NIFTY weekly: Thursday, Tuesday from Sep 2025. SENSEX weekly: Friday, Tuesday
+// from Jan 2025, Thursday from Sep 2025. BANK NIFTY (monthly only): last Thursday, last Wednesday Mar–Dec 2024,
+// last Thursday again from Jan 2025, last Tuesday from Sep 2025.
+const NIFTY_WD = d => (d >= '2025-09-01' ? 2 : 4);
+export const EXPIRY_WEEKDAY = {
+  NIFTY: NIFTY_WD,
+  SENSEX: d => (d >= '2025-09-01' ? 4 : d >= '2025-01-01' ? 2 : 5),
+  BANKNIFTY: d => (d >= '2025-09-01' ? 2 : d >= '2025-01-01' ? 4 : d >= '2024-03-01' ? 3 : 4),
+};
+/** Expiry n (1 = nearest) of an index's contracts on a day: weekly for NIFTY and SENSEX, monthly for BANK NIFTY. */
+export function indexExpiry(underlying, day, n, tradingDays = null) {
+  const wd = EXPIRY_WEEKDAY[underlying] || NIFTY_WD;
+  if (underlying !== 'BANKNIFTY') return weeklyExpiry(day, n, tradingDays, wd);
+  let e = monthlyExpiry(day, tradingDays, wd);
+  for (let k = 1; k < n; k++) e = monthlyExpiry(addDays(e.date, 1), tradingDays, wd);
+  return e;
+}
 
 const istDay = seconds => new Date(seconds * 1000 + 19_800_000).toISOString().slice(0, 10);
 const inSession = seconds => { const hhmm = new Date(seconds * 1000 + 19_800_000).toISOString().slice(11, 16); return hhmm >= '09:15' && hhmm < '15:30'; };
@@ -31,9 +56,9 @@ const weekday = day => new Date(`${day}T00:00:00Z`).getUTCDay();
 
 // NIFTY weekly expiry: Thursday until August 2025, Tuesday from September 2025. When `tradingDays`
 // covers the date and the market was shut, the expiry moves to the previous trading day.
-function weeklyExpiryOnOrAfter(day, tradingDays, lastKnownDay) {
+function weeklyExpiryOnOrAfter(day, tradingDays, lastKnownDay, wd = NIFTY_WD) {
   for (let d = day; ; d = addDays(d, 1)) {
-    if (weekday(d) !== (d >= '2025-09-01' ? 2 : 4)) continue;
+    if (weekday(d) !== wd(d)) continue;
     let expiry = d;
     if (tradingDays && d <= lastKnownDay) while (!tradingDays.has(expiry) && expiry > day) expiry = addDays(expiry, -1);
     if (expiry >= day) return { date:expiry, estimated:!tradingDays || d > lastKnownDay };
@@ -41,18 +66,18 @@ function weeklyExpiryOnOrAfter(day, tradingDays, lastKnownDay) {
 }
 /** Dhan expiryCode 1 = the nearest weekly expiry (today's on expiry day), 2 = the one after it. */
 export function secondWeeklyExpiry(day, tradingDays = null) { return weeklyExpiry(day, 2, tradingDays); }
-export function weeklyExpiry(day, n, tradingDays = null) {
+export function weeklyExpiry(day, n, tradingDays = null, wd = NIFTY_WD) {
   const lastKnownDay = tradingDays ? [...tradingDays].sort().at(-1) : null;
-  let expiry = weeklyExpiryOnOrAfter(day, tradingDays, lastKnownDay);
-  for (let k = 1; k < n; k++) expiry = weeklyExpiryOnOrAfter(addDays(expiry.date, 1), tradingDays, lastKnownDay);
+  let expiry = weeklyExpiryOnOrAfter(day, tradingDays, lastKnownDay, wd);
+  for (let k = 1; k < n; k++) expiry = weeklyExpiryOnOrAfter(addDays(expiry.date, 1), tradingDays, lastKnownDay, wd);
   return expiry;
 }
 /** Current monthly expiry: the last weekly-expiry weekday of the month (moved back for holidays). */
-export function monthlyExpiry(day, tradingDays = null) {
+export function monthlyExpiry(day, tradingDays = null, wd = NIFTY_WD) {
   const lastKnownDay = tradingDays ? [...tradingDays].sort().at(-1) : null;
   for (let month = day.slice(0, 7); ; month = addDays(`${month}-28`, 7).slice(0, 7)) {
     let last = addDays(`${addDays(`${month}-28`, 7).slice(0, 7)}-01`, -1);
-    while (weekday(last) !== (last >= '2025-09-01' ? 2 : 4)) last = addDays(last, -1);
+    while (weekday(last) !== wd(last)) last = addDays(last, -1);
     let expiry = last;
     if (tradingDays && last <= lastKnownDay) while (!tradingDays.has(expiry) && expiry > `${month}-01`) expiry = addDays(expiry, -1);
     if (expiry >= day) return { date:expiry, estimated:!tradingDays || last > lastKnownDay };
