@@ -9,7 +9,7 @@ DAYS=${1:-4}
 cd /home/ubuntu/tradelock/deploy || exit 1
 TODAY=$(TZ=Asia/Kolkata date +%F)
 /usr/bin/docker compose exec -T app sh -c "node server/src/workers/history-backfill.js --to $TODAY --days $DAYS --pause 800 --window 1 --max-per-day 5000 >> /app/data/backfill-daily.log 2>&1"
-# BANK NIFTY and SENSEX: the strikes the backtests use (ATM ± 3).
+# BANK NIFTY and SENSEX: ATM ± 10 (a big gap day opens far from the previous close; slot 2 is ± 3, the most Dhan serves).
 for U in BANKNIFTY SENSEX; do
-  /usr/bin/docker compose exec -T app sh -c "node server/src/workers/history-backfill.js --underlying $U --to $TODAY --days $DAYS --pause 800 --window 1 --max-offset 3 --max-per-day 5000 >> /app/data/backfill-daily.log 2>&1"
+  /usr/bin/docker compose exec -T app sh -c "node server/src/workers/history-backfill.js --underlying $U --to $TODAY --days $DAYS --pause 800 --window 1 --max-offset 10 --max-per-day 5000 >> /app/data/backfill-daily.log 2>&1"
 done
