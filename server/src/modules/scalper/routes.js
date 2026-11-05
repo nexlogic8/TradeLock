@@ -386,7 +386,8 @@ function gapSettings(body) {
   const s = { capital: Number(b.capital ?? d.capital), compound: b.compound === undefined ? d.compound : b.compound === true, fundsUse: Number(b.fundsUse ?? d.fundsUse),
     dailySlPct: Number(b.dailySlPct ?? d.dailySlPct), lotCap: Number(b.lotCap ?? d.lotCap), slippage: Number(b.slippage ?? d.slippage), squareOff: String(b.squareOff ?? d.squareOff),
     costToCostR: Number(b.costToCostR ?? d.costToCostR), exitCandle: String(b.exitCandle ?? d.exitCandle), strike: Number(b.strike ?? d.strike), lateEntryPct: Number(b.lateEntryPct ?? d.lateEntryPct), minGapPts: Number(b.minGapPts ?? d.minGapPts), tradeAmount: Number(b.tradeAmount ?? d.tradeAmount),
-    entryMode: String(b.entryMode ?? d.entryMode), retestMin: Number(b.retestMin ?? d.retestMin), retestSlPct: Number(b.retestSlPct ?? d.retestSlPct) };
+    entryMode: String(b.entryMode ?? d.entryMode), retestMin: Number(b.retestMin ?? d.retestMin), retestSlPct: Number(b.retestSlPct ?? d.retestSlPct), signal: String(b.signal ?? d.signal) };
+  if (!['index', 'premium', 'both'].includes(s.signal)) throw bad('INVALID_GAP_SIGNAL', 'Gap check must be on the index, the ATM premium, or both.');
   if (!intIn(s.strike, -3, 3)) throw bad('INVALID_GAP_STRIKE', 'Choose a strike from OTM3 to ITM3.');
   if (!numIn(s.lateEntryPct, 0, 15)) throw bad('INVALID_GAP_LATE_ENTRY', 'Late entry must be 0–15% above the 09:15 open.');
   if (!numIn(s.minGapPts, 0, 5000)) throw bad('INVALID_GAP_MIN_GAP', 'Minimum index gap must be 0–5,000 points (0 = any gap).');

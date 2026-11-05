@@ -4,6 +4,7 @@
 //   node server/src/workers/history-backfill.js --days 180 --to 2026-10-23 --codes 1,2 --pause 1500 --window 10
 //   node server/src/workers/history-backfill.js --status        what is stored so far
 //   --max-offset 2: only strikes within 2 steps of ATM (fill what the live strategies trade first)
+//   --refresh: download again even when already stored (the same day's data can come in incomplete, e.g. from 09:18)
 //   --max-per-day 5000: at most that many Dhan requests per IST day (Dhan allows 7,000 a day per account, shared
 //     with the live account's Algo Trading), then wait for the next day. Counted from the stored log, so a
 //     restart does not reset it.
@@ -102,7 +103,7 @@ console.log(`[backfill] ${UNDERLYING} ${FROM} … ${TO}, expiry slots ${CODES.jo
 // 1) index 1-minute candles
 for (let a = FROM; a <= TO; a = addDays(a, 80)) {
   const b = addDays(a, 79) < TO ? addDays(a, 79) : TO;
-  if (store.fetched('index', UNDERLYING, 0, '', 0, a, b)) { skipped++; continue; }
+  if (!has('refresh') && store.fetched('index', UNDERLYING, 0, '', 0, a, b)) { skipped++; continue; }
   const raw = await request(`index ${a}…${b}`, ad => ad.intradayCandles({ securityId: U.securityId, exchangeSegment: 'IDX_I', instrument: 'INDEX', interval: '1', fromDate: `${a} 09:00:00`, toDate: `${b} 15:30:00` }));
   if (!raw) { failed++; continue; }
   const rows = normalizeScalperCandles(raw).map(c => ({ ...c, time: Math.round(c.time / 1000) }));
@@ -118,7 +119,7 @@ jobs.sort((x, y) => Math.abs(x.off) - Math.abs(y.off) || x.code - y.code || x.si
 let n = 0;
 for (const { code, side, off, a, b } of jobs) {
   n++;
-  if (store.fetched('option', UNDERLYING, code, side, off, a, b)) { skipped++; continue; }
+  if (!has('refresh') && store.fetched('option', UNDERLYING, code, side, off, a, b)) { skipped++; continue; }
   const label = `slot ${code} ${side} ${slotName(off)} ${a}…${b}`;
   let raw;
   try { raw = await request(label, ad => ad.rollingOption({ securityId: U.securityId, exchangeSegment: U.optionSegment, expiryFlag: EXPIRY_FLAG, expiryCode: code, strike: slotName(off), option: side, fromDate: a, toDate: b, interval: '1', full: true, timeoutMs: 45_000 })); }

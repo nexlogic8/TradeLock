@@ -101,3 +101,25 @@ test('an estimated previous close that only the low end of its range would beat 
   assert.match(day.reason, /^gap uncertain: PE previous close estimated/);
   s.close();
 });
+
+test('gap check on the index: up → CE whatever the premiums did; a stale 09:15 open is lifted to the intrinsic value', () => {
+  const s = openHistory(':memory:'), D1 = '2026-03-02', D2 = '2026-03-03';
+  // SENSEX gaps up 1,000 and sells off inside the 09:15 minute; the ATM CE's first minute is red.
+  s.saveIndex('SENSEX', D1, D2, [bar(D1, '15:29', 80000, 80000, 80000, 80000), bar(D2, '09:15', 81000, 81010, 80700, 80800), bar(D2, '09:16', 80800, 80850, 80780, 80820), bar(D2, '09:17', 80820, 80900, 80800, 80880)]);
+  const o = (side, off, strike, rows) => s.saveOptions('SENSEX', 1, side, off, D1, D2, rows.map(r => ({ strike, ...r })));
+  o('CE', 0, 80800, [bar(D1, '15:29', 30, 30, 30, 30), bar(D2, '09:15', 300, 300, 150, 200), bar(D2, '09:16', 200, 230, 195, 220), bar(D2, '09:17', 220, 260, 218, 250)]);
+  o('PE', 0, 80800, [bar(D1, '15:29', 900, 900, 900, 900), bar(D2, '09:15', 100, 160, 90, 150), bar(D2, '09:16', 150, 155, 140, 145), bar(D2, '09:17', 145, 146, 120, 125)]);
+  // ITM2 CE 80600: "opened" 20 (stale) with SENSEX at 81,000 → worth at least 400; the minute's high was 380.
+  o('CE', -2, 80600, [bar(D2, '09:15', 20, 380, 20, 330), bar(D2, '09:16', 330, 360, 325, 350), bar(D2, '09:17', 350, 390, 348, 380)]);
+  const run = signal => gapBacktest({ underlying: 'SENSEX', signal, startDate: D2, endDate: D2, capital: 100000, strike: 2, lateEntryPct: 5, dailySlPct: 50, exitCandle: '0916', costToCostR: 0, slippage: 0 }, s);
+  const prem = run('premium');
+  assert.equal(prem.days[0].side, null, 'ATM CE red, PE no gap: no trade on the premium rule');
+  const idx = run('index');
+  assert.equal(idx.days[0].side, 'CE');
+  const [t] = idx.best.trades;
+  assert.deepEqual([t.strike, t.entry], [80600, 399], 'entry from min(intrinsic 400, high 380) = 380, +5% = 399; not 20 × 1.05');
+  const both = run('both');
+  assert.equal(both.days[0].side, null);
+  assert.match(both.days[0].reason, /gapped up 1000 pts, but the ATM CE premium did not gap up green/);
+  s.close();
+});
