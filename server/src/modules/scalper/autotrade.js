@@ -1166,7 +1166,8 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
   if (trade.status === 'open') await costToCost(trade, adapter, now).catch(e => console.error('[autotrade] cost-to-cost', e.message));
   if (trade.status === 'open') {
     const strategy = JSON.parse(trade.detail || '{}').setup?.strategy;
-    const why = await (strategy === 'Gap 09:15' ? gapExitDue : strategy === EMA_SCALP.name ? emaScalpExitDue : strategy === EMA_TREND.name ? emaTrendExitDue : emaExitDue)(trade, adapter, now).catch(() => null);
+    // Gap open 09:15 with its auto exit switched off (Algo page): no 09:16 exit; the stop-loss, a manual exit or the cutoff.
+    const why = strategy === 'Gap 09:15' && acct?.gap_auto_exit === 0 ? null : await (strategy === 'Gap 09:15' ? gapExitDue : strategy === EMA_SCALP.name ? emaScalpExitDue : strategy === EMA_TREND.name ? emaTrendExitDue : emaExitDue)(trade, adapter, now).catch(() => null);
     // Users see that the strategy closed it, not its exit rule (lib/access.js).
     const shown = why && strategy === 'Gap 09:15' && !isAdminUser(uid) ? 'Strategy exit' : why;
     if (why) { update(trade.id, { status: 'closing', reason: shown }); trade = { ...trade, status: 'closing', reason: shown }; }

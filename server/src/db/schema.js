@@ -777,4 +777,6 @@ export const MIGRATIONS = [
   );
   CREATE INDEX paper_fills_user ON paper_fills(user_id, day);
   `,
+  // Gap open 09:15: its automatic 09:16 exit can be switched off (then the stop-loss, a manual exit or the cutoff).
+  `ALTER TABLE broker_accounts ADD COLUMN gap_auto_exit INTEGER NOT NULL DEFAULT 1;`,
 ];

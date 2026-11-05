@@ -74,7 +74,19 @@ function strategyRow(s, a, open, rules) {
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
-      ${s.key === 'gap' ? gapLockRow(a, rules) : ''}
+      ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}` : ''}
+    </div>`;
+}
+
+/** Inside the Gap open 09:15 row: the automatic exit at 09:16, on or off. */
+function autoExitRow(a, rules) {
+  const on_ = a?.gapAutoExitOn !== false;
+  return html`
+    <div class="algo-strat-head algo-strat-sub">
+      <span class="algo-strat-name"><b>Auto exit at 09:16</b><small>${on_
+        ? 'Sells at market at 09:16:00, about one minute after the entry (or the stop-loss before then).'
+        : html`Off: the trade stays open with its stop-loss at the broker until the stop is hit, you exit it, or the ${rules?.squareOff || '15:00'} square-off.`}</small></span>
+      <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="Automatic exit of the Gap open 09:15 trade at 09:16" data-gap-autoexit-toggle ${a ? '' : 'disabled'}></button>
     </div>`;
 }
 
@@ -296,6 +308,18 @@ export default {
         toast('Paper settings saved.', 'ok');
         await refresh();
       } catch (err) { toastError(err); await refresh(); }
+    }, signal);
+
+    on(el, 'click', '[data-gap-autoexit-toggle]', async (_, b) => {
+      const id = ctx.data.account?.id, next = b.getAttribute('aria-checked') !== 'true';
+      if (!id) return;
+      b.disabled = true;
+      try {
+        const { account } = await post(`/brokers/${id}/strategies`, { gapAutoExit: next });
+        syncTopbar(account);
+        toast(next ? 'Gap open 09:15 exits automatically at 09:16.' : 'Gap open 09:15 stays open after 09:16: the stop-loss, your exit or the square-off closes it.', next ? 'ok' : 'warn');
+        await refresh();
+      } catch (err) { toastError(err); b.disabled = false; }
     }, signal);
 
     on(el, 'click', '[data-gap-lock-toggle]', async (_, b) => {

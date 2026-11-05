@@ -39,7 +39,7 @@ export function algoLive(userId, acct) {
   const daily = rules.maxLoss?.on ? limitAmount(rules.maxLoss, capital) : null, pnl = s.realized + s.unrealized;
   const readiness = algoReadiness(userId, acct);
   return {
-    account: acct ? { id: acct.id, broker: acct.broker, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), paperMode: acct.paper_mode === 1, underlyings: algoIndices(acct) } : null,
+    account: acct ? { id: acct.id, broker: acct.broker, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, gapAutoExitOn: acct.gap_auto_exit !== 0, retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), paperMode: acct.paper_mode === 1, underlyings: algoIndices(acct) } : null,
     underlyings: Object.values(UNDERLYINGS).map(({ key, label }) => ({ key, label })),
     ready: readiness.every(r => r.ok), readiness, marketOpen: marketOpen(),
     budget: { capital, daily, pnl, left: daily ? riskLeft(daily, pnl) : 0, lossLimitMode: rules.maxLoss?.mode, lossLimitValue: rules.maxLoss?.value },

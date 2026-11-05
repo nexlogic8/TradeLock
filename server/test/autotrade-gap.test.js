@@ -125,6 +125,11 @@ test('the gap CE exits at market at 09:16:00 whatever the colour: stop cancelled
   assert.equal(AUTO.gap.exitAt, '09:16');
   await manageTrade(stmt('SELECT * FROM auto_trades WHERE id = ?').get(row.id), { now: ms('09:15:59'), adapter: hold });
   assert.ok(!hold.calls.some(c => c[0] === 'exit'), 'before 09:16: hold');
+  // Auto exit switched off (Algo page): no exit at 09:16; the stop-loss, a manual exit or the cutoff closes it.
+  const kept = fakeDhan();
+  await manageTrade(stmt('SELECT * FROM auto_trades WHERE id = ?').get(row.id), { now: ms('09:16:00'), adapter: kept, acct: { ...acct, gap_auto_exit: 0 } });
+  assert.ok(!kept.calls.some(c => c[0] === 'exit' || c[0] === 'cancel'), 'auto exit off: still open at 09:16');
+  assert.equal(stmt('SELECT status FROM auto_trades WHERE id = ?').get(row.id).status, 'open');
   const dhan = fakeDhan();
   await manageTrade(stmt('SELECT * FROM auto_trades WHERE id = ?').get(row.id), { now: ms('09:16:00'), adapter: dhan });
   assert.deepEqual(dhan.calls.filter(c => c[0] === 'cancel' || c[0] === 'exit').map(c => c[0]), ['cancel', 'exit'], '09:15 was green: exits anyway');

@@ -165,6 +165,8 @@ export function brokerRoutes(r) {
     if (ctx.body.manual !== undefined) change.manual_on = v.bool(ctx.body.manual, 'Manual trades') ? 1 : 0;
     // Kill switch on a day the Gap open 09:15 strategy has no entry.
     if (ctx.body.gapLock !== undefined) change.gap_lock = v.bool(ctx.body.gapLock, 'Kill switch if no Gap entry') ? 1 : 0;
+    // Gap open 09:15's automatic exit at 09:16 (off: the stop-loss, a manual exit or the cutoff closes it).
+    if (ctx.body.gapAutoExit !== undefined) change.gap_auto_exit = v.bool(ctx.body.gapAutoExit, 'Auto exit at 09:16') ? 1 : 0;
     // Gap retest 09:15 on paper (no orders): on or off, and its retest window and stop.
     if (ctx.body.gapRetest !== undefined) change.retest_paper_on = v.bool(ctx.body.gapRetest, 'Gap retest 09:15 (paper)') ? 1 : 0;
     if (ctx.body.retestCfg !== undefined) {
