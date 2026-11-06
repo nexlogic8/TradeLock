@@ -242,6 +242,20 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
       return { id: orderId, status: 'pending' };
     },
 
+    // Move a resting LIMIT order to a new price (Dhan Modify Order). A sliced order: every leg still working, each with
+    // its own quantity; fails only if no leg could be moved (a leg that traded meanwhile cannot be).
+    async modifyOrder(orderId, { price, qty }) {
+      const ids = legs(orderId);
+      const out = await Promise.allSettled(ids.map(async id => {
+        const s = ids.length > 1 ? await this.orderStatus(id) : null;
+        if (s && s.status !== 'pending') return;
+        await call('PUT', `/orders/${encodeURIComponent(id)}`, { dhanClientId: clientId, orderId: id, orderType: 'LIMIT',
+          legName: '', quantity: s ? s.qty : qty, price, disclosedQuantity: 0, triggerPrice: 0, validity: 'DAY' });
+      }));
+      if (!out.some(x => x.status === 'fulfilled')) throw out[0].reason;
+      return { id: orderId, status: 'pending' };
+    },
+
     // Every leg; fails only if no leg could be cancelled (a leg that already traded cannot be).
     async cancelOrder(orderId) {
       const out = await Promise.allSettled(legs(orderId).map(id => call('DELETE', `/orders/${encodeURIComponent(id)}`)));

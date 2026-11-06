@@ -19,6 +19,10 @@ const { gapPick, premiumGreen, gapExitCandle, scanForEntry, manageTrade, gapFirs
 // The ATM tests below trade the ATM; the live default (ITM2) has its own test at the end.
 assert.equal(GAP_LIVE.strike, 2, 'live: ITM2');
 GAP_LIVE.strike = 0;
+// The older tests below cover the market-order entry; the live default (fresh price, chased limit) has its own tests at the end.
+assert.ok(GAP_LIVE.chase && GAP_LIVE.liquid, 'live: chased limit on a fresh price');
+const CHASE = GAP_LIVE.chase;
+GAP_LIVE.chase = null; GAP_LIVE.liquid = false;
 
 const D = '2026-10-19', ms = hhmmss => Date.parse(`${D}T${hhmmss}+05:30`);
 const raw = bars => ({ timestamp: bars.map(b => ms(b[0]) / 1000), open: bars.map(b => b[1]), high: bars.map(b => b[2]), low: bars.map(b => b[3]), close: bars.map(b => b[4]) });
@@ -518,6 +522,72 @@ test('ITM2 on the first tick: the decision carries only the ATM ticks, so ITM2 i
     assert.deepEqual([buy.securityId, buy.qty, buy.refPrice], ['C3', 650, 230], 'ITM2 at its own tick 230: 80% of ₹2,00,000 / (230 × 65) = 10 lots');
     assert.ok(!dhan.calls.some(c => c[0] === 'quote' || c[0] === 'quotes'), 'no REST price request');
   } finally { Object.assign(FEED, saved); GAP_LIVE.strike = 0; }
+});
+
+// 6 Nov 2026: the SENSEX ITM2 had not traded yet; priced from yesterday's quote, the market buy (a limit at +10% at Dhan)
+// sat below the sellers and was cancelled. Live now: a contract that traded today, our own limit above it, raised until filled.
+const chaseSetup = (statusOf) => {
+  const chain = { last_price: 23070, oc: { '22950': { ce: { security_id: 'C3' }, pe: { security_id: 'Q3' } }, '23000': { ce: { security_id: 'C2' }, pe: { security_id: 'Q2' } },
+    '23050': { ce: { security_id: 'G1', last_price: 125 }, pe: { security_id: 'P1', last_price: 110 } }, '23100': { ce: { security_id: 'G2' }, pe: { security_id: 'Q4' } } } };
+  const dhan = fakeDhan();
+  dhan.optionChain = async ({ expiry }) => { dhan.calls.push(['chain', expiry]); return chain; };
+  // ITM2 / ITM1 not traded today: a quote with yesterday's price and no open of today.
+  const stale = { ltp: 100, open: null, high: null, low: null, close: 100 };
+  const quotes = dhan.quotes.bind(dhan);
+  dhan.quotes = async by => { const r = await quotes(by); for (const id of ['C3', 'C2']) if (r.NSE_FNO?.[id]) r.NSE_FNO[id] = stale; if (r.NSE_FNO?.G1) r.NSE_FNO.G1 = { ...r.NSE_FNO.G1, open: 148 }; return r; };
+  dhan.quote = async (seg, id) => { dhan.calls.push(['quote', seg, id]); return ['C3', 'C2'].includes(String(id)) ? stale : { ltp: 150, open: 140 }; };
+  let n = 0;
+  dhan.orderStatus = async id => { dhan.calls.push(['status', id]); return id === 'GE1' ? statusOf(++n) : { status: 'pending' }; };
+  dhan.modifyOrder = async (id, o) => { dhan.calls.push(['modify', id, o.price]); return { id, status: 'pending' }; };
+  return dhan;
+};
+const inst3 = async () => new Map(['G1', 'P1', 'C2', 'C3'].map(id => [id, { lotSize: 65, tickSize: 0.05 }]));
+
+test('live: ITM2 not traded yet today → the ATM (priced by the decision); a limit 15% above, raised every second until filled', async (t) => {
+  const D16 = '2026-09-29', at = x => Date.parse(`${D16}T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true });
+  const saved = { ...FEED };
+  FEED.tick = () => null;
+  try {
+    const dhan = chaseSetup(k => (k < 10 ? { status: 'pending', filledQty: 0 } : { status: 'filled', price: 160 }));
+    const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments: inst3 });
+    if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+    assert.equal(r.entered, true, JSON.stringify(r));
+    const buy = dhan.calls.find(c => c[0] === 'order')[1];
+    assert.deepEqual([buy.securityId, buy.type, buy.qty], ['G1', 'LIMIT', 1040], 'ATM 23050 CE (ITM2 / ITM1 had no trade today); 1,56,800 (98% of the funds ÷ 1.25) / (150 × 65) = 16 lots');
+    assert.deepEqual(dhan.calls.filter(c => c[0] === 'modify').map(c => c[2]), [175.5, 178.5], 'from 172.50 (150 + 15%) up 2% of 150 a second (no newer price)');
+    assert.ok(!dhan.calls.some(c => c[0] === 'cancel'), 'filled, nothing cancelled');
+    const row = stmt('SELECT * FROM auto_trades WHERE user_id = ?').get(uid);
+    assert.deepEqual([row.strike, row.entry_price, row.status], [23050, 160, 'open']);
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+});
+
+test('live: the chase follows a newer price, never above the first price + 25%, and cancels at 09:15:30', async (t) => {
+  const D17 = '2026-09-30', at = x => Date.parse(`${D17}T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  Object.assign(GAP_LIVE, { strike: 0, chase: CHASE, liquid: true });
+  const saved = { ...FEED };
+  let px = null;
+  FEED.tick = (u, key) => (key === 'NSE_FNO:G1' && px ? { ltp: px, at: Date.now() } : null);
+  try {
+    const dhan = chaseSetup(() => ({ status: 'pending', filledQty: 0 }));
+    const m = dhan.modifyOrder;
+    dhan.modifyOrder = async (id, o) => { px = 160; return m(id, o); };   // the premium trades at 160 after the first move
+    const polls = [];
+    const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: async ms => { polls.push(ms); }, instruments: inst3 });
+    if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+    assert.equal(r.skipped, 'not filled', JSON.stringify(r));
+    const moves = dhan.calls.filter(c => c[0] === 'modify').map(c => c[2]);
+    assert.deepEqual(moves, [175.5, 184, 187, 187.5], '172.50 → +2% of 150 → 160 + 15% = 184 → +2% → capped at 150 + 25% = 187.50');
+    assert.equal(Math.max(...moves), 187.5, 'never above the first price + 25%');
+    assert.ok(dhan.calls.some(c => c[0] === 'cancel'), 'cancelled when the time is up');
+    const waited = polls.filter(ms => ms === CHASE.pollMs).length * CHASE.pollMs;
+    assert.ok(waited >= 28_000 && waited < 29_000, `kept working until 09:15:30 (${waited} ms after 09:15:02)`);
+    assert.match(stmt('SELECT reason FROM auto_trades WHERE user_id = ?').get(uid).reason, /not filled within 28 seconds \(last limit 187\.5\)/);
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
 });
 
 test('Algo page history: earlier days only, newest first, with P&L and % when the trade has an entry and an exit', async () => {

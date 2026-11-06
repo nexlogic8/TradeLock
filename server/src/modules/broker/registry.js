@@ -83,7 +83,7 @@ function tradeThroughStoxkart(dhan, creds) {
   const data = withSharedData(dhan), sx = createStoxkartAdapter({ creds, ltp: (segment, securityId) => data.ltp(segment, securityId) });
   return { ...dhan, label: 'StoxKart', tradingBroker: 'stoxkart', capabilities: sx.capabilities,
     verify: sx.verify, snapshot: sx.snapshot, placeOrder: sx.placeOrder, orderStatus: sx.orderStatus, cancelOrder: sx.cancelOrder,
-    modifyStopLoss: sx.modifyStopLoss, exitPosition: p => sx.exitPosition(p),
+    modifyStopLoss: sx.modifyStopLoss, modifyOrder: undefined, exitPosition: p => sx.exitPosition(p),
     tradeHistory: sx.tradeHistory, getKillSwitch: undefined, activateKillSwitch: undefined, permissions: undefined };
 }
 

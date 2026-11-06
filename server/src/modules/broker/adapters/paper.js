@@ -128,6 +128,11 @@ export function createPaperAdapter({ userId, data }) {
       }
       return { status: 'cancelled' };
     },
+    async modifyOrder(id, { price }) {
+      for (const x of String(id).split(',').filter(Boolean)) stmt(`UPDATE paper_orders SET limit_price = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'pending' AND type = 'LIMIT'`)
+        .run(price, Date.now(), rowId(x), userId);
+      return { id, status: 'pending' };
+    },
     async modifyStopLoss(id, { triggerPrice, price }) {
       for (const x of String(id).split(',').filter(Boolean)) stmt(`UPDATE paper_orders SET trigger_price = ?, limit_price = ?, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'pending'`)
         .run(triggerPrice, price ?? null, Date.now(), rowId(x), userId);
