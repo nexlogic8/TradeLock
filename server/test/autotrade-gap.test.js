@@ -571,7 +571,7 @@ test('live: the chase follows a newer price, never above the first price + 25%, 
   Object.assign(GAP_LIVE, { strike: 0, chase: CHASE, liquid: true });
   const saved = { ...FEED };
   let px = null;
-  FEED.tick = (u, key) => (key === 'NSE_FNO:G1' && px ? { ltp: px, at: Date.now() } : null);
+  FEED.tick = (u, key) => (key === 'NSE_FNO:G1' && px ? { ltp: px, volume: 650, at: Date.now() } : null);
   try {
     const dhan = chaseSetup(() => ({ status: 'pending', filledQty: 0 }));
     const m = dhan.modifyOrder;
@@ -587,6 +587,45 @@ test('live: the chase follows a newer price, never above the first price + 25%, 
     const waited = polls.filter(ms => ms === CHASE.pollMs).length * CHASE.pollMs;
     assert.ok(waited >= 28_000 && waited < 29_000, `kept working until 09:15:30 (${waited} ms after 09:15:02)`);
     assert.match(stmt('SELECT reason FROM auto_trades WHERE user_id = ?').get(uid).reason, /not filled within 28 seconds \(last limit 187\.5\)/);
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+});
+
+test('live: ITM2 with no trade yet but sellers in the depth (6 Nov) → ITM2 at its best offer + 5%; a lone far offer is ignored', async (t) => {
+  const D18 = '2026-09-28', at = x => Date.parse(`${D18}T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true });
+  const saved = { ...FEED };
+  // 22950 CE (ITM2): last trade yesterday (100), no volume today, sellers at 120 from 09:15:00.3.
+  FEED.tick = (u, key, { since = 0 } = {}) => (key === 'NSE_FNO:C3' && at('09:15:00') + 300 >= since
+    ? { ltp: 100, volume: 0, dayOpen: 0, depth: [{ bid: 110, bidQty: 50, ask: 120, askQty: 40 }], at: at('09:15:00') + 300 } : null);
+  try {
+    const dhan = chaseSetup(() => ({ status: 'filled', price: 121.5 }));
+    const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments: inst3 });
+    if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+    assert.equal(r.entered, true, JSON.stringify(r));
+    const buy = dhan.calls.find(c => c[0] === 'order')[1];
+    assert.deepEqual([buy.securityId, buy.type, buy.price, buy.qty], ['C3', 'LIMIT', 126, 1300], 'ITM2 22950 CE at 120 + 5%; 1,56,800 / (120 × 65) = 20 lots');
+    assert.deepEqual([stmt('SELECT strike FROM auto_trades WHERE user_id = ?').get(uid).strike, r.entryPrice], [22950, 121.5]);
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+});
+
+test('live: ITM2 with no feed tick → one REST depth quote gives its best offer', async (t) => {
+  const D19 = '2026-09-25', at = x => Date.parse(`${D19}T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true });
+  const saved = { ...FEED };
+  FEED.tick = () => null;
+  try {
+    const dhan = chaseSetup(() => ({ status: 'filled', price: 131 }));
+    dhan.depthQuote = async (seg, id) => { dhan.calls.push(['depth', id]); return id === 'C3' ? { ltp: 100, ask: 130, askQty: 20, volume: 0, open: null } : null; };
+    const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments: inst3 });
+    if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
+    assert.equal(r.entered, true, JSON.stringify(r));
+    const buy = dhan.calls.find(c => c[0] === 'order')[1];
+    assert.deepEqual([buy.securityId, buy.price], ['C3', 136.5], 'ITM2 at its REST best offer 130 + 5%');
+    assert.deepEqual(dhan.calls.filter(c => c[0] === 'depth').map(c => c[1]), ['C3'], 'one depth request');
   } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
 });
 

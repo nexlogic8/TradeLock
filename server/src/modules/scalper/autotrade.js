@@ -124,13 +124,16 @@ export const FEED = { tick: liveTick, minute: liveMinute, bar: liveBar, watch: a
 // Gap entry strike, in steps from the ATM (+ = ITM, − = OTM, 0 = ATM). A mutable object so tests can choose.
 // 6 Nov 2026: the SENSEX ITM2 had not traded yet, so its only price was yesterday's (₹867.25); Dhan turned the market buy
 // into a limit at that + 10% (₹953.95), sellers were at ₹1,085+, and it was cancelled unfilled. Hence:
-// LIQUID: a contract counts as priced only by a trade today (a feed tick since 09:15, or a quote with today's open); ITM2
-// without one → ITM1 → ATM (the decision itself priced the ATM).
+// LIQUID: a contract counts as priced only by its live market: the best offer in its market depth (the near-ATM contracts
+// are on the feed in Full mode; else one REST depth quote), or a trade today (feed volume, or a quote with today's
+// open). The offer comes first: it is what a buyer pays now, and it exists before the contract's first trade. ITM2 with
+// neither → ITM1 → ATM (the decision itself priced the ATM).
 // CHASE: our own LIMIT at that fresh price + BUFFER; while not filled it is raised every EVERY_MS to the latest price +
 // BUFFER (at least STEP of the first price more each time, for a contract that is not trading), never above the first
 // price + CAP; cancelled at UNTIL (IST), or MIN_MS after it was placed if later. null: the old market order.
 export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400, liquid: true,
-  chase: { buffer: 0.15, cap: 0.25, step: 0.02, everyMs: 1_000, pollMs: 250, until: '09:15:30', minMs: 15_000 } };
+  // ASK_BUFFER: when the price is the best offer in the market depth (what sellers ask now), the limit is that + 5%.
+  chase: { buffer: 0.15, askBuffer: 0.05, cap: 0.25, step: 0.02, everyMs: 1_000, pollMs: 250, until: '09:15:30', minMs: 15_000 } };
 const FEED_FROM = 9 * 60 + 13, FEED_TO = 15 * 60 + 31;   // IST minutes: subscribed from just before the open to the close
 const TICK_FRESH_MS = 3_000;
 /** A 5-minute index candle from the feed's five 1-minute candles (each complete), or null. */
@@ -311,7 +314,7 @@ function candlesFor(adapter, securityId, { index = false, interval = '1', now = 
  * new price, but sellers above the limit), never above `ceiling`. Until `waitMs` has passed (counted both by the pauses
  * and by the clock). Returns the fill, the failure, or { status: 'pending' } (the caller cancels). `order.price` follows.
  */
-export async function chaseFill(adapter, orderId, { order, ceiling, first, tick, waitMs, pause = sleep, latest = () => null, ch = GAP_LIVE.chase }) {
+export async function chaseFill(adapter, orderId, { order, ceiling, first, tick, waitMs, pause = sleep, latest = () => null, ch = GAP_LIVE.chase, buffer = ch.buffer }) {
   const started = Date.now();
   let waited = 0, sinceMove = 0, s = null;
   for (;;) {
@@ -322,7 +325,7 @@ export async function chaseFill(adapter, orderId, { order, ceiling, first, tick,
     if (sinceMove < ch.everyMs || !adapter.modifyOrder || !(order.price < ceiling)) continue;
     sinceMove = 0;
     const px = Number(latest()) || 0;
-    const next = Math.min(ceiling, roundTick(Math.max(px * (1 + ch.buffer), order.price + first * ch.step), tick));
+    const next = Math.min(ceiling, roundTick(Math.max(px * (1 + buffer), order.price + first * ch.step), tick));
     if (!(next > order.price)) continue;
     try { await adapter.modifyOrder(orderId, { price: next, qty: order.qty }); order.price = next; }
     catch { /* filled or cancelled meanwhile: the next status says which */ }
@@ -925,27 +928,41 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   let c = strikeFrom(chain, atm, direction, steps), pick = pickOf(steps);
   if (!c) return skip(`No ${pick} ${direction} (${steps > 0 ? 'in' : 'out of'} the money from the ATM ${atm.strike}) in the ${expiry} option chain.`);
   const seg = u.optionSegment, open915 = Date.parse(`${ist(now).day}T09:15:00+05:30`);
-  // Price now: the decision's own quote when it covers this contract, else this contract's first tick since the open
-  // (waited for up to `waitMs`: it is subscribed with the strikes near the ATM). LIQUID: only a price from a trade today.
-  const priced = async (cc, waitMs) => {
+  // Price now (LIQUID: only the live market, see GAP_LIVE): the contract's best offer in the market depth when the feed has
+  // it, else its price from a trade today (the decision's own quote covers the ATM); waited for up to `waitMs` (it is
+  // subscribed, in Full mode, with the strikes near the ATM); `rest`: then one REST depth quote. { ltp, ask, open }.
+  const fromTick = t => {
+    if (!(t?.ltp > 0)) return null;
+    const best = t.depth?.[0], traded = Number(t.volume) > 0;
+    let ask = best?.ask > 0 && best.askQty > 0 ? best.ask : null;
+    if (ask && traded && ask > t.ltp * (1 + (GAP_LIVE.chase?.cap ?? 0.25))) ask = null;   // a lone far offer: go by the trades
+    if (GAP_LIVE.liquid && !ask && !traded) return null;
+    return { ltp: t.ltp, ask, open: t.dayOpen, tick: true, traded };
+  };
+  const priced = async (cc, waitMs, rest = false) => {
     const d = gap.optionQuotes?.[cc.securityId];
-    if (d?.ltp > 0 && (!GAP_LIVE.liquid || d.tick || d.open > 0)) return d;
     for (const until = Date.now() + waitMs; ;) {
-      const t = FEED.tick(uid, `${seg}:${cc.securityId}`, { since: open915 });
-      if (t?.ltp > 0) return { ltp: t.ltp, open: t.dayOpen, tick: true };
-      if (Date.now() >= until) return null;
+      const t = fromTick(FEED.tick(uid, `${seg}:${cc.securityId}`, { since: open915 }));
+      if (t?.ask) return t;
+      if (d?.ltp > 0 && (!GAP_LIVE.liquid || d.tick || d.open > 0)) return { ...d, ask: d.ask ?? null };
+      if (t) return t;
+      if (Date.now() >= until) break;
       await sleep(G.pollMs);
     }
+    if (!rest || !adapter.depthQuote) return null;
+    const r = await adapter.depthQuote(seg, cc.securityId).catch(() => null);
+    return r ? fromTick({ ltp: r.ltp || r.ask, volume: r.volume, dayOpen: r.open, depth: r.ask ? [{ ask: r.ask, askQty: r.askQty }] : [] }) : null;
   };
-  let q = await priced(c, GAP_LIVE.strikeTickWaitMs), moved = null;
-  // LIQUID: not traded yet today → the next strike toward the ATM that has (the ATM always has: the gap was decided on it).
+  let q = await priced(c, GAP_LIVE.strikeTickWaitMs, GAP_LIVE.liquid), moved = null;
+  // LIQUID: no offer and no trade yet today → the next strike toward the ATM that has one (the ATM always has a trade:
+  // the gap was decided on it).
   for (let n = steps - Math.sign(steps); !q && GAP_LIVE.liquid && steps && Math.abs(n) < Math.abs(steps); n -= Math.sign(steps)) {
     const cc = strikeFrom(chain, atm, direction, n), qq = cc && await priced(cc, 0);
-    if (qq) { moved = `${pick} ${c.strike} ${direction} had not traded yet today`; c = cc; q = qq; steps = n; pick = pickOf(n); }
+    if (qq) { moved = `${pick} ${c.strike} ${direction} had no sellers and no trade yet today`; c = cc; q = qq; steps = n; pick = pickOf(n); }
   }
   if (!q && GAP_LIVE.liquid && steps) {
     const qq = await priced(atm, 0);
-    if (qq) { moved = `${pick} ${c.strike} ${direction} had not traded yet today`; c = atm; q = qq; steps = 0; pick = 'ATM'; }
+    if (qq) { moved = `${pick} ${c.strike} ${direction} had no sellers and no trade yet today`; c = atm; q = qq; steps = 0; pick = 'ATM'; }
   }
   if (!q) {   // one more quote: with LIQUID, only if it shows a trade today
     const r = await adapter.quote?.(seg, c.securityId).catch(() => null);
@@ -956,8 +973,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const symbol = `${u.symbol} ${expiry} ${c.strike} ${direction}`;
   update(id, { security_id: c.securityId, exchange_segment: seg, symbol, expiry, strike: c.strike });
   if (moved) audit(uid, 'algo.gap_strike_moved', { id, why: moved, to: symbol, pick });
-  const quoteAt = q?.ltp > 0 ? q.ltp : 0;
-  if (!(quoteAt > 0)) return skip(GAP_LIVE.liquid ? `${symbol} has not traded yet today (no fresh price), so it cannot be priced.` : `${symbol} has no last price yet.`);
+  // The price the order goes by: the best offer (what sellers ask now) when known, else the last trade.
+  const quoteAt = q?.ask > 0 ? q.ask : q?.ltp > 0 ? q.ltp : 0, byAsk = q?.ask > 0;
+  if (!(quoteAt > 0)) return skip(GAP_LIVE.liquid ? `${symbol} has no sellers and no trade yet today (no live price), so it cannot be priced.` : `${symbol} has no last price yet.`);
   if (G.requireGreen && !premiumGreen(q)) return skip(`${symbol} premium is ${quoteAt} vs its 09:15 open ${q?.open ?? '—'}: not green in the first seconds, so no trade today.`);
   const limit = roundTick(quoteAt + Math.max(G.minPad, quoteAt * G.padPct), meta.tickSize);
   const funds = Number(getBook(uid).funds?.available);
@@ -976,11 +994,14 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
 
   // CHASE: our own limit above the fresh price (a buy limit pays the sellers' price, the limit is only the ceiling).
   // Otherwise refPrice / marketBand: a broker that turns market orders into limits (StoxKart) prices it from this tick.
-  const ceiling = ch ? roundTick(quoteAt * (1 + ch.cap), meta.tickSize) : null;
-  const order = { symbol, side: 'BUY', qty, ...(ch ? { type: 'LIMIT', price: Math.min(ceiling, roundTick(quoteAt * (1 + ch.buffer), meta.tickSize)) }
+  // BUFFER over the best offer is ASK_BUFFER (sellers are there); over a last trade, BUFFER.
+  const ceiling = ch ? roundTick(quoteAt * (1 + ch.cap), meta.tickSize) : null, buf = ch ? (byAsk ? ch.askBuffer : ch.buffer) : 0;
+  // The latest live price of the contract: its best offer, else its last trade today.
+  const latestPx = () => { const t = fromTick(FEED.tick(uid, `${seg}:${c.securityId}`, { since: Date.now() - TICK_FRESH_MS })); return t ? (t.ask || (t.traded ? t.ltp : null)) : null; };
+  const order = { symbol, side: 'BUY', qty, ...(ch ? { type: 'LIMIT', price: Math.min(ceiling, roundTick(quoteAt * (1 + buf), meta.tickSize)) }
     : G.market ? { type: 'MARKET', refPrice: quoteAt, marketBand: G.marketBand } : { type: 'LIMIT', price: limit }), securityId: c.securityId, exchangeSegment: seg, productType: 'INTRADAY',
     ...(qty > freeze ? { slice: true } : {}) };
-  const how = ch ? `limit buy at ${order.price} (premium ${quoteAt} at ${clockMs(setup.checkedAt || now)} + ${Math.round(ch.buffer * 100)}%, raised up to ${ceiling} if not filled)`
+  const how = ch ? `limit buy at ${order.price} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())} + ${Math.round(buf * 100)}%, raised up to ${ceiling} if not filled)`
     : G.market ? `market buy (premium ${limit} at ${clockMs(setup.checkedAt || now)})` : `limit buy at ${limit} (premium ${quoteAt} at ${clockMs(setup.checkedAt || now)} + ${Math.round(G.padPct * 100)}%)`;
   // How long the entry may stay unfilled: CHASE until UNTIL (at least MIN_MS), else the fixed fill wait.
   const waitMs = ch ? Math.max(ch.minMs, Date.parse(`${ist(now).day}T${ch.until}+05:30`) - now) : AUTO.fillWaitMs;
@@ -1025,7 +1046,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
       audit(uid, 'order.placed', { order, result: placed, auto: 'gap', attempt: attempt + 1 });
       // Confirmed by polling the order every FILL_POLL_MS.
       fill = placed.status === 'filled' ? placed : ch ? await chaseFill(adapter, placed.id, { order, ceiling, first: quoteAt, tick: meta.tickSize, waitMs, pause,
-        latest: () => FEED.tick(uid, `${seg}:${c.securityId}`, { since: Date.now() - TICK_FRESH_MS })?.ltp })
+        latest: latestPx, buffer: buf })
         : await waitForFill(adapter, placed.id, { pause, stepMs: G.fillPollMs });
       if (fill.status !== 'failed' || attempt >= G.maxAttempts - 1) break;
       // Rejected: placed again at once. Refused for funds (a market order is charged above the price): with the lots
@@ -1044,7 +1065,8 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
         await pause(G.retryMs);
         const t = FEED.tick(uid, `${seg}:${c.securityId}`, { since: Date.now() - 5_000 });
         if (t?.ltp > 0 && order.type === 'MARKET') order.refPrice = t.ltp;
-        if (t?.ltp > 0 && ch) order.price = Math.min(ceiling, Math.max(order.price, roundTick(t.ltp * (1 + ch.buffer), meta.tickSize)));
+        const px = ch ? latestPx() : null;
+        if (px > 0) order.price = Math.min(ceiling, Math.max(order.price, roundTick(px * (1 + buf), meta.tickSize)));
       }
     }
     if (fill.status === 'pending') {
@@ -1495,9 +1517,11 @@ function syncFeeds(accounts, active, now = Date.now()) {
   const t = ist(now), on = isTradingDay(now) && t.minutes >= FEED_FROM && t.minutes <= FEED_TO, want = new Set();
   if (on) for (const acct of accounts) {
     const keys = new Set(algoIndices(acct).map(k => `IDX_I:${underlyingFor(k).securityId}`));
-    for (const k of gapFeedKeys.get(`${acct.user_id}:${t.day}`) || []) keys.add(k);
+    // The near-ATM contracts with market depth (Full mode): the gap entry prices from their best offer.
+    const depth = gapFeedKeys.get(`${acct.user_id}:${t.day}`) || new Set();
+    for (const k of depth) keys.add(k);
     for (const tr of active) if (tr.user_id === acct.user_id && tr.security_id) keys.add(`${tr.exchange_segment || 'NSE_FNO'}:${tr.security_id}`);
-    try { FEED.watch(acct.user_id, keys); want.add(acct.user_id); } catch (e) { console.error('[autotrade] feed', e.message); }
+    try { FEED.watch(acct.user_id, keys, depth); want.add(acct.user_id); } catch (e) { console.error('[autotrade] feed', e.message); }
   }
   for (const uid of feedUsers) if (!want.has(uid)) { try { FEED.unwatch(uid); } catch { /* closed anyway */ } }
   feedUsers = want;

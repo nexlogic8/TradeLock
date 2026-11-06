@@ -36,3 +36,12 @@ test('decodes full packets with market depth and rejects malformed packets', () 
   assert.equal(decodeDhanQuotePacket(Buffer.from([4, 0])), null);
   assert.equal(decodeDhanQuotePacket(Buffer.from([50])).type, 'feed-status');
 });
+
+test('subscriptions: Algo Trading near-ATM options in Full mode (depth); a mode change unsubscribes first', async () => {
+  const { subscriptionSteps } = await import('../src/modules/scalper/live.js');
+  const none = new Map(), next = new Map([['IDX_I:13', 17], ['NSE_FNO:1', 21], ['NSE_FNO:2', 17]]);
+  assert.deepEqual(subscriptionSteps(none, next), [[17, ['IDX_I:13', 'NSE_FNO:2']], [21, ['NSE_FNO:1']]]);
+  assert.deepEqual(subscriptionSteps(next, next), [], 'nothing changed: nothing sent');
+  const later = new Map([['IDX_I:13', 17], ['NSE_FNO:2', 21]]);
+  assert.deepEqual(subscriptionSteps(next, later), [[18, ['NSE_FNO:2']], [22, ['NSE_FNO:1']], [21, ['NSE_FNO:2']]], 'NSE_FNO:1 dropped, NSE_FNO:2 Quote → Full');
+});

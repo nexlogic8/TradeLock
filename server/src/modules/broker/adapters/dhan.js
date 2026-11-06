@@ -128,6 +128,15 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
       return Object.fromEntries(Object.keys(body).map(seg => [seg, Object.fromEntries(Object.entries(r?.data?.[seg] || {})
         .map(([id, q]) => [id, { ltp: n(q.last_price), open: n(q.ohlc?.open), high: n(q.ohlc?.high), low: n(q.ohlc?.low), close: n(q.ohlc?.close) }]))]));
     },
+    // Dhan Market Quote API (full, with market depth): the best offer (what a buyer pays now, there before the first
+    // trade of the day), last price, today's volume and open. One request per second.
+    async depthQuote(segment, securityId) {
+      const r = await call('POST', '/marketfeed/quote', { [segment]: [Number(securityId)] }, 3000);
+      const q = r?.data?.[segment]?.[String(securityId)], n = x => (Number.isFinite(Number(x)) && Number(x) > 0 ? Number(x) : null);
+      if (!q) return null;
+      const best = (q.depth?.sell || []).find(s => n(s?.price) && n(s?.quantity));
+      return { ltp: n(q.last_price), ask: best ? n(best.price) : null, askQty: best ? n(best.quantity) : null, volume: Number(q.volume) || 0, open: n(q.ohlc?.open) };
+    },
     // Dhan Margin Calculator: funds an order would block (premium for a buy, SPAN + exposure for a sell).
     async marginRequired({ securityId, exchangeSegment, side, qty, price, productType = 'INTRADAY' }) {
       const r = await call('POST', '/margincalculator', { dhanClientId: clientId, exchangeSegment, transactionType: side,

@@ -14,7 +14,7 @@ const feeds = new Map();   // userId -> feed
 const hubs = new Map();    // credentials key -> hub
 const minuteListeners = new Set();
 const newFeed = userId => ({ userId, clients: new Set(), algo: null, hub: null });
-const newHub = key => ({ key, feeds: new Set(), upstream: null, subscribed: new Set(), retryCount: 0, retry: null, book: createTickBook() });
+const newHub = key => ({ key, feeds: new Set(), upstream: null, subscribed: new Map(), retryCount: 0, retry: null, book: createTickBook() });
 const hubClients = function* (hub) { for (const f of hub.feeds) yield* f.clients; };
 const hubBusy = hub => [...hub.feeds].some(f => f.clients.size);
 const MAX_WATCH = 99; // one slot is reserved for NIFTY 50
@@ -74,10 +74,20 @@ export function decodeDhanQuotePacket(buffer) {
   return Number.isFinite(out.ltp) && out.ltp > 0 ? out : null;
 }
 
+// key -> Dhan subscribe code: 21 (Full: with the 5 best bids / offers) when any client asked for its depth, else 17 (Quote).
 function watchUnion(hub) {
-  const union = new Set(['IDX_I:13']);
-  for (const client of hubClients(hub)) for (const key of client.watch || []) union.add(key);
+  const union = new Map([['IDX_I:13', 17]]);
+  for (const client of hubClients(hub)) for (const key of client.watch || []) if (union.get(key) !== 21) union.set(key, client.depth?.has(key) ? 21 : 17);
   return union;
+}
+
+/** From what is subscribed (key -> code) to `next`: [[requestCode, keys]], unsubscribes (code + 1) of what is no longer
+ * watched or changes mode first, then the subscriptions of what is new in its mode (17 Quote, 21 Full with depth). */
+export function subscriptionSteps(subscribed, next) {
+  const gone = [...subscribed].filter(([key, code]) => next.get(key) !== code), out = [];
+  for (const code of [17, 21]) out.push([code + 1, gone.filter(([, c]) => c === code).map(([key]) => key)]);
+  for (const code of [17, 21]) out.push([code, [...next].filter(([key, c]) => c === code && subscribed.get(key) !== code).map(([key]) => key)]);
+  return out.filter(([, keys]) => keys.length);
 }
 
 function sendSubscriptions(hub) {
@@ -90,8 +100,7 @@ function sendSubscriptions(hub) {
       if (batch.length) hub.upstream.send(JSON.stringify({ RequestCode:requestCode, InstrumentCount:batch.length, InstrumentList:batch }));
     }
   };
-  sendBatches(18, [...hub.subscribed].filter(key => !next.has(key)));
-  sendBatches(17, [...next].filter(key => !hub.subscribed.has(key)));
+  for (const [code, keys] of subscriptionSteps(hub.subscribed, next)) sendBatches(code, keys);
   hub.subscribed = next;
 }
 
@@ -195,12 +204,13 @@ function closeFeed(userId, feed) {
 
 // ---- Algo Trading on the server ----
 /** Keep the user's feed subscribed to these keys ("IDX_I:13", "NSE_FNO:51334", …) for Algo Trading. */
-export function algoWatch(userId, keys) {
+export function algoWatch(userId, keys, depthKeys = []) {
   let feed = feeds.get(userId);
   if (!feed) { feed = newFeed(userId); feeds.set(userId, feed); }
-  if (!feed.algo) { feed.algo = { internal: true, watch: new Set() }; feed.clients.add(feed.algo); }
-  const next = new Set(keys), same = next.size === feed.algo.watch.size && [...next].every(k => feed.algo.watch.has(k));
-  feed.algo.watch = next;
+  if (!feed.algo) { feed.algo = { internal: true, watch: new Set(), depth: new Set() }; feed.clients.add(feed.algo); }
+  const next = new Set(keys), depth = new Set(depthKeys), eq = (a, b) => a.size === b.size && [...a].every(k => b.has(k));
+  const same = eq(next, feed.algo.watch) && eq(depth, feed.algo.depth);
+  feed.algo.watch = next; feed.algo.depth = depth;
   const hub = join(feed);
   if (!same) sendSubscriptions(hub);
 }

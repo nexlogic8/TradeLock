@@ -14,6 +14,7 @@ const METHODS = {
   quotes: { ttl: 1_000, lane: 'quote' },
   quote: { ttl: 1_000, lane: 'quote' },
   ltp: { ttl: 1_000, lane: 'quote' },
+  depthQuote: { ttl: 500, lane: 'quote' },
   intradayCandles: { ttl: 4_000, lane: 'data' },
   rollingOption: { ttl: 30_000, lane: 'data' },
 };
