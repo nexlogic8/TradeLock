@@ -25,10 +25,12 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
 
-export const GAP_DEFAULTS = Object.freeze({ underlying: 'NIFTY', signal: 'premium', capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0, entryMode: 'open', retestMin: 15, retestSlPct: 5 });   // ENTRY_MODE 'open' (live: at 09:15) or 'retest' (a limit buy at the 09:15 open when the option comes back to it within RETEST_MIN minutes, stop RETEST_SL_PCT below)   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
+export const GAP_DEFAULTS = Object.freeze({ underlying: 'NIFTY', signal: 'premium', atmFrom: 'dhan', dailySlAmount: 0, liveSizing: false, capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0, entryMode: 'open', retestMin: 15, retestSlPct: 5 });   // ENTRY_MODE 'open' (live: at 09:15) or 'retest' (a limit buy at the 09:15 open when the option comes back to it within RETEST_MIN minutes, stop RETEST_SL_PCT below)   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
 export const GAP_MODES = Object.freeze({ best: 'Late entry: fill above the 09:15 open', worst: 'Worst case: fill at the 09:16 open' });
 
 const TICK = 0.05;
+/** Strike step of each index's options (ATM from the index price, as live). */
+const STEP = { NIFTY: 50, BANKNIFTY: 100, SENSEX: 100 };
 /** The stored-history index a run uses: NIFTY, BANKNIFTY or SENSEX (default NIFTY). */
 export const BACKTEST_INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
 const indexKey = u => (BACKTEST_INDICES.includes(String(u || '').toUpperCase()) ? String(u).toUpperCase() : 'NIFTY');
@@ -75,7 +77,8 @@ function run(store, startDate, endDate, s) {
   const days = [...byDay.keys()].sort();
   // Only the rows the rule needs (the ATM at 09:15, that strike's day, its previous close), not every strike.
   const q = {
-    atm: store.db.prepare('SELECT side, strike, open, close FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND offset = 0 AND time = ?'),
+    atm: store.db.prepare('SELECT side, strike, open, high, close FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND offset = 0 AND time = ?'),
+    strikeAt: store.db.prepare('SELECT side, strike, open, high, close FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND strike = ? AND time = ?'),
     lastAtm: store.db.prepare('SELECT close FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND offset = 0 AND time >= ? AND time < ? ORDER BY time DESC LIMIT 1'),
     prev: store.db.prepare('SELECT close FROM option_1m WHERE underlying = ? AND expiry_code = ? AND side = ? AND strike = ? AND time >= ? AND time < ? ORDER BY time DESC LIMIT 1'),
     day: store.db.prepare('SELECT time, open, high, low, close FROM option_1m WHERE underlying = ? AND expiry_code = 1 AND side = ? AND strike = ? AND time >= ? AND time < ? ORDER BY time'),
@@ -116,20 +119,31 @@ function run(store, startDate, endDate, s) {
     const five = new Map(), bucketOf = time => time - ((time - t0) % 300);
     for (const c of D) { const k5 = bucketOf(c.time), b5 = five.get(k5); if (b5) { b5.close = c.close; b5.last = c.time; } else five.set(k5, { open: c.open, close: c.close, last: c.time }); }
     const sides = {};
+    // ATM_FROM 'open' (as live): the strike nearest the index's 09:15 open; 'dhan': Dhan's rolling ATM of that minute
+    // (from the minute's later price). Falls back to Dhan's when the strike is not stored.
+    const atmOpen = Math.round(D[0].open / STEP[UNDERLYING]) * STEP[UNDERLYING];
     for (const side of ['CE', 'PE']) {
-      const a = q.atm.get(UNDERLYING, side, t0); if (!a) continue;
+      const a = (s.atmFrom === 'open' && q.strikeAt.get(UNDERLYING, side, atmOpen, t0)) || q.atm.get(UNDERLYING, side, t0); if (!a) continue;
       const pc = prevCode ? prevClose(prevCode, side, a.strike, y) : { prev: null, estimated: false }, prev = pc.prev;
-      sides[side] = { strike: a.strike, prev, ...(pc.estimated ? { prevEstimated: true, prevLow: pc.low, prevFrom: pc.from } : {}), open: a.open, close: a.close, ok: prev > 0 && a.open > prev && a.close > a.open };
+      // A 09:15 open below the option's intrinsic value at the index open is a stale pre-open print (live decides on the
+      // first real trade): at least the intrinsic value, no more than that minute's high.
+      const intr = side === 'CE' ? D[0].open - a.strike : a.strike - D[0].open, open = a.open < intr ? Math.min(r2(intr), a.high) : a.open;
+      const gapUp = prev > 0 && open > prev, green = a.close > open;
+      sides[side] = { strike: a.strike, prev, ...(pc.estimated ? { prevEstimated: true, prevLow: pc.low, prevFrom: pc.from } : {}), open, close: a.close,
+        ok: gapUp && green, gapUp };
       // Estimated close: a gap up only against the low end of its range is uncertain (not traded, reported as such).
-      sides[side].uncertain = !!pc.estimated && !sides[side].ok && a.open > pc.low && a.close > a.open;
+      const needGreen = s.signal !== 'live';
+      sides[side].uncertain = !!pc.estimated && !(needGreen ? sides[side].ok : gapUp) && open > pc.low && (!needGreen || green);
     }
     // The index gap: today's 09:15 open against the previous session's last close, in points.
     const yd = byDay.get(y), indexGap = yd?.length ? r2(D[0].open - yd[yd.length - 1].close) : null;
     const small = s.minGapPts > 0 && !(Math.abs(indexGap) >= s.minGapPts);
-    const ok = small ? [] : Object.keys(sides).filter(x => sides[x].ok);
-    const premiumReason = Object.values(sides).some(x => x.prev == null) && !ok.length ? (prevCode ? 'previous close not in the stored history' : 'previous close not found (expiry rollover)') : ok.length > 1 ? 'both premiums gapped up green' : ok.length ? '' : Object.values(sides).some(x => x.uncertain) ? `gap uncertain: ${Object.keys(sides).filter(x => sides[x].uncertain).join(' and ')} previous close estimated (strike beyond the stored history)` : 'no premium gapped up and stayed green';
-    // SIGNAL 'premium' (live): the one ATM premium that gapped up green. 'index': the index's own gap (up → CE, down → PE).
+    // SIGNAL 'live' (as Algo Trading): the one ATM premium that opened above its previous close (no colour check).
+    // 'premium': that, and its 09:15 minute closed green. 'index': the index's own gap (up → CE, down → PE).
     // 'both': the index gap's side, only when that side's ATM premium also gapped up green.
+    const live = s.signal === 'live', grn = live ? '' : ' green', stay = live ? '' : ' and stayed green';
+    const ok = small ? [] : Object.keys(sides).filter(x => (live ? sides[x].gapUp : sides[x].ok));
+    const premiumReason = Object.values(sides).some(x => x.prev == null) && !ok.length ? (prevCode ? 'previous close not in the stored history' : 'previous close not found (expiry rollover)') : ok.length > 1 ? `both premiums gapped up${grn}` : ok.length ? '' : Object.values(sides).some(x => x.uncertain) ? `gap uncertain: ${Object.keys(sides).filter(x => sides[x].uncertain).join(' and ')} previous close estimated (strike beyond the stored history)` : `no premium gapped up${stay}`;
     const idxSide = small || indexGap == null ? null : indexGap > 0 ? 'CE' : indexGap < 0 ? 'PE' : null;
     const pick = s.signal === 'index' ? (idxSide && sides[idxSide] ? idxSide : null)
       : s.signal === 'both' ? (idxSide && sides[idxSide]?.ok ? idxSide : null)
@@ -138,8 +152,8 @@ function run(store, startDate, endDate, s) {
       reason: small ? (indexGap == null ? `${label} previous close not found` : `${label} gap ${Math.abs(indexGap)} pts, below the ${s.minGapPts}-point threshold`)
         : !Object.keys(sides).length ? 'no option data'
         : pick ? ''
-        : s.signal !== 'premium' && indexGap == null ? `${label} previous close not found`
-        : s.signal !== 'premium' && !idxSide ? `${label} opened at its previous close (no gap)`
+        : (s.signal === 'index' || s.signal === 'both') && indexGap == null ? `${label} previous close not found`
+        : (s.signal === 'index' || s.signal === 'both') && !idxSide ? `${label} opened at its previous close (no gap)`
         : s.signal === 'index' ? `no ATM ${idxSide} option data`
         : s.signal === 'both' ? `${label} gapped ${idxSide === 'CE' ? 'up' : 'down'} ${Math.abs(indexGap)} pts, but the ATM ${idxSide} premium did not gap up green`
         : premiumReason };
@@ -148,7 +162,9 @@ function run(store, startDate, endDate, s) {
     const side = decision.side, S = sides[side];
     // The traded strike: s.strike steps into the money (ITM: CE lower, PE higher) or out of it, at 09:15.
     const offset = (side === 'CE' ? -1 : 1) * (Number(s.strike) || 0);
-    const strike = offset ? q.at.get(UNDERLYING, side, offset, t0)?.strike : S.strike;
+    // From the index-open ATM (as live): that many strike steps away; else Dhan's rolling offset.
+    const strike = !offset ? S.strike : s.atmFrom === 'open' ? (q.strikeAt.get(UNDERLYING, side, S.strike + offset * STEP[UNDERLYING], t0)?.strike ?? null)
+      : q.at.get(UNDERLYING, side, offset, t0)?.strike;
     if (!strike) { for (const b of Object.values(book)) b.skipped.push({ day: d, reason: 'strike not in the stored history' }); continue; }
     const rows = new Map(q.day.all(UNDERLYING, side, strike, sec(d) + OPEN_S, sec(d) + CLOSE_S).map(r => [r.time, r]));
     // ENTRY_MODE 'retest': after the 09:15 spike, a limit buy at the option's 09:15 open, filled by the first minute
@@ -173,10 +189,13 @@ function run(store, startDate, endDate, s) {
       const open915 = k === 0 && e.open < intrinsic ? Math.min(intrinsic, e.high) : e.open;
       const lotSize = lotSizeOn(UNDERLYING, d), entry = r2(tick((retest ? rFill : open915 * (k ? 1 : 1 + (Number(s.lateEntryPct) || 0) / 100)) + s.slippage)), basis = s.compound ? b.capital : s.capital;
       // Fixed sizing with a rupee amount: that much a trade, never more than the account holds that day.
-      const spend = !s.compound && s.tradeAmount > 0 ? Math.min(s.tradeAmount, b.capital) : basis * s.fundsUse / 100;
+      // LIVE_SIZING: also no more than funds × 0.98 ÷ 1.15, as live (Dhan blocks about 15% above the price for a market buy).
+      const want = !s.compound && s.tradeAmount > 0 ? Math.min(s.tradeAmount, b.capital) : basis * s.fundsUse / 100;
+      const spend = s.liveSizing ? Math.min(want, b.capital * 0.98 / 1.15) : want;
       const lots = Math.min(Math.floor(spend / (entry * lotSize)), s.lotCap > 0 ? s.lotCap : Infinity);
       if (!(lots >= 1)) { b.skipped.push({ day: d, reason: 'capital too small for 1 lot' }); continue; }
-      const qty = lots * lotSize, room = basis * s.dailySlPct / 100 / qty;
+      // DAILY_SL_AMOUNT (₹, as a fixed daily loss limit in Risk rules) instead of DAILY_SL_PCT of the capital.
+      const qty = lots * lotSize, room = (s.dailySlAmount > 0 ? s.dailySlAmount : basis * s.dailySlPct / 100) / qty;
       if (room < entry * s.minStopPct / 100) { b.skipped.push({ day: d, reason: 'stop too tight' }); continue; }
       // Retest: the stop RETEST_SL_PCT below the entry, or closer when the day's stop-loss allows less.
       const stop = r2(Math.max(TICK, Math.ceil((retest ? Math.max(entry - room, entry * (1 - s.retestSlPct / 100)) : entry - room) / TICK - 1e-9) * TICK));

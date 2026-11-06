@@ -123,3 +123,28 @@ test('gap check on the index: up → CE whatever the premiums did; a stale 09:15
   assert.match(both.days[0].reason, /gapped up 1000 pts, but the ATM CE premium did not gap up green/);
   s.close();
 });
+
+test('live gap check: the ATM premium gap alone (no colour), ATM at the index open, ₹ stop, live sizing', () => {
+  const s = openHistory(':memory:'), D1 = '2026-03-02', D2 = '2026-03-03';
+  // SENSEX opens 81,040 (ATM 81000 by the open), sells off to 80,800 (Dhan's rolling ATM 80800).
+  s.saveIndex('SENSEX', D1, D2, [bar(D1, '15:29', 80000, 80000, 80000, 80000), bar(D2, '09:15', 81040, 81050, 80700, 80800), bar(D2, '09:16', 80800, 80850, 80780, 80820), bar(D2, '09:17', 80820, 80900, 80800, 80880)]);
+  const o = (side, off, strike, rows) => s.saveOptions('SENSEX', 1, side, off, D1, D2, rows.map(r => ({ strike, ...r })));
+  o('CE', 0, 81000, [bar(D1, '15:29', 40, 40, 40, 40)]);
+  o('PE', 0, 81000, [bar(D1, '15:29', 1000, 1000, 1000, 1000)]);
+  o('CE', 2, 81000, [bar(D2, '09:15', 300, 300, 200, 250), bar(D2, '09:16', 250, 260, 240, 255)]);   // red minute
+  o('PE', -2, 81000, [bar(D2, '09:15', 250, 330, 240, 320), bar(D2, '09:16', 320, 325, 300, 310)]);
+  o('CE', 0, 80800, [bar(D2, '09:15', 400, 410, 380, 400)]);   // the same contract as the ITM2 row below
+  o('PE', 0, 80800, [bar(D2, '09:15', 150, 200, 140, 190)]);
+  o('CE', 0, 80800, [bar(D1, '15:29', 70, 70, 70, 70)]);
+  o('PE', 0, 80800, [bar(D1, '15:29', 820, 820, 820, 820)]);
+  o('CE', -2, 80800, [bar(D2, '09:15', 400, 410, 380, 400), bar(D2, '09:16', 400, 420, 395, 415), bar(D2, '09:17', 415, 430, 410, 425)]);
+  const base = { underlying: 'SENSEX', startDate: D2, endDate: D2, capital: 200000, strike: 2, lateEntryPct: 0, exitCandle: '0916', costToCostR: 0, slippage: 0 };
+  const green = gapBacktest({ ...base, signal: 'premium', atmFrom: 'open' }, s);
+  assert.equal(green.days[0].side, null, '81000 CE gapped up (40 → 300) but its minute was red');
+  const live = gapBacktest({ ...base, signal: 'live', atmFrom: 'open', dailySlAmount: 10000, liveSizing: true, fundsUse: 100 }, s);
+  assert.deepEqual([live.days[0].side, live.days[0].ce.strike], ['CE', 81000], 'live: the gap alone; ATM from the 81,040 open');
+  const [t] = live.best.trades;
+  // ITM2 from 81000 = 80800 CE at 400. Spend min(₹2L, ₹2L × 0.98 ÷ 1.15 = ₹170,434) → 21 lots × 20 = 420; stop ₹10,000 ÷ 420 = ₹23.81 below.
+  assert.deepEqual([t.strike, t.entry, t.lots, t.qty, t.stop], [80800, 400, 21, 420, 376.2]);
+  s.close();
+});
