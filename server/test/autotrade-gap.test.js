@@ -547,7 +547,7 @@ test('live: ITM2 not traded yet today → the ATM (priced by the decision); a li
   const D16 = '2026-09-29', at = x => Date.parse(`${D16}T${x}+05:30`);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   flatBook();
-  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true });
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true, market: false });
   const saved = { ...FEED };
   FEED.tick = () => null;
   try {
@@ -561,14 +561,14 @@ test('live: ITM2 not traded yet today → the ATM (priced by the decision); a li
     assert.ok(!dhan.calls.some(c => c[0] === 'cancel'), 'filled, nothing cancelled');
     const row = stmt('SELECT * FROM auto_trades WHERE user_id = ?').get(uid);
     assert.deepEqual([row.strike, row.entry_price, row.status], [23050, 160, 'open']);
-  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false, market: true }); }
 });
 
 test('live: the chase follows a newer price, never above the first price + 25%, and cancels at 09:15:30', async (t) => {
   const D17 = '2026-09-30', at = x => Date.parse(`${D17}T${x}+05:30`);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   flatBook();
-  Object.assign(GAP_LIVE, { strike: 0, chase: CHASE, liquid: true });
+  Object.assign(GAP_LIVE, { strike: 0, chase: CHASE, liquid: true, market: false });
   const saved = { ...FEED };
   let px = null;
   FEED.tick = (u, key) => (key === 'NSE_FNO:G1' && px ? { ltp: px, volume: 650, at: Date.now() } : null);
@@ -587,14 +587,14 @@ test('live: the chase follows a newer price, never above the first price + 25%, 
     const waited = polls.filter(ms => ms === CHASE.pollMs).length * CHASE.pollMs;
     assert.ok(waited >= 28_000 && waited < 29_000, `kept working until 09:15:30 (${waited} ms after 09:15:02)`);
     assert.match(stmt('SELECT reason FROM auto_trades WHERE user_id = ?').get(uid).reason, /not filled within 28 seconds \(last limit 187\.5\)/);
-  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false, market: true }); }
 });
 
 test('live: ITM2 with no trade yet but sellers in the depth (6 Nov) → ITM2 at its best offer + 5%; a lone far offer is ignored', async (t) => {
   const D18 = '2026-09-28', at = x => Date.parse(`${D18}T${x}+05:30`);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   flatBook();
-  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true });
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true, market: false });
   const saved = { ...FEED };
   // 22950 CE (ITM2): last trade yesterday (100), no volume today, sellers at 120 from 09:15:00.3.
   FEED.tick = (u, key, { since = 0 } = {}) => (key === 'NSE_FNO:C3' && at('09:15:00') + 300 >= since
@@ -607,14 +607,14 @@ test('live: ITM2 with no trade yet but sellers in the depth (6 Nov) → ITM2 at 
     const buy = dhan.calls.find(c => c[0] === 'order')[1];
     assert.deepEqual([buy.securityId, buy.type, buy.price, buy.qty], ['C3', 'LIMIT', 126, 1300], 'ITM2 22950 CE at 120 + 5%; 1,56,800 / (120 × 65) = 20 lots');
     assert.deepEqual([stmt('SELECT strike FROM auto_trades WHERE user_id = ?').get(uid).strike, r.entryPrice], [22950, 121.5]);
-  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false, market: true }); }
 });
 
 test('live: ITM2 with no feed tick → one REST depth quote gives its best offer', async (t) => {
   const D19 = '2026-09-25', at = x => Date.parse(`${D19}T${x}+05:30`);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   flatBook();
-  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true });
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true, market: false });
   const saved = { ...FEED };
   FEED.tick = () => null;
   try {
@@ -626,7 +626,57 @@ test('live: ITM2 with no feed tick → one REST depth quote gives its best offer
     const buy = dhan.calls.find(c => c[0] === 'order')[1];
     assert.deepEqual([buy.securityId, buy.price], ['C3', 136.5], 'ITM2 at its REST best offer 130 + 5%');
     assert.deepEqual(dhan.calls.filter(c => c[0] === 'depth').map(c => c[1]), ['C3'], 'one depth request');
-  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false }); }
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false, market: true }); }
+});
+
+// Live default (user's choice): a MARKET order of the lots sized at ITM2's live best offer; not filled in a second →
+// cancelled and a new market order for the rest, until 09:15:30.
+const marketRun = async (day, statusOf, { ticks = true } = {}) => {
+  const at = x => Date.parse(`${day}T${x}+05:30`);
+  stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
+  flatBook();
+  Object.assign(GAP_LIVE, { strike: 2, chase: CHASE, liquid: true, market: true });
+  const saved = { ...FEED };
+  FEED.tick = (u, key) => (ticks && key === 'NSE_FNO:C3' ? { ltp: 100, volume: 0, dayOpen: 0, depth: [{ bid: 110, bidQty: 50, ask: 120, askQty: 40 }], at: at('09:15:00') + 300 } : null);
+  try {
+    const dhan = chaseSetup(() => ({ status: 'pending' }));
+    let n = 0;
+    const cancelled = new Set();
+    dhan.placeOrder = async o => { dhan.calls.push(['order', { ...o }]); return { id: o.type === 'STOP_LOSS' ? 'GS1' : `GE${++n}`, status: 'pending' }; };
+    dhan.cancelOrder = async id => { dhan.calls.push(['cancel', id]); cancelled.add(id); return { status: 'cancelled' }; };
+    dhan.orderStatus = async id => { dhan.calls.push(['status', id]); return id === 'GS1' ? { status: 'pending' } : statusOf(id, cancelled.has(id)); };
+    const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments: inst3 });
+    return { r, dhan, buys: dhan.calls.filter(c => c[0] === 'order' && c[1].side === 'BUY').map(c => c[1]) };
+  } finally { Object.assign(FEED, saved); Object.assign(GAP_LIVE, { strike: 0, chase: null, liquid: false, market: true }); }
+};
+const gateSkip = (t, r) => r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped) && t.skip(`gate refused in this environment: ${r.skipped}`);
+
+test('live market: ITM2 (no trade yet, sellers at 120) bought with a MARKET order of the lots sized at 120', async (t) => {
+  assert.equal(GAP_LIVE.market, true, 'live default: market order');
+  const { r, buys } = await marketRun('2026-09-24', () => ({ status: 'filled', price: 121, filledQty: 1300 }));
+  if (gateSkip(t, r)) return;
+  assert.equal(r.entered, true, JSON.stringify(r));
+  assert.deepEqual(buys.map(b => [b.securityId, b.type, b.qty, b.refPrice, b.price]), [['C3', 'MARKET', 1300, 120, undefined]], '80% of ₹2,00,000 / (120 × 65) = 20 lots');
+  assert.equal(r.entryPrice, 121);
+});
+
+test('live market: not filled in a second → cancelled and a new MARKET order sent; part filled first is kept', async (t) => {
+  // GE1: 650 traded, the rest not (cancelled after 1 s); GE2 (the 650 left) fills at 126.
+  const { r, dhan, buys } = await marketRun('2026-09-23', (id, gone) => (id === 'GE1' ? (gone ? { status: 'failed', reason: 'Order cancelled', filledQty: 650, price: 121 } : { status: 'pending', filledQty: 650 })
+    : { status: 'filled', price: 126, filledQty: 650 }));
+  if (gateSkip(t, r)) return;
+  assert.equal(r.entered, true, JSON.stringify(r));
+  assert.deepEqual(buys.map(b => [b.type, b.qty]), [['MARKET', 1300], ['MARKET', 650]]);
+  assert.deepEqual(dhan.calls.filter(c => c[0] === 'cancel').map(c => c[1]), ['GE1']);
+  assert.deepEqual([r.qty, r.entryPrice], [1300, 123.5], 'average of 650 at 121 and 650 at 126');
+});
+
+test('live market: never filled → a market order every second until 09:15:30, each cancelled, then no trade', async (t) => {
+  const { r, dhan, buys } = await marketRun('2026-09-22', (id, gone) => (gone ? { status: 'failed', reason: 'Order cancelled', filledQty: 0 } : { status: 'pending', filledQty: 0 }));
+  if (gateSkip(t, r)) return;
+  assert.equal(r.skipped, 'not filled', JSON.stringify(r));
+  assert.ok(buys.length >= 27 && buys.length <= 29 && buys.every(b => b.type === 'MARKET' && b.qty === 1300), `${buys.length} market orders in 28 s`);
+  assert.equal(new Set(dhan.calls.filter(c => c[0] === 'cancel').map(c => c[1])).size, buys.length, 'every one cancelled');
 });
 
 test('Algo page history: earlier days only, newest first, with P&L and % when the trade has an entry and an exit', async () => {

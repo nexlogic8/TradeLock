@@ -131,7 +131,10 @@ export const FEED = { tick: liveTick, minute: liveMinute, bar: liveBar, watch: a
 // CHASE: our own LIMIT at that fresh price + BUFFER; while not filled it is raised every EVERY_MS to the latest price +
 // BUFFER (at least STEP of the first price more each time, for a contract that is not trading), never above the first
 // price + CAP; cancelled at UNTIL (IST), or MIN_MS after it was placed if later. null: the old market order.
-export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400, liquid: true,
+// MARKET (user's choice, 6 Nov): the entry is a MARKET order of the lots sized at that live price, not our own limit; if
+// Dhan has not filled it after EVERY_MS it is cancelled and a new market order sent for the rest, until UNTIL. false:
+// our own LIMIT at the price + BUFFER / ASK_BUFFER, raised (CHASE) instead.
+export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400, liquid: true, market: true,
   // ASK_BUFFER: when the price is the best offer in the market depth (what sellers ask now), the limit is that + 5%.
   chase: { buffer: 0.15, askBuffer: 0.05, cap: 0.25, step: 0.02, everyMs: 1_000, pollMs: 250, until: '09:15:30', minMs: 15_000 } };
 const FEED_FROM = 9 * 60 + 13, FEED_TO = 15 * 60 + 31;   // IST minutes: subscribed from just before the open to the close
@@ -984,7 +987,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // The Risk rules' Capital per trade when it is on, else FUNDS_USE of the funds. Either way no more than the broker can
   // block for a market buy (the premium + BLOCK_PAD, 98% of the funds), so the first order is not refused for funds.
   // CHASE: the limit can be raised up to the price + CAP, so that is what has to fit.
-  const ch = GAP_LIVE.chase, cap = risk.budget?.capitalLimit ?? null, fits = funds * 0.98 / (1 + (ch ? ch.cap : G.blockPad));
+  // MARKET (GAP_LIVE.market): a market order, re-sent if not filled; else LIM: our own limit, chased.
+  const ch = GAP_LIVE.chase, mkt = !!(ch && GAP_LIVE.market), lim = !!(ch && !mkt);
+  const cap = risk.budget?.capitalLimit ?? null, fits = funds * 0.98 / (1 + (lim ? ch.cap : G.blockPad));
   const spend = Math.min(cap != null ? cap : funds * G.fundsUse, fits);
   let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
   if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < fits ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
@@ -995,19 +1000,20 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // CHASE: our own limit above the fresh price (a buy limit pays the sellers' price, the limit is only the ceiling).
   // Otherwise refPrice / marketBand: a broker that turns market orders into limits (StoxKart) prices it from this tick.
   // BUFFER over the best offer is ASK_BUFFER (sellers are there); over a last trade, BUFFER.
-  const ceiling = ch ? roundTick(quoteAt * (1 + ch.cap), meta.tickSize) : null, buf = ch ? (byAsk ? ch.askBuffer : ch.buffer) : 0;
+  const ceiling = lim ? roundTick(quoteAt * (1 + ch.cap), meta.tickSize) : null, buf = lim ? (byAsk ? ch.askBuffer : ch.buffer) : 0;
   // The latest live price of the contract: its best offer, else its last trade today.
   const latestPx = () => { const t = fromTick(FEED.tick(uid, `${seg}:${c.securityId}`, { since: Date.now() - TICK_FRESH_MS })); return t ? (t.ask || (t.traded ? t.ltp : null)) : null; };
-  const order = { symbol, side: 'BUY', qty, ...(ch ? { type: 'LIMIT', price: Math.min(ceiling, roundTick(quoteAt * (1 + buf), meta.tickSize)) }
-    : G.market ? { type: 'MARKET', refPrice: quoteAt, marketBand: G.marketBand } : { type: 'LIMIT', price: limit }), securityId: c.securityId, exchangeSegment: seg, productType: 'INTRADAY',
+  const order = { symbol, side: 'BUY', qty, ...(lim ? { type: 'LIMIT', price: Math.min(ceiling, roundTick(quoteAt * (1 + buf), meta.tickSize)) }
+    : mkt || G.market ? { type: 'MARKET', refPrice: quoteAt, marketBand: G.marketBand } : { type: 'LIMIT', price: limit }), securityId: c.securityId, exchangeSegment: seg, productType: 'INTRADAY',
     ...(qty > freeze ? { slice: true } : {}) };
-  const how = ch ? `limit buy at ${order.price} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())} + ${Math.round(buf * 100)}%, raised up to ${ceiling} if not filled)`
+  const how = mkt ? `market buy of ${qty} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())}; sent again every ${ch.everyMs / 1000} s if not filled)`
+    : lim ? `limit buy at ${order.price} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())} + ${Math.round(buf * 100)}%, raised up to ${ceiling} if not filled)`
     : G.market ? `market buy (premium ${limit} at ${clockMs(setup.checkedAt || now)})` : `limit buy at ${limit} (premium ${quoteAt} at ${clockMs(setup.checkedAt || now)} + ${Math.round(G.padPct * 100)}%)`;
   // How long the entry may stay unfilled: CHASE until UNTIL (at least MIN_MS), else the fixed fill wait.
   const waitMs = ch ? Math.max(ch.minMs, Date.parse(`${ist(now).day}T${ch.until}+05:30`) - now) : AUTO.fillWaitMs;
   const t = ist(), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
   // Capital per trade is checked at the premium the order was sized at, not at the chase limit above it.
-  const verdict = checkOrder(ch ? { ...order, price: undefined } : order, { price: quoteAt, rules, positions: book.positions, orders: book.orders || [], entryInFlight: entriesInFlight.has(uid),
+  const verdict = checkOrder(lim ? { ...order, price: undefined } : order, { price: quoteAt, rules, positions: book.positions, orders: book.orders || [], entryInFlight: entriesInFlight.has(uid),
     entries: s.entries, pnl: s.realized + s.unrealized, minutes: marketOpen() ? t.minutes : null, capital: capitalFor(uid, s), paused: !!s.paused,
     killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
@@ -1031,6 +1037,41 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     audit(uid, 'algo.gap_took_over', { id, qty, price: h.price });
     return { status: 'filled', price: h.price };
   };
+  // MARKET: Dhan turns an option market order into a limit at its last price + ~10% (6 Nov: 953.95 on 867.25, the price
+  // ran to 1,085 first and it never filled). So: polled every POLL_MS; not filled after EVERY_MS → cancelled, what traded
+  // counted, and a NEW market order sent for the rest (Dhan prices it from the new last price); until `waitMs`.
+  // { status: 'filled', price (average), filledQty } when anything traded; a rejection with nothing traded is returned
+  // as is (the attempts loop below places it again); else { status: 'pending' } with every order cancelled.
+  const marketFill = async first => {
+    const started = Date.now();
+    let cur = first, filled = 0, cost = 0, waited = 0, sinceSend = 0, sent = 1;
+    const add = s => { const q = Number(s?.filledQty) || (s?.status === 'filled' ? order.qty : 0); if (q > 0) { filled += q; cost += q * (Number(s.price) || quoteAt); } };
+    const done = () => (filled > 0 ? { status: 'filled', price: round2(cost / filled), filledQty: filled } : { status: 'pending', filledQty: 0 });
+    for (;;) {
+      let s;
+      try { s = await adapter.orderStatus(cur.id); } catch { s = null; }
+      if (s?.status === 'filled') { add(s); return done(); }
+      if (s?.status === 'failed' && !(s.filledQty > 0) && !filled && sent === 1) return s;
+      const timeUp = waited >= waitMs || Date.now() - started >= waitMs;
+      if (s?.status === 'failed' || sinceSend >= ch.everyMs || timeUp) {
+        let after = s;
+        if (s?.status !== 'failed') { await adapter.cancelOrder(cur.id).catch(() => {}); after = await adapter.orderStatus(cur.id).catch(() => null); }
+        if (after?.status === 'filled') { add(after); return done(); }
+        add(after);
+        const rest = qty - filled;
+        if (timeUp || rest < meta.lotSize) return done();
+        order.qty = rest;
+        if (rest > freeze) order.slice = true; else delete order.slice;
+        const px = latestPx();
+        if (px > 0) order.refPrice = px;
+        try { cur = await adapter.placeOrder(order); } catch { return done(); }
+        sent++; sinceSend = 0;
+        update(id, { entry_order_id: String(cur.id) });
+        audit(uid, 'order.placed', { order, result: cur, auto: 'gap', resent: sent, filledSoFar: filled });
+      }
+      await pause(ch.pollMs); waited += ch.pollMs; sinceSend += ch.pollMs;
+    }
+  };
   entriesInFlight.add(uid);
   let fill;
   try {
@@ -1045,7 +1086,8 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
       update(id, { entry_order_id: String(placed.id), lots, qty });
       audit(uid, 'order.placed', { order, result: placed, auto: 'gap', attempt: attempt + 1 });
       // Confirmed by polling the order every FILL_POLL_MS.
-      fill = placed.status === 'filled' ? placed : ch ? await chaseFill(adapter, placed.id, { order, ceiling, first: quoteAt, tick: meta.tickSize, waitMs, pause,
+      fill = placed.status === 'filled' ? placed : mkt ? await marketFill(placed)
+        : lim ? await chaseFill(adapter, placed.id, { order, ceiling, first: quoteAt, tick: meta.tickSize, waitMs, pause,
         latest: latestPx, buffer: buf })
         : await waitForFill(adapter, placed.id, { pause, stepMs: G.fillPollMs });
       if (fill.status !== 'failed' || attempt >= G.maxAttempts - 1) break;
@@ -1065,7 +1107,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
         await pause(G.retryMs);
         const t = FEED.tick(uid, `${seg}:${c.securityId}`, { since: Date.now() - 5_000 });
         if (t?.ltp > 0 && order.type === 'MARKET') order.refPrice = t.ltp;
-        const px = ch ? latestPx() : null;
+        const px = lim ? latestPx() : null;
         if (px > 0) order.price = Math.min(ceiling, Math.max(order.price, roundTick(px * (1 + buf), meta.tickSize)));
       }
     }
@@ -1083,8 +1125,8 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
       } else {
         const h = await held();
         if (h) fill = takeOver(h);
-        else { update(id, { status: 'skipped', reason: `The ${how} was not filled within ${Math.round(waitMs / 1000)} seconds${ch ? ` (last limit ${order.price})` : ""}; cancelled.`, closed_at: Date.now() });
-          notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: Gap 09:15 ${direction} not filled`, body: `${symbol} ${how} was not filled within ${Math.round(waitMs / 1000)} seconds${ch ? ` (last limit ${order.price})` : ""} and was cancelled. No trade today.` });
+        else { update(id, { status: 'skipped', reason: `The ${how} was not filled within ${Math.round(waitMs / 1000)} seconds${lim ? ` (last limit ${order.price})` : mkt ? ` (market orders, sent again every second)` : ""}; cancelled.`, closed_at: Date.now() });
+          notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: Gap 09:15 ${direction} not filled`, body: `${symbol} ${how} was not filled within ${Math.round(waitMs / 1000)} seconds${lim ? ` (last limit ${order.price})` : mkt ? ` (market orders, sent again every second)` : ""} and was cancelled. No trade today.` });
           return { skipped: 'not filled', id }; }
       }
     }
@@ -1093,6 +1135,12 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
       update(id, { status: 'failed', reason: fill.reason || 'Entry order rejected', closed_at: Date.now() });
       notify(uid, { kind: 'risk', level: 'critical', title: `Algo Trading: ${symbol} buy rejected`, body: `Dhan rejected the entry${fill.reason ? `: ${fill.reason}` : ''}.` });
       return { failed: fill.reason, id };
+    }
+    // MARKET re-sent: part of the quantity traded by 09:15:30, the rest cancelled; the stop covers what is held.
+    if (mkt && fill.filledQty > 0 && fill.filledQty < qty) {
+      qty = fill.filledQty; lots = Math.round(qty / meta.lotSize);
+      update(id, { lots, qty });
+      notify(uid, { kind: 'risk', level: 'info', title: `Algo Trading: Gap 09:15 ${direction} partly filled`, body: `${symbol}: ${qty} of the ${how} traded within ${Math.round(waitMs / 1000)} seconds; the rest was cancelled. Trading the ${qty}.` });
     }
   } finally { entriesInFlight.delete(uid); }
 
