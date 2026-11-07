@@ -21,7 +21,7 @@ import { BACKTEST_INDICES } from './gap.js';
 // source: 'all' = every strike of the contracts saved while they traded (option_far_1m, NIFTY from Sep 2026: needed for
 // far ₹3 options), 'near' = the near-ATM history (1 year+, strikes ATM ±10 / ±3 only).
 export const STRANGLE_DEFAULTS = Object.freeze({ source: 'all', target: 3, tolerancePct: 30, entryTime: '09:20', waitMin: 25, exitTime: '15:25',
-  stopMode: 'leg', stopPct: 20, expiryCode: 1, skipExpiryDay: true, capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 0, slippage: 0, stopCheck: 'close' });
+  stopMode: 'leg', stopPct: 20, expiryCode: 1, skipExpiryDay: true, capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 0, slippage: 0, stopCheck: 'close', dayLossPct: 0 });
 // The usual target per index (the page fills it in when the index changes).
 export const STRANGLE_TARGETS = Object.freeze({ NIFTY: 3, BANKNIFTY: 20, SENSEX: 100 });
 // Most units one order may carry (exchange freeze quantity); more is sent as several orders, each with brokerage.
@@ -137,6 +137,15 @@ function run(store, startDate, endDate, s) {
     const start = Math.max(legs.CE.entryAt, legs.PE.entryAt);
     for (const L of legList) { L.i = L.candles.findIndex(x => x.time > L.entryAt); if (L.i < 0) L.i = L.candles.length; L.lastAt = L.entryAt; }
     const sumEntry = legs.CE.entry + legs.PE.entry;
+    // Size: whole lots of both, from the capital and the thinner side's recent volume.
+    const base = s.sizing === 'fixed' ? s.capital : equity, perLot = sumEntry * lotSize;
+    let lots = Math.floor(base * s.fundsUse / 100 / perLot), volCapped = false;
+    if (s.maxVolPct > 0) { const cap = Math.floor(Math.min(legs.CE.vol, legs.PE.vol) * s.maxVolPct / 100 / lotSize); if (cap < lots) { lots = cap; volCapped = true; } }
+    if (lots < 1) { skipped.push({ day, reason: volCapped ? `too little volume: ${s.maxVolPct}% of the last 10 minutes is under one lot` : 'capital below one lot of both' }); continue; }
+    const qty = lots * lotSize, orders = Math.ceil(qty / (FREEZE[U] || 1800));
+    // Max loss a day: both sold at a minute's close once the two together (sold ones at their exit) are down this % of
+    // the capital the day started with (before charges).
+    const maxLoss = s.dayLossPct > 0 ? equity * s.dayLossPct / 100 : Infinity;
     for (let t = start + 60; t <= tEnd; t += 60) {
       for (const L of legList) {
         if (L.exit) continue;
@@ -150,15 +159,13 @@ function run(store, startDate, endDate, s) {
       if (s.stopMode === 'whole' && !legs.CE.exit && !legs.PE.exit && t < tEnd && legs.CE.last + legs.PE.last <= sumEntry * (1 - s.stopPct / 100)) {
         for (const L of legList) L.exit = { price: L.last, at: t, reason: `Both sold: together −${s.stopPct}%` };
       }
+      if (maxLoss < Infinity && t < tEnd && (!legs.CE.exit || !legs.PE.exit)
+        && legList.reduce((a, L) => a + ((L.exit ? L.exit.price : L.last) - L.entry) * qty, 0) <= -maxLoss) {
+        for (const L of legList) if (!L.exit) L.exit = { price: L.last, at: t, reason: `Day loss −${s.dayLossPct}%: closed` };
+      }
       if (legs.CE.exit && legs.PE.exit) break;
     }
     for (const L of legList) if (!L.exit) L.exit = { price: L.last, at: tEnd, reason: `Exit ${s.exitTime}` };
-    // Size: whole lots of both, from the capital and the thinner side's recent volume.
-    const base = s.sizing === 'fixed' ? s.capital : equity, perLot = sumEntry * lotSize;
-    let lots = Math.floor(base * s.fundsUse / 100 / perLot), volCapped = false;
-    if (s.maxVolPct > 0) { const cap = Math.floor(Math.min(legs.CE.vol, legs.PE.vol) * s.maxVolPct / 100 / lotSize); if (cap < lots) { lots = cap; volCapped = true; } }
-    if (lots < 1) { skipped.push({ day, reason: volCapped ? `too little volume: ${s.maxVolPct}% of the last 10 minutes is under one lot` : 'capital below one lot of both' }); continue; }
-    const qty = lots * lotSize, orders = Math.ceil(qty / (FREEZE[U] || 1800));
     let gross = 0, charges = 0;
     const leg = L => {
       const buy = L.entry * qty, sell = L.exit.price * qty;

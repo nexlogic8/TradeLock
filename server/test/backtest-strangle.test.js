@@ -91,3 +91,16 @@ test('stop on the minute close (default) sells at that close; a stop-loss order 
   const touch = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 3, stopMode: 'leg', stopPct: 20, stopCheck: 'touch', capital: 100000 }, store()).trades[0];
   assert.equal(touch.pe.exit, 2.48);
 });
+
+test('max loss a day sells both once the two together are down that % of the day’s capital', () => {
+  // Fall the call too: CE 23500 at ₹3 → ₹1 from 10:00, PE ₹3.10 → ₹2.30 at 11:00. With all the capital in, −10% of
+  // capital is reached at 10:00 (call −67% on half the money ≈ −33%): both sold at 10:00's close.
+  const s = openHistory(':memory:');
+  s.saveIndex('NIFTY', D, D, minutes().map(hhmm => ({ time: t(D, hhmm), open: 22500, high: 22501, low: 22499, close: 22500 })));
+  s.saveOptions('NIFTY', 1, 'CE', 10, D, D, series(D, 23500, h => ({ close: h >= '10:00' ? 1 : 3 })));
+  s.saveOptions('NIFTY', 1, 'PE', -10, D, D, series(D, 21500, () => ({ close: 3.1 })));
+  const x = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 3, stopMode: 'none', dayLossPct: 10, capital: 100000 }, s).trades[0];
+  assert.deepEqual([x.ce.exit, x.ce.exitAt, x.pe.exit, x.pe.exitAt, x.pe.exitReason], [1, t(D, '10:00'), 3.1, t(D, '10:00'), 'Day loss −10%: closed']);
+  const off = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 3, stopMode: 'none', capital: 100000 }, s).trades[0];
+  assert.equal(off.pe.exitReason, 'Exit 15:25');
+});

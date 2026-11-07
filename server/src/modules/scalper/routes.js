@@ -470,7 +470,8 @@ function strangleSettings(body) {
   const b = body || {}, d = STRANGLE_DEFAULTS, num = k => Number(b[k] ?? d[k]);
   const s = { source: String(b.source ?? d.source), target: num('target'), tolerancePct: num('tolerancePct'), entryTime: String(b.entryTime ?? d.entryTime), waitMin: num('waitMin'), exitTime: String(b.exitTime ?? d.exitTime),
     stopMode: String(b.stopMode ?? d.stopMode), stopCheck: String(b.stopCheck ?? d.stopCheck), stopPct: num('stopPct'), expiryCode: num('expiryCode'), skipExpiryDay: b.skipExpiryDay === undefined ? d.skipExpiryDay : b.skipExpiryDay === true,
-    capital: num('capital'), fundsUse: num('fundsUse'), sizing: String(b.sizing ?? d.sizing), maxVolPct: num('maxVolPct'), slippage: num('slippage') };
+    capital: num('capital'), fundsUse: num('fundsUse'), sizing: String(b.sizing ?? d.sizing), maxVolPct: num('maxVolPct'), slippage: num('slippage'), dayLossPct: num('dayLossPct') };
+  if (!numIn(s.dayLossPct, 0, 100)) throw bad('INVALID_STRANGLE_DAY_LOSS', 'Max loss a day must be 0 (off) to 100% of capital.');
   if (!['all', 'near'].includes(s.source)) throw bad('INVALID_STRANGLE_SOURCE', 'Choose all strikes or the near-ATM history.');
   if (!numIn(s.target, 0.05, 5000)) throw bad('INVALID_STRANGLE_TARGET', 'The target option price must be ₹0.05–5,000.');
   if (!numIn(s.tolerancePct, 1, 90)) throw bad('INVALID_STRANGLE_TOLERANCE', 'The price band must be 1–90% around the target.');
