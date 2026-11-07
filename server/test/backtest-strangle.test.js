@@ -115,3 +115,11 @@ test('all-strike source: a day before the nearest saved contract traded uses the
   const r = strangleBacktest({ startDate: day, endDate: day, source: 'all', target: 3, stopMode: 'none', capital: 100000 }, s);
   assert.equal(r.trades[0]?.expiry, '2026-11-23');
 });
+
+test('choose by distance from the ATM: the call ATM + distance, the put ATM − distance, at the entry minute', () => {
+  // Index at 22,500 → ATM 22,500: 1,000 points out = CE 23,500 and PE 21,500 (both in the synthetic store).
+  const r = strangleBacktest({ source: 'near', startDate: D, endDate: D, pick: 'distance', distance: 1000, stopMode: 'none', capital: 100000 }, store());
+  assert.deepEqual([r.trades[0].ce.strike, r.trades[0].pe.strike], [23500, 21500]);
+  const none = strangleBacktest({ source: 'near', startDate: D, endDate: D, pick: 'distance', distance: 300, capital: 100000 }, store());
+  assert.match(none.skipped[0].reason, /^no call or put 300 points from the ATM traded/);
+});

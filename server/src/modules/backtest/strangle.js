@@ -20,7 +20,7 @@ import { BACKTEST_INDICES } from './gap.js';
 
 // source: 'all' = every strike of the contracts saved while they traded (option_far_1m, NIFTY from Sep 2026: needed for
 // far ₹3 options), 'near' = the near-ATM history (1 year+, strikes ATM ±10 / ±3 only).
-export const STRANGLE_DEFAULTS = Object.freeze({ source: 'all', target: 3, tolerancePct: 30, entryTime: '09:20', waitMin: 25, exitTime: '15:25',
+export const STRANGLE_DEFAULTS = Object.freeze({ source: 'all', pick: 'price', distance: 300, target: 3, tolerancePct: 30, entryTime: '09:20', waitMin: 25, exitTime: '15:25',
   stopMode: 'leg', stopPct: 20, expiryCode: 1, skipExpiryDay: true, capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 0, slippage: 0, stopCheck: 'close', dayLossPct: 0 });
 // The usual target per index (the page fills it in when the index changes).
 export const STRANGLE_TARGETS = Object.freeze({ NIFTY: 3, BANKNIFTY: 20, SENSEX: 100 });
@@ -57,6 +57,24 @@ function bySide(rows, side) {
   return m;
 }
 /** The option nearest the target at minute `t` (its last price in the 10 minutes up to t, and traded in them). */
+// Strike step per index: the ATM is the index rounded to it.
+const STEP = { NIFTY: 50, BANKNIFTY: 100, SENSEX: 100 };
+/** pick 'distance': the strike `distance` points out of the money from the ATM at minute t (index close then). */
+function distanceStrike(bars, t, side, distance, step) {
+  let spot = null;
+  for (const b of bars) { if (b.time > t) break; spot = b.close; }
+  if (!(spot > 0)) return null;
+  const atm = Math.round(spot / step) * step;
+  return side === 'CE' ? atm + distance : atm - distance;
+}
+/** That strike's last price in the 10 minutes up to t, if it traded in them. */
+function pickStrike(strikes, t, strike) {
+  const c = strike == null ? null : strikes.get(strike);
+  if (!c) return null;
+  let last = null, vol = 0;
+  for (const x of c) { if (x.time > t) break; if (x.time > t - LOOKBACK) { last = x; vol += Number(x.volume) || 0; } }
+  return last && vol > 0 ? { strike, price: last.close, vol, candles: c } : null;
+}
 function pick(strikes, t, lo, hi, target) {
   let best = null;
   for (const [strike, c] of strikes) {
@@ -127,12 +145,15 @@ function run(store, startDate, endDate, s) {
     const legs = {};
     for (const side of ['CE', 'PE']) {
       const strikes = bySide(early, side);
-      for (let t = t0; t <= lastPick && !legs[side]; t += 60) { const p = pick(strikes, t, lo, hi, s.target); if (p) legs[side] = { ...p, entryAt: t }; }
+      for (let t = t0; t <= lastPick && !legs[side]; t += 60) {
+        const p = s.pick === 'distance' ? pickStrike(strikes, t, distanceStrike(bars, t, side, s.distance, STEP[U] || 50)) : pick(strikes, t, lo, hi, s.target);
+        if (p) legs[side] = { ...p, entryAt: t };
+      }
       if (legs[side]) legs[side].candles = src.strike(expiry, side, legs[side].strike, t0 - LOOKBACK - 60, tEnd + 60);
     }
     if (!legs.CE || !legs.PE) {
       const which = !legs.CE && !legs.PE ? 'no call or put' : !legs.CE ? 'no call' : 'no put';
-      skipped.push({ day, reason: `${which} traded at ₹${r2(lo)}–${r2(hi)} between ${s.entryTime} and ${hm(t0 + s.waitMin * 60)} in the stored strikes` });
+      skipped.push({ day, reason: s.pick === 'distance' ? `${which} ${s.distance} points from the ATM traded between ${s.entryTime} and ${hm(t0 + s.waitMin * 60)} in the stored strikes` : `${which} traded at ₹${r2(lo)}–${r2(hi)} between ${s.entryTime} and ${hm(t0 + s.waitMin * 60)} in the stored strikes` });
       continue;
     }
     const lotSize = lotSizeOn(U, day), legList = [legs.CE, legs.PE];

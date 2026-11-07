@@ -23,7 +23,7 @@ const stopText = s => (s.stopMode === 'leg' ? `each option −${s.stopPct}%` : s
 
 export function strangleDefaults(ui, caps) {
   const d = caps?.strangle?.defaults || {}, targets = caps?.strangle?.targets || {};
-  ui.strangle ??= { source: d.source ?? 'all', target: targets[ui.underlying || 'NIFTY'] ?? d.target ?? 3, tolerancePct: d.tolerancePct ?? 30, entryTime: d.entryTime ?? '09:20', waitMin: d.waitMin ?? 25,
+  ui.strangle ??= { source: d.source ?? 'all', pick: d.pick ?? 'price', distance: d.distance ?? 300, target: targets[ui.underlying || 'NIFTY'] ?? d.target ?? 3, tolerancePct: d.tolerancePct ?? 30, entryTime: d.entryTime ?? '09:20', waitMin: d.waitMin ?? 25,
     exitTime: d.exitTime ?? '15:25', stopMode: d.stopMode ?? 'leg', stopPct: d.stopPct ?? 20, expiryCode: d.expiryCode ?? 1, skipExpiryDay: d.skipExpiryDay ?? true,
     capital: d.capital ?? 600000, fundsUse: d.fundsUse ?? 100, sizing: d.sizing ?? 'compound', maxVolPct: d.maxVolPct ?? 0, slippage: d.slippage ?? 0, stopCheck: d.stopCheck ?? 'close', dayLossPct: d.dayLossPct ?? 0 };
 }
@@ -34,11 +34,11 @@ export function strangleIndexChanged(ui, caps) {
 }
 export function strangleFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
-  ui.strangle = { source:s.source ?? 'near', stopCheck:s.stopCheck ?? 'touch', dayLossPct:s.dayLossPct ?? 0, target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
+  ui.strangle = { source:s.source ?? 'near', pick:s.pick ?? 'price', distance:s.distance ?? 300, stopCheck:s.stopCheck ?? 'touch', dayLossPct:s.dayLossPct ?? 0, target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
     expiryCode:s.expiryCode, skipExpiryDay:s.skipExpiryDay, capital:s.capital, fundsUse:s.fundsUse, sizing:s.sizing, maxVolPct:s.maxVolPct, slippage:s.slippage };
 }
 export const stranglePayload = ui => ({ strategy:STRANGLE_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.strangle });
-const TEXT = ['source', 'entryTime', 'exitTime', 'stopMode', 'stopCheck', 'sizing'];
+const TEXT = ['source', 'pick', 'entryTime', 'exitTime', 'stopMode', 'stopCheck', 'sizing'];
 export function strangleFieldChange(ui, field) {
   const key = field.dataset.strangleField; if (!key) return false;
   ui.strangle[key] = key === 'skipExpiryDay' ? field.value === '1' : TEXT.includes(key) ? field.value : Number(field.value);
@@ -46,11 +46,11 @@ export function strangleFieldChange(ui, field) {
 }
 export function strangleRunLabel(run) {
   const m = run.metrics, s = m.settings || {}, x = m.summary;
-  return `${STRANGLE_LABEL} | ${run.startDate} to ${run.endDate} | ₹${s.target} | ${stopText(s)} | ${x.traded} days | ${pct(x.returnPct)}`;
+  return `${STRANGLE_LABEL} | ${run.startDate} to ${run.endDate} | ${s.pick === 'distance' ? `ATM ± ${s.distance}` : `₹${s.target}`} | ${stopText(s)} | ${x.traded} days | ${pct(x.returnPct)}`;
 }
 export function strangleRunFacts(run) {
   const m = run.metrics, s = m.settings || {}, x = m.summary;
-  return { name: 'CE + PE at a target price', settings: [s.source === 'all' ? 'all strikes' : 'near-ATM strikes', ...(s.dayLossPct > 0 ? [`max loss ${s.dayLossPct}% a day`] : []), `₹${s.target} ±${s.tolerancePct}%`, `${s.entryTime} → ${s.exitTime}`, stopText(s), s.expiryCode === 2 ? 'next expiry' : 'nearest expiry',
+  return { name: 'CE + PE at a target price', settings: [s.source === 'all' ? 'all strikes' : 'near-ATM strikes', ...(s.dayLossPct > 0 ? [`max loss ${s.dayLossPct}% a day`] : []), s.pick === 'distance' ? `ATM ± ${s.distance} points` : `₹${s.target} ±${s.tolerancePct}%`, `${s.entryTime} → ${s.exitTime}`, stopText(s), s.expiryCode === 2 ? 'next expiry' : 'nearest expiry',
     `${inr(s.capital)} ${s.sizing === 'compound' ? 'compounding' : 'fixed'} · ${s.fundsUse}% a day`, s.maxVolPct > 0 ? `≤ ${s.maxVolPct}% of volume` : 'no volume limit'],
     trades: `${x.traded} days`, results: [{ label:'Capital', value:`${inr(x.startCapital)} → ${inr(x.endCapital)}`, sub:`${pct(x.returnPct)} · worst day ${pct(x.worstDayPct)}`, tone:x.net }] };
 }
@@ -60,8 +60,11 @@ export function strangleFields(ui) {
   const num = (key, label, min, max, step, aria) => field(label, html`<input class="input" type="number" min="${min}" max="${max}" step="${step}" data-strangle-field="${key}" value="${g[key]}" aria-label="${aria}">`);
   return html`
     ${field('Strikes from', html`<select class="input" data-strangle-field="source" aria-label="Which stored option prices to use"><option value="all" ${g.source === 'all' ? 'selected' : ''}>All strikes (saved from Sep 2026)</option><option value="near" ${g.source === 'near' ? 'selected' : ''}>Near-ATM history (1 year+)</option></select>`)}
-    ${num('target', 'Option price ₹ (both)', 0.05, 5000, 0.05, 'Target premium for the call and the put')}
-    ${num('tolerancePct', 'Price band ± %', 1, 90, 1, 'How far from the target a price may be, in percent')}
+    ${field('Choose by', html`<select class="input" data-strangle-field="pick" aria-label="How the call and the put are chosen"><option value="price" ${g.pick === 'price' ? 'selected' : ''}>Option price</option><option value="distance" ${g.pick === 'distance' ? 'selected' : ''}>Distance from ATM</option></select>`)}
+    ${g.pick === 'distance'
+      ? field('Distance from ATM (points)', html`<select class="input" data-strangle-field="distance" aria-label="Points from the ATM">${[50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000].map(p => html`<option value="${p}" ${g.distance === p ? 'selected' : ''}>${p}</option>`)}</select>`)
+      : html`${num('target', 'Option price ₹ (both)', 0.05, 5000, 0.05, 'Target premium for the call and the put')}
+    ${num('tolerancePct', 'Price band ± %', 1, 90, 1, 'How far from the target a price may be, in percent')}`}
     ${field('Entry (IST)', html`<input class="input" type="time" min="09:15" max="15:29" data-strangle-field="entryTime" value="${g.entryTime}" aria-label="Entry time">`)}
     ${num('waitMin', 'Wait for a price (min)', 0, 120, 1, 'Minutes to keep looking when no option traded near the target at the entry time')}
     ${field('Exit (IST)', html`<input class="input" type="time" min="09:16" max="15:29" data-strangle-field="exitTime" value="${g.exitTime}" aria-label="Exit time">`)}
@@ -81,7 +84,7 @@ export function strangleFields(ui) {
 
 export function strangleNotes(ui, caps) {
   const g = ui.strangle, cov = caps?.gap?.indices ? caps.gap.indices[ui.underlying || 'NIFTY'] : caps?.gap?.coverage;
-  return html`<p class="bt-muted"><b>CE + PE at a target price.</b> Every day at ${g.entryTime}: buy the call and the put whose price is closest to ₹${g.target} (within ±${g.tolerancePct}%, and traded in the last 10 minutes), the same number of lots of each. If none is there yet, keep looking every minute for ${g.waitMin} minutes. Stop: ${g.stopMode === 'leg' ? `each option on its own at ${g.stopPct}% below its entry (the other keeps running)` : g.stopMode === 'whole' ? `both sold together when their combined price is ${g.stopPct}% below the combined entry` : 'none'}. ${g.dayLossPct > 0 ? `Max loss a day: once the call and the put together are down ${g.dayLossPct}% of that day's starting capital at a minute's close, both are sold for the day. ` : ''}Everything still open is sold at ${g.exitTime}. Charges as on each date, plus extra orders for quantity above the exchange's per-order limit.</p>
+  return html`<p class="bt-muted"><b>CE + PE at a target price.</b> Every day at ${g.entryTime}: buy ${g.pick === 'distance' ? `the call ${g.distance} points above the ATM and the put ${g.distance} points below it (ATM = the index rounded to the strike step at that minute; each must have traded in the last 10 minutes)` : `the call and the put whose price is closest to ₹${g.target} (within ±${g.tolerancePct}%, and traded in the last 10 minutes)`}, the same number of lots of each.${g.pick === 'distance' && g.source === 'all' ? ' Tip: up to 500 points (NIFTY) is also in the near-ATM history, which covers a year or more.' : ''} If none is there yet, keep looking every minute for ${g.waitMin} minutes. Stop: ${g.stopMode === 'leg' ? `each option on its own at ${g.stopPct}% below its entry (the other keeps running)` : g.stopMode === 'whole' ? `both sold together when their combined price is ${g.stopPct}% below the combined entry` : 'none'}. ${g.dayLossPct > 0 ? `Max loss a day: once the call and the put together are down ${g.dayLossPct}% of that day's starting capital at a minute's close, both are sold for the day. ` : ''}Everything still open is sold at ${g.exitTime}. Charges as on each date, plus extra orders for quantity above the exchange's per-order limit.</p>
     ${g.source === 'all' ? html`<p class="bt-muted"><b>All strikes:</b> every strike of the NIFTY contracts saved while they traded, from Sep 2026 (Dhan gives no data for far strikes once a contract has expired, so older days cannot be added). Each day uses the nearest saved contract: in October that is the 9 Nov expiry, so those days trade a contract 1–3 weeks from expiry. Days with no saved contract are listed as skipped.</p>`
       : html`<p class="bt-muted"><b>Near-ATM history:</b> it keeps only strikes near the ATM: the nearest expiry ATM ±10 strikes, the next expiry ±3. Very cheap far options (₹3 on NIFTY) are usually further away, so most days are skipped and listed with the reason; ₹100 on SENSEX is in the data on most days.</p>`}
     <p class="bt-muted">${cov ? `Stored range: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
