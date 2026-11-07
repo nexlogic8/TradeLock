@@ -21,7 +21,7 @@ import { BACKTEST_INDICES } from './gap.js';
 // source: 'all' = every strike of the contracts saved while they traded (option_far_1m, NIFTY from Sep 2026: needed for
 // far ₹3 options), 'near' = the near-ATM history (1 year+, strikes ATM ±10 / ±3 only).
 export const STRANGLE_DEFAULTS = Object.freeze({ source: 'all', target: 3, tolerancePct: 30, entryTime: '09:20', waitMin: 25, exitTime: '15:25',
-  stopMode: 'leg', stopPct: 20, expiryCode: 1, skipExpiryDay: true, capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 10, slippage: 0 });
+  stopMode: 'leg', stopPct: 20, expiryCode: 1, skipExpiryDay: true, capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 0, slippage: 0, stopCheck: 'close' });
 // The usual target per index (the page fills it in when the index changes).
 export const STRANGLE_TARGETS = Object.freeze({ NIFTY: 3, BANKNIFTY: 20, SENSEX: 100 });
 // Most units one order may carry (exchange freeze quantity); more is sent as several orders, each with brokerage.
@@ -129,6 +129,9 @@ function run(store, startDate, endDate, s) {
       continue;
     }
     const lotSize = lotSizeOn(U, day), legList = [legs.CE, legs.PE];
+    // stopCheck 'close': out at the close of the first minute that closes at or under the stop; 'touch': a stop-loss order,
+    // out when any price in the minute reaches it (at the stop, or the open when it opened under it).
+    const stopHit = (x, stop) => (s.stopCheck === 'touch' ? x.low <= stop : x.close <= stop), stopFill = (x, stop) => (s.stopCheck === 'touch' ? Math.min(stop, x.open) : x.close);
     for (const L of legList) { L.entry = r2(L.price + s.slippage); L.stop = s.stopMode === 'leg' ? r2(L.entry * (1 - s.stopPct / 100)) : null; L.last = L.price; L.exit = null; }
     // Minute by minute from the minute after the later entry … the exit minute.
     const start = Math.max(legs.CE.entryAt, legs.PE.entryAt);
@@ -138,11 +141,11 @@ function run(store, startDate, endDate, s) {
       for (const L of legList) {
         if (L.exit) continue;
         // Catch up on the minutes before `t` (only the later leg's start can lag).
-        while (L.i < L.candles.length && L.candles[L.i].time < t) { const x = L.candles[L.i++]; L.last = x.close; L.lastAt = x.time; if (L.stop != null && x.time > L.entryAt && x.low <= L.stop) { L.exit = { price: Math.min(L.stop, x.open), at: x.time, reason: `Stop −${s.stopPct}%` }; break; } }
+        while (L.i < L.candles.length && L.candles[L.i].time < t) { const x = L.candles[L.i++]; L.last = x.close; L.lastAt = x.time; if (L.stop != null && x.time > L.entryAt && stopHit(x, L.stop)) { L.exit = { price: stopFill(x, L.stop), at: x.time, reason: `Stop −${s.stopPct}%` }; break; } }
         if (L.exit) continue;
         const x = L.candles[L.i]?.time === t ? L.candles[L.i] : null;
         if (t === tEnd) { L.exit = { price: x ? x.open : L.last, at: t, reason: `Exit ${s.exitTime}` }; if (!x && t - L.lastAt > 15 * 60) L.exit.dataEnded = L.lastAt; continue; }
-        if (x) { L.i++; if (L.stop != null && x.low <= L.stop) { L.exit = { price: Math.min(L.stop, x.open), at: t, reason: `Stop −${s.stopPct}%` }; continue; } L.last = x.close; L.lastAt = t; }
+        if (x) { L.i++; if (L.stop != null && stopHit(x, L.stop)) { L.exit = { price: stopFill(x, L.stop), at: t, reason: `Stop −${s.stopPct}%` }; continue; } L.last = x.close; L.lastAt = t; }
       }
       if (s.stopMode === 'whole' && !legs.CE.exit && !legs.PE.exit && t < tEnd && legs.CE.last + legs.PE.last <= sumEntry * (1 - s.stopPct / 100)) {
         for (const L of legList) L.exit = { price: L.last, at: t, reason: `Both sold: together −${s.stopPct}%` };

@@ -25,7 +25,7 @@ function store(days = [D]) {
 }
 
 test('buys the call and the put nearest the target, stops the falling one at −20%, sells the other at the exit time', () => {
-  const r = strangleBacktest({ source: 'near', startDate: D, endDate: D, underlying: 'NIFTY', target: 3, stopMode: 'leg', stopPct: 20, capital: 100000, maxVolPct: 0 }, store());
+  const r = strangleBacktest({ source: 'near', startDate: D, endDate: D, underlying: 'NIFTY', target: 3, stopMode: 'leg', stopPct: 20, stopCheck: 'touch', capital: 100000, maxVolPct: 0 }, store());
   assert.equal(r.trades.length, 1);
   const [x] = r.trades, lot = lotSizeOn('NIFTY', D);
   assert.deepEqual([x.ce.strike, x.ce.entry, x.ce.entryAt, x.ce.exit, x.ce.exitAt, x.ce.exitReason], [23500, 3, t(D, '09:20'), 6, t(D, '15:25'), 'Exit 15:25']);
@@ -82,4 +82,12 @@ test('all-strike source: picks from every saved strike of the nearest saved cont
   // A day before any saved contract's data: skipped with the reason.
   const none = strangleBacktest({ startDate: day, endDate: day, source: 'all', target: 3, expiryCode: 2 }, store([day]));
   assert.match(none.skipped[0].reason, /no stored contract|no stored option prices/);
+});
+
+test('stop on the minute close (default) sells at that close; a stop-loss order (touch) sells at the stop', () => {
+  const close = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 3, stopMode: 'leg', stopPct: 20, capital: 100000 }, store()).trades[0];
+  // 11:00: low 2.20 under the 2.48 stop, close 2.30 → out at 2.30 on the close; at 2.48 as an order.
+  assert.deepEqual([close.pe.exit, close.pe.exitAt, close.pe.exitReason], [2.3, t(D, '11:00'), 'Stop −20%']);
+  const touch = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 3, stopMode: 'leg', stopPct: 20, stopCheck: 'touch', capital: 100000 }, store()).trades[0];
+  assert.equal(touch.pe.exit, 2.48);
 });

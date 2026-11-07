@@ -19,13 +19,13 @@ const inr = (v, sign = false) => {
 };
 const pct = (v, sign = true) => (Number.isFinite(v) ? `${sign && v > 0 ? '+' : ''}${v.toFixed(1)}%` : '-');
 const cls = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
-const stopText = s => s.stopMode === 'leg' ? `each option −${s.stopPct}%` : s.stopMode === 'whole' ? `both together −${s.stopPct}%` : 'no stop';
+const stopText = s => (s.stopMode === 'leg' ? `each option −${s.stopPct}%` : s.stopMode === 'whole' ? `both together −${s.stopPct}%` : 'no stop') + (s.stopMode !== 'none' && s.stopMode !== 'whole' ? (s.stopCheck === 'close' ? ' (on minute close)' : ' (stop order)') : '');
 
 export function strangleDefaults(ui, caps) {
   const d = caps?.strangle?.defaults || {}, targets = caps?.strangle?.targets || {};
   ui.strangle ??= { source: d.source ?? 'all', target: targets[ui.underlying || 'NIFTY'] ?? d.target ?? 3, tolerancePct: d.tolerancePct ?? 30, entryTime: d.entryTime ?? '09:20', waitMin: d.waitMin ?? 25,
     exitTime: d.exitTime ?? '15:25', stopMode: d.stopMode ?? 'leg', stopPct: d.stopPct ?? 20, expiryCode: d.expiryCode ?? 1, skipExpiryDay: d.skipExpiryDay ?? true,
-    capital: d.capital ?? 600000, fundsUse: d.fundsUse ?? 100, sizing: d.sizing ?? 'compound', maxVolPct: d.maxVolPct ?? 10, slippage: d.slippage ?? 0 };
+    capital: d.capital ?? 600000, fundsUse: d.fundsUse ?? 100, sizing: d.sizing ?? 'compound', maxVolPct: d.maxVolPct ?? 0, slippage: d.slippage ?? 0, stopCheck: d.stopCheck ?? 'close' };
 }
 /** The usual target for an index (₹3 NIFTY, ₹100 SENSEX), when the index changes. */
 export function strangleIndexChanged(ui, caps) {
@@ -34,11 +34,11 @@ export function strangleIndexChanged(ui, caps) {
 }
 export function strangleFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
-  ui.strangle = { source:s.source ?? 'near', target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
+  ui.strangle = { source:s.source ?? 'near', stopCheck:s.stopCheck ?? 'touch', target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
     expiryCode:s.expiryCode, skipExpiryDay:s.skipExpiryDay, capital:s.capital, fundsUse:s.fundsUse, sizing:s.sizing, maxVolPct:s.maxVolPct, slippage:s.slippage };
 }
 export const stranglePayload = ui => ({ strategy:STRANGLE_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.strangle });
-const TEXT = ['source', 'entryTime', 'exitTime', 'stopMode', 'sizing'];
+const TEXT = ['source', 'entryTime', 'exitTime', 'stopMode', 'stopCheck', 'sizing'];
 export function strangleFieldChange(ui, field) {
   const key = field.dataset.strangleField; if (!key) return false;
   ui.strangle[key] = key === 'skipExpiryDay' ? field.value === '1' : TEXT.includes(key) ? field.value : Number(field.value);
@@ -67,6 +67,7 @@ export function strangleFields(ui) {
     ${field('Exit (IST)', html`<input class="input" type="time" min="09:16" max="15:29" data-strangle-field="exitTime" value="${g.exitTime}" aria-label="Exit time">`)}
     ${field('Stop', html`<select class="input" data-strangle-field="stopMode" aria-label="Stop rule"><option value="leg" ${g.stopMode === 'leg' ? 'selected' : ''}>On each option</option><option value="whole" ${g.stopMode === 'whole' ? 'selected' : ''}>On both together</option><option value="none" ${g.stopMode === 'none' ? 'selected' : ''}>No stop</option></select>`)}
     ${num('stopPct', 'Stop % below entry', 1, 99, 1, 'Stop percent below the entry price')}
+    ${field('Stop checks', html`<select class="input" data-strangle-field="stopCheck" aria-label="When the stop fires"><option value="close" ${g.stopCheck === 'close' ? 'selected' : ''}>Minute close (sold at that close)</option><option value="touch" ${g.stopCheck === 'touch' ? 'selected' : ''}>Every price (a stop-loss order)</option></select>`)}
     ${field('Expiry', html`<select class="input" data-strangle-field="expiryCode" aria-label="Expiry"><option value="1" ${g.expiryCode === 1 ? 'selected' : ''}>Nearest${g.source === 'near' ? ' (strikes ATM ±10)' : ' saved contract'}</option><option value="2" ${g.expiryCode === 2 ? 'selected' : ''}>Next${g.source === 'near' ? ' (strikes ATM ±3 only)' : ' saved contract'}</option></select>`)}
     ${field('On the expiry day', html`<select class="input" data-strangle-field="skipExpiryDay" aria-label="Trade on the day the option expires"><option value="1" ${g.skipExpiryDay ? 'selected' : ''}>Skip (option expires that day)</option><option value="0" ${g.skipExpiryDay ? '' : 'selected'}>Trade it</option></select>`)}
     ${num('capital', 'Starting capital ₹', 1000, 1e10, 1000, 'Starting capital in rupees')}

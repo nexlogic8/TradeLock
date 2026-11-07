@@ -469,13 +469,14 @@ async function runEma915Backtest(ctx) {
 function strangleSettings(body) {
   const b = body || {}, d = STRANGLE_DEFAULTS, num = k => Number(b[k] ?? d[k]);
   const s = { source: String(b.source ?? d.source), target: num('target'), tolerancePct: num('tolerancePct'), entryTime: String(b.entryTime ?? d.entryTime), waitMin: num('waitMin'), exitTime: String(b.exitTime ?? d.exitTime),
-    stopMode: String(b.stopMode ?? d.stopMode), stopPct: num('stopPct'), expiryCode: num('expiryCode'), skipExpiryDay: b.skipExpiryDay === undefined ? d.skipExpiryDay : b.skipExpiryDay === true,
+    stopMode: String(b.stopMode ?? d.stopMode), stopCheck: String(b.stopCheck ?? d.stopCheck), stopPct: num('stopPct'), expiryCode: num('expiryCode'), skipExpiryDay: b.skipExpiryDay === undefined ? d.skipExpiryDay : b.skipExpiryDay === true,
     capital: num('capital'), fundsUse: num('fundsUse'), sizing: String(b.sizing ?? d.sizing), maxVolPct: num('maxVolPct'), slippage: num('slippage') };
   if (!['all', 'near'].includes(s.source)) throw bad('INVALID_STRANGLE_SOURCE', 'Choose all strikes or the near-ATM history.');
   if (!numIn(s.target, 0.05, 5000)) throw bad('INVALID_STRANGLE_TARGET', 'The target option price must be ₹0.05–5,000.');
   if (!numIn(s.tolerancePct, 1, 90)) throw bad('INVALID_STRANGLE_TOLERANCE', 'The price band must be 1–90% around the target.');
   if (!intIn(s.waitMin, 0, 120)) throw bad('INVALID_STRANGLE_WAIT', 'Waiting for a price must be 0–120 minutes.');
   if (!['none', 'leg', 'whole'].includes(s.stopMode)) throw bad('INVALID_STRANGLE_STOP', 'Choose no stop, a stop on each option, or one on both together.');
+  if (!['close', 'touch'].includes(s.stopCheck)) throw bad('INVALID_STRANGLE_STOP_CHECK', 'Check the stop on each minute’s close or on every price (a stop-loss order).');
   if (!numIn(s.stopPct, 1, 99)) throw bad('INVALID_STRANGLE_STOP_PCT', 'The stop must be 1–99% below the entry.');
   if (![1, 2].includes(s.expiryCode)) throw bad('INVALID_STRANGLE_EXPIRY', 'Choose the nearest or the next expiry.');
   if (!numIn(s.capital, 1000, 1e10)) throw bad('INVALID_STRANGLE_CAPITAL', 'Starting capital must be between ₹1,000 and ₹1,000 crore.');
