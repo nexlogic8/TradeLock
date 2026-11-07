@@ -16,3 +16,8 @@ REFRESH=${1:+--refresh}
 for U in BANKNIFTY SENSEX; do
   /usr/bin/docker compose exec -T app sh -c "node server/src/workers/history-backfill.js --underlying $U --to $TODAY --days $DAYS --pause 800 --window 1 --max-offset 10 --max-per-day 0 $REFRESH >> /app/data/backfill-daily.log 2>&1"
 done
+# The 16:30 catch-up only: every out-of-the-money NIFTY strike of the contracts expiring within 6 weeks (option_far_1m),
+# for backtests of cheap far options. Dhan serves them only while they trade, so this runs every day (3-day look-back).
+if [ -n "$1" ]; then
+  /usr/bin/docker compose exec -T app sh -c "node server/src/workers/far-strikes.js --underlying NIFTY --to $TODAY --days 3 --refresh >> /app/data/far-strikes.log 2>&1"
+fi

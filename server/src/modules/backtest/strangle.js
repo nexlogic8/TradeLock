@@ -90,9 +90,16 @@ function allStrikes(store, U, s) {
     WHERE underlying = ? AND time >= ? AND time < ? AND expiry = ? ORDER BY time`);
   const one = store.db.prepare(`SELECT time, open, high, low, close, volume FROM option_far_1m
     WHERE underlying = ? AND expiry = ? AND side = ? AND strike = ? AND time >= ? AND time < ? ORDER BY time`);
+  const traded = store.db.prepare(`SELECT 1 FROM option_far_1m WHERE underlying = ? AND expiry = ? AND side = ? AND strike = ?
+    AND time >= ? AND time < ? LIMIT 1`);
+  const strikesOf = store.db.prepare('SELECT DISTINCT side, strike FROM far_fetch_log WHERE underlying = ? AND expiry = ? AND rows > 0');
+  const strikesStored = store.db.prepare('SELECT DISTINCT side, strike FROM option_far_1m WHERE underlying = ? AND expiry = ?');
+  const known = new Map(expiries.map(e => { const k = strikesOf.all(U, e); return [e, k.length ? k : strikesStored.all(U, e)]; }));
+  // Whether a saved contract has prices on a day (its weekly contracts only start trading a few weeks before expiry).
+  const hasDay = (e, day) => known.get(e).some(k => traded.get(U, e, k.side, k.strike, sec(day), sec(day) + 86_400));
   return {
-    // The n-th saved contract expiring on or after the day (1 = nearest).
-    expiry: day => expiries.filter(e => e >= day)[s.expiryCode - 1] ?? null,
+    // The n-th saved contract expiring on or after the day that has prices that day (1 = nearest).
+    expiry: day => expiries.filter(e => e >= day && hasDay(e, day))[s.expiryCode - 1] ?? null,
     window: (expiry, from, to) => win.all(U, from, to, expiry),
     strike: (expiry, side, strike, from, to) => one.all(U, expiry, side, strike, from, to),
   };

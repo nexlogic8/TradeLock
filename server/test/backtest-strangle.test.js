@@ -104,3 +104,14 @@ test('max loss a day sells both once the two together are down that % of the day
   const off = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 3, stopMode: 'none', capital: 100000 }, s).trades[0];
   assert.equal(off.pe.exitReason, 'Exit 15:25');
 });
+
+test('all-strike source: a day before the nearest saved contract traded uses the next one that has prices', () => {
+  const s = store([]), day = '2026-10-01';
+  s.saveIndex('NIFTY', day, day, minutes().map(hhmm => ({ time: t(day, hhmm), open: 22600, high: 22601, low: 22599, close: 22600 })));
+  // 9 Nov saved, but with prices only on later days; 23 Nov trades on 1 Oct.
+  s.saveFar('NIFTY', '2026-11-09', 'CE', 24000, series('2026-10-28', 24000, () => ({ close: 3 })));
+  s.saveFar('NIFTY', '2026-11-23', 'CE', 26000, series(day, 26000, () => ({ close: 3 })));
+  s.saveFar('NIFTY', '2026-11-23', 'PE', 19000, series(day, 19000, () => ({ close: 3 })));
+  const r = strangleBacktest({ startDate: day, endDate: day, source: 'all', target: 3, stopMode: 'none', capital: 100000 }, s);
+  assert.equal(r.trades[0]?.expiry, '2026-11-23');
+});
