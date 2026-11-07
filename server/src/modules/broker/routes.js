@@ -154,13 +154,23 @@ export function brokerRoutes(r) {
     const acct = ownAccount(ctx.user.id, ctx.params.id);
     const change = {};
     // ORB, EMA 5/9 and EMA 9/15 are admin-only (lib/access.js): other users have Gap open 09:15 only.
-    if (!isAdminEmail(ctx.user.email) && ['emaCross', 'orb', 'ema915'].some(k => ctx.body[k] === true)) {
+    if (!isAdminEmail(ctx.user.email) && (['emaCross', 'orb', 'ema915', 'strangle'].some(k => ctx.body[k] === true) || ctx.body.strangleCfg !== undefined)) {
       throw bad('VALIDATION', 'This strategy is not available on your account.');
     }
     if (ctx.body.emaCross !== undefined) change.cross_on = v.bool(ctx.body.emaCross, 'EMA 9/21 crossover') ? 1 : 0;
     if (ctx.body.orb !== undefined) change.orb_on = v.bool(ctx.body.orb, 'ORB 5m') ? 1 : 0;
     if (ctx.body.gap !== undefined) change.gap_on = v.bool(ctx.body.gap, 'Gap open 09:15') ? 1 : 0;
     if (ctx.body.ema915 !== undefined) change.ema915_on = v.bool(ctx.body.ema915, 'EMA 9/15 5m') ? 1 : 0;
+    // CE + PE at a target price: on/off, and its settings (saved together).
+    if (ctx.body.strangle !== undefined) change.strangle_on = v.bool(ctx.body.strangle, 'CE + PE at a target price') ? 1 : 0;
+    if (ctx.body.strangleCfg !== undefined) {
+      const c = ctx.body.strangleCfg || {}, time = (x, label) => { const s = String(x || ''); if (!/^\d{2}:\d{2}$/.test(s) || s < '09:15' || s > '15:29') throw bad('VALIDATION', `${label} must be a time from 09:15 to 15:29.`); return s; };
+      const cfg = { target: v.num(c.target, 'Option price', { min: 0.05, max: 5000 }), bandPct: v.num(c.bandPct, 'Price band %', { min: 1, max: 95 }),
+        entry: time(c.entry, 'Entry'), waitMin: v.num(c.waitMin, 'Wait for a price (minutes)', { min: 0, max: 120, int: true }), exit: time(c.exit, 'Exit'),
+        stopPct: v.num(c.stopPct, 'Stop %', { min: 1, max: 99 }), fundsPct: v.num(c.fundsPct, 'Funds used %', { min: 1, max: 100 }), maxVolPct: v.num(c.maxVolPct, 'Max % of volume', { min: 0, max: 100 }) };
+      if (cfg.exit <= cfg.entry) throw bad('VALIDATION', 'The exit time must be after the entry time.');
+      change.strangle_cfg = JSON.stringify(cfg);
+    }
     // Manual trades while Algo Trading runs: on or off at any time, also during the session.
     if (ctx.body.manual !== undefined) change.manual_on = v.bool(ctx.body.manual, 'Manual trades') ? 1 : 0;
     // Kill switch on a day the Gap open 09:15 strategy has no entry.
@@ -182,8 +192,8 @@ export function brokerRoutes(r) {
       change.algo_underlying = ['NIFTY', 'BANKNIFTY', 'SENSEX'].filter(k => keys.includes(k)).join(',');
     }
     if (!Object.keys(change).length) throw bad('VALIDATION', 'Choose a strategy to switch on or off.');
-    const orbAfter = change.orb_on ?? acct.orb_on, crossAfter = change.cross_on ?? acct.cross_on, gapAfter = change.gap_on ?? acct.gap_on, trendAfter = change.ema915_on ?? acct.ema915_on;
-    if (algoLocked(acct) && !orbAfter && !crossAfter && !gapAfter && !trendAfter) throw conflict('ALGO_LOCKED', `At least one strategy stays on while Algo Trading runs. ${ALGO_LOCK_MESSAGE}`);
+    const orbAfter = change.orb_on ?? acct.orb_on, crossAfter = change.cross_on ?? acct.cross_on, gapAfter = change.gap_on ?? acct.gap_on, trendAfter = change.ema915_on ?? acct.ema915_on, strangleAfter = change.strangle_on ?? acct.strangle_on;
+    if (algoLocked(acct) && !orbAfter && !crossAfter && !gapAfter && !trendAfter && !strangleAfter) throw conflict('ALGO_LOCKED', `At least one strategy stays on while Algo Trading runs. ${ALGO_LOCK_MESSAGE}`);
     for (const [col, val] of Object.entries(change)) stmt(`UPDATE broker_accounts SET ${col} = ? WHERE id = ?`).run(val, acct.id);
     accountsChanged();
     audit(ctx.user.id, 'algo.strategy_changed', change, ctx.ip);

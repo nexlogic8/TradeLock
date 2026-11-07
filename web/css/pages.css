@@ -1611,6 +1611,11 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .algo-strat-list .algo-strat-head { margin: 0; }
 .algo-strat-list .algo-strat-sub { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .algo-strat-sub .algo-strat-name b { font-size: 13px; }
+/* CE + PE at a target price: its settings under the switch. */
+.algo-strangle { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 10px; align-items: end; }
+.algo-strangle-field { display: grid; gap: 4px; font-size: 11px; color: var(--dim); }
+.algo-strangle-field .input { padding: 6px 8px; font-size: 13px; }
+.algo-strangle small { grid-column: 1 / -1; }
 .algo-retest-cfg { flex-wrap: wrap; }
 .algo-retest-cfg label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .algo-retest-cfg .input { width: 64px; padding: 4px 8px; height: 30px; }

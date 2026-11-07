@@ -8,7 +8,7 @@ export const isAdminUser = userId => isAdminEmail(stmt('SELECT email FROM users 
 
 /** Strategies other users can see and switch on (broker_accounts switch columns). */
 export const PUBLIC_STRATEGIES = ['gap_on'];
-const PRIVATE_SWITCHES = ['orb_on', 'cross_on', 'ema915_on'];
+const PRIVATE_SWITCHES = ['orb_on', 'cross_on', 'ema915_on', 'strangle_on'];
 
 /** The account as Algo Trading may use it: for non-admins the private strategies count as off. */
 export const withAllowedStrategies = acct =>

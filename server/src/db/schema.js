@@ -806,4 +806,7 @@ export const MIGRATIONS = [
   DROP TABLE backtest_runs_before_strangle;
   CREATE INDEX backtest_runs_user ON backtest_runs(user_id, id DESC);
   `,
+  // Algo Trading: CE + PE at a target price (both sides daily), its own switch (off until switched on) and settings (JSON).
+  `ALTER TABLE broker_accounts ADD COLUMN strangle_on INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE broker_accounts ADD COLUMN strangle_cfg TEXT;`,
 ];

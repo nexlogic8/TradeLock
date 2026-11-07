@@ -75,6 +75,24 @@ function strategyRow(s, a, open, rules) {
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
       ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}` : ''}
+      ${s.key === 'strangle' ? strangleSettings(a, rules) : ''}
+    </div>`;
+}
+
+/** Inside the CE + PE row: its settings, saved together when any of them changes. */
+function strangleSettings(a, rules) {
+  const c = a?.strangleCfg || {}, f = (k, label, type, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="${type}" min="${min}" max="${max}" step="${step}" data-strangle-cfg="${k}" value="${c[k] ?? ''}" ${a ? '' : 'disabled'}></label>`;
+  return html`
+    <div class="algo-strat-sub algo-strangle">
+      ${f('target', 'Option price ₹', 'number', 0.05, 5000, '0.05')}
+      ${f('bandPct', 'Price band ± %', 'number', 1, 95)}
+      ${f('entry', 'Entry', 'time', '09:15', '15:29', '60')}
+      ${f('waitMin', 'Wait (min)', 'number', 0, 120)}
+      ${f('exit', 'Exit', 'time', '09:16', '15:29', '60')}
+      ${f('stopPct', 'Stop % (minute close)', 'number', 1, 99)}
+      ${f('fundsPct', 'Funds used %', 'number', 1, 100)}
+      ${f('maxVolPct', 'Max % of volume (0 = off)', 'number', 0, 100)}
+      <small class="muted">${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? html`Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
     </div>`;
 }
 
@@ -306,6 +324,19 @@ export default {
       try {
         await post(`/brokers/${id}/strategies`, { retestCfg: { windowMin: val('windowMin'), slPct: val('slPct') } });
         toast('Paper settings saved.', 'ok');
+        await refresh();
+      } catch (err) { toastError(err); await refresh(); }
+    }, signal);
+
+    // CE + PE at a target price: all its settings are saved together when one changes.
+    on(el, 'change', '[data-strangle-cfg]', async () => {
+      const id = ctx.data.account?.id;
+      if (!id) return;
+      const val = k => el.querySelector(`[data-strangle-cfg="${k}"]`)?.value;
+      const cfg = Object.fromEntries(['target', 'bandPct', 'waitMin', 'stopPct', 'fundsPct', 'maxVolPct'].map(k => [k, Number(val(k))]));
+      try {
+        await post(`/brokers/${id}/strategies`, { strangleCfg: { ...cfg, entry: val('entry'), exit: val('exit') } });
+        toast('CE + PE settings saved.', 'ok');
         await refresh();
       } catch (err) { toastError(err); await refresh(); }
     }, signal);
