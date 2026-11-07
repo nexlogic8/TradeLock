@@ -74,7 +74,8 @@ export function strangleFields(ui) {
     ${field('Sizing', html`<select class="input" data-strangle-field="sizing" aria-label="Sizing"><option value="compound" ${g.sizing === 'compound' ? 'selected' : ''}>Compound: % of running capital</option><option value="fixed" ${g.sizing === 'fixed' ? 'selected' : ''}>Fixed: % of starting capital</option></select>`)}
     ${num('fundsUse', 'Capital used a day %', 1, 100, 1, 'Percent of capital used each day')}
     ${num('maxVolPct', 'Max % of volume (0 = off)', 0, 100, 1, 'Size limit as a percent of the option volume in the 10 minutes before entry')}
-    ${num('slippage', 'Slippage ₹ / unit (entry)', 0, 50, 0.05, 'Entry slippage in rupees per unit')}`;
+    ${num('slippage', 'Slippage ₹ / unit (entry)', 0, 50, 0.05, 'Entry slippage in rupees per unit')}
+    ${field('Settings', html`<button type="button" class="btn" data-strangle-reset aria-label="Reset these settings to the defaults">Reset to defaults</button>`)}`;
 }
 
 export function strangleNotes(ui, caps) {

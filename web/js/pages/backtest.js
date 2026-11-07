@@ -171,7 +171,7 @@ export default {
       if(last.strategy===ORB5_KEY) orbFromRun(ui,last);
       if(last.strategy===GAP_KEY) gapFromRun(ui,last);
       if(last.strategy===EMA915_KEY) ema915FromRun(ui,last);
-      if(last.strategy===STRANGLE_KEY) strangleFromRun(ui,last);
+      // CE + PE: the form opens on the defaults (a saved run's settings load when its card is clicked).
       if(last.strategy===CUSTOM_KEY) customFromRun(ui,last);
       if(HISTORY_KEYS.includes(last.strategy)) ui.underlying=runIndex(last);
     }
@@ -256,6 +256,7 @@ export default {
       if(!strangleFieldChange(ui,field))return;
       ui.result=null;ui.error='';ctx.paint();
     },signal);
+    on(el,'click','[data-strangle-reset]',()=>{ ui.strangle=null; strangleDefaults(ui,ui.caps); ui.result=null; ui.error=''; ctx.paint(); },signal);
     on(el,'click','[data-strangle-csv]',()=>{ if(ui.result?.strategy===STRANGLE_KEY) downloadCsv(`ce-pe-target-${ui.result.startDate}-to-${ui.result.endDate}.csv`,strangleCsv(ui.result)); },signal);
     on(el,'change','[data-custom-field]',(_,field)=>{
       if(!customFieldChange(ui,field))return;
