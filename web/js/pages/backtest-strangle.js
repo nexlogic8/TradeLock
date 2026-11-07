@@ -23,7 +23,7 @@ const stopText = s => s.stopMode === 'leg' ? `each option −${s.stopPct}%` : s.
 
 export function strangleDefaults(ui, caps) {
   const d = caps?.strangle?.defaults || {}, targets = caps?.strangle?.targets || {};
-  ui.strangle ??= { target: targets[ui.underlying || 'NIFTY'] ?? d.target ?? 3, tolerancePct: d.tolerancePct ?? 30, entryTime: d.entryTime ?? '09:20', waitMin: d.waitMin ?? 25,
+  ui.strangle ??= { source: d.source ?? 'all', target: targets[ui.underlying || 'NIFTY'] ?? d.target ?? 3, tolerancePct: d.tolerancePct ?? 30, entryTime: d.entryTime ?? '09:20', waitMin: d.waitMin ?? 25,
     exitTime: d.exitTime ?? '15:25', stopMode: d.stopMode ?? 'leg', stopPct: d.stopPct ?? 20, expiryCode: d.expiryCode ?? 1, skipExpiryDay: d.skipExpiryDay ?? true,
     capital: d.capital ?? 600000, fundsUse: d.fundsUse ?? 100, sizing: d.sizing ?? 'compound', maxVolPct: d.maxVolPct ?? 10, slippage: d.slippage ?? 0 };
 }
@@ -34,11 +34,11 @@ export function strangleIndexChanged(ui, caps) {
 }
 export function strangleFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
-  ui.strangle = { target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
+  ui.strangle = { source:s.source ?? 'near', target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
     expiryCode:s.expiryCode, skipExpiryDay:s.skipExpiryDay, capital:s.capital, fundsUse:s.fundsUse, sizing:s.sizing, maxVolPct:s.maxVolPct, slippage:s.slippage };
 }
 export const stranglePayload = ui => ({ strategy:STRANGLE_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.strangle });
-const TEXT = ['entryTime', 'exitTime', 'stopMode', 'sizing'];
+const TEXT = ['source', 'entryTime', 'exitTime', 'stopMode', 'sizing'];
 export function strangleFieldChange(ui, field) {
   const key = field.dataset.strangleField; if (!key) return false;
   ui.strangle[key] = key === 'skipExpiryDay' ? field.value === '1' : TEXT.includes(key) ? field.value : Number(field.value);
@@ -50,7 +50,7 @@ export function strangleRunLabel(run) {
 }
 export function strangleRunFacts(run) {
   const m = run.metrics, s = m.settings || {}, x = m.summary;
-  return { name: 'CE + PE at a target price', settings: [`₹${s.target} ±${s.tolerancePct}%`, `${s.entryTime} → ${s.exitTime}`, stopText(s), s.expiryCode === 2 ? 'next expiry' : 'nearest expiry',
+  return { name: 'CE + PE at a target price', settings: [s.source === 'all' ? 'all strikes' : 'near-ATM strikes', `₹${s.target} ±${s.tolerancePct}%`, `${s.entryTime} → ${s.exitTime}`, stopText(s), s.expiryCode === 2 ? 'next expiry' : 'nearest expiry',
     `${inr(s.capital)} ${s.sizing === 'compound' ? 'compounding' : 'fixed'} · ${s.fundsUse}% a day`, s.maxVolPct > 0 ? `≤ ${s.maxVolPct}% of volume` : 'no volume limit'],
     trades: `${x.traded} days`, results: [{ label:'Capital', value:`${inr(x.startCapital)} → ${inr(x.endCapital)}`, sub:`${pct(x.returnPct)} · worst day ${pct(x.worstDayPct)}`, tone:x.net }] };
 }
@@ -59,6 +59,7 @@ export function strangleFields(ui) {
   const g = ui.strangle, field = (label, control) => html`<label class="strategy-field"><span>${label}</span>${control}</label>`;
   const num = (key, label, min, max, step, aria) => field(label, html`<input class="input" type="number" min="${min}" max="${max}" step="${step}" data-strangle-field="${key}" value="${g[key]}" aria-label="${aria}">`);
   return html`
+    ${field('Strikes from', html`<select class="input" data-strangle-field="source" aria-label="Which stored option prices to use"><option value="all" ${g.source === 'all' ? 'selected' : ''}>All strikes (saved from Sep 2026)</option><option value="near" ${g.source === 'near' ? 'selected' : ''}>Near-ATM history (1 year+)</option></select>`)}
     ${num('target', 'Option price ₹ (both)', 0.05, 5000, 0.05, 'Target premium for the call and the put')}
     ${num('tolerancePct', 'Price band ± %', 1, 90, 1, 'How far from the target a price may be, in percent')}
     ${field('Entry (IST)', html`<input class="input" type="time" min="09:15" max="15:29" data-strangle-field="entryTime" value="${g.entryTime}" aria-label="Entry time">`)}
@@ -66,7 +67,7 @@ export function strangleFields(ui) {
     ${field('Exit (IST)', html`<input class="input" type="time" min="09:16" max="15:29" data-strangle-field="exitTime" value="${g.exitTime}" aria-label="Exit time">`)}
     ${field('Stop', html`<select class="input" data-strangle-field="stopMode" aria-label="Stop rule"><option value="leg" ${g.stopMode === 'leg' ? 'selected' : ''}>On each option</option><option value="whole" ${g.stopMode === 'whole' ? 'selected' : ''}>On both together</option><option value="none" ${g.stopMode === 'none' ? 'selected' : ''}>No stop</option></select>`)}
     ${num('stopPct', 'Stop % below entry', 1, 99, 1, 'Stop percent below the entry price')}
-    ${field('Expiry', html`<select class="input" data-strangle-field="expiryCode" aria-label="Expiry"><option value="1" ${g.expiryCode === 1 ? 'selected' : ''}>Nearest (strikes ATM ±10)</option><option value="2" ${g.expiryCode === 2 ? 'selected' : ''}>Next (strikes ATM ±3 only)</option></select>`)}
+    ${field('Expiry', html`<select class="input" data-strangle-field="expiryCode" aria-label="Expiry"><option value="1" ${g.expiryCode === 1 ? 'selected' : ''}>Nearest${g.source === 'near' ? ' (strikes ATM ±10)' : ' saved contract'}</option><option value="2" ${g.expiryCode === 2 ? 'selected' : ''}>Next${g.source === 'near' ? ' (strikes ATM ±3 only)' : ' saved contract'}</option></select>`)}
     ${field('On the expiry day', html`<select class="input" data-strangle-field="skipExpiryDay" aria-label="Trade on the day the option expires"><option value="1" ${g.skipExpiryDay ? 'selected' : ''}>Skip (option expires that day)</option><option value="0" ${g.skipExpiryDay ? '' : 'selected'}>Trade it</option></select>`)}
     ${num('capital', 'Starting capital ₹', 1000, 1e10, 1000, 'Starting capital in rupees')}
     ${field('Sizing', html`<select class="input" data-strangle-field="sizing" aria-label="Sizing"><option value="compound" ${g.sizing === 'compound' ? 'selected' : ''}>Compound: % of running capital</option><option value="fixed" ${g.sizing === 'fixed' ? 'selected' : ''}>Fixed: % of starting capital</option></select>`)}
@@ -78,7 +79,9 @@ export function strangleFields(ui) {
 export function strangleNotes(ui, caps) {
   const g = ui.strangle, cov = caps?.gap?.indices ? caps.gap.indices[ui.underlying || 'NIFTY'] : caps?.gap?.coverage;
   return html`<p class="bt-muted"><b>CE + PE at a target price.</b> Every day at ${g.entryTime}: buy the call and the put whose price is closest to ₹${g.target} (within ±${g.tolerancePct}%, and traded in the last 10 minutes), the same number of lots of each. If none is there yet, keep looking every minute for ${g.waitMin} minutes. Stop: ${g.stopMode === 'leg' ? `each option on its own at ${g.stopPct}% below its entry (the other keeps running)` : g.stopMode === 'whole' ? `both sold together when their combined price is ${g.stopPct}% below the combined entry` : 'none'}. Everything still open is sold at ${g.exitTime}. Charges as on each date, plus extra orders for quantity above the exchange's per-order limit.</p>
-    <p class="bt-muted"><b>What the stored history can test:</b> it keeps only strikes near the ATM: the nearest expiry ATM ±10 strikes, the next expiry ±3. Very cheap far options (₹3 on NIFTY) are usually further away, so most days are skipped and listed with the reason; ₹100 on SENSEX is in the data on most days. ${cov ? `Stored range: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
+    ${g.source === 'all' ? html`<p class="bt-muted"><b>All strikes:</b> every strike of the NIFTY contracts saved while they traded, from Sep 2026 (Dhan gives no data for far strikes once a contract has expired, so older days cannot be added). Each day uses the nearest saved contract: in October that is the 9 Nov expiry, so those days trade a contract 1–3 weeks from expiry. Days with no saved contract are listed as skipped.</p>`
+      : html`<p class="bt-muted"><b>Near-ATM history:</b> it keeps only strikes near the ATM: the nearest expiry ATM ±10 strikes, the next expiry ±3. Very cheap far options (₹3 on NIFTY) are usually further away, so most days are skipped and listed with the reason; ₹100 on SENSEX is in the data on most days.</p>`}
+    <p class="bt-muted">${cov ? `Stored range: ${dayLabel(cov.from)} to ${dayLabel(cov.to)}.` : `The stored option history is not available${caps?.gap?.reason ? `: ${caps.gap.reason}` : ''}.`}</p>`;
 }
 
 // ---------- Results ----------

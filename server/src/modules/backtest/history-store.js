@@ -26,6 +26,19 @@ CREATE TABLE IF NOT EXISTS index_1m (
   open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
   PRIMARY KEY (underlying, time)
 ) WITHOUT ROWID;
+-- Every strike of an index's live contracts, saved while they trade (Dhan has no expired data for strikes far from
+-- the ATM): cheap far options for backtests. Keyed by the actual expiry date and strike.
+CREATE TABLE IF NOT EXISTS option_far_1m (
+  underlying TEXT NOT NULL, expiry TEXT NOT NULL, side TEXT NOT NULL, strike REAL NOT NULL, time INTEGER NOT NULL,
+  open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL, volume REAL, oi REAL,
+  PRIMARY KEY (underlying, expiry, side, strike, time)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS option_far_1m_time ON option_far_1m (underlying, time);
+CREATE TABLE IF NOT EXISTS far_fetch_log (
+  underlying TEXT NOT NULL, expiry TEXT NOT NULL, side TEXT NOT NULL, strike REAL NOT NULL,
+  from_day TEXT NOT NULL, to_day TEXT NOT NULL, rows INTEGER NOT NULL, fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (underlying, expiry, side, strike, from_day, to_day)
+) WITHOUT ROWID;
 -- One row per downloaded request, so an interrupted backfill resumes where it stopped.
 CREATE TABLE IF NOT EXISTS fetch_log (
   kind TEXT NOT NULL, underlying TEXT NOT NULL, expiry_code INTEGER NOT NULL, side TEXT NOT NULL, offset INTEGER NOT NULL,
@@ -63,6 +76,11 @@ export function openHistory(file = historyPath()) {
     saveIndex: h.transaction((underlying, fromDay, toDay, rows) => {
       for (const r of rows) insIdx.run(underlying, r.time, r.open, r.high, r.low, r.close);
       insLog.run('index', underlying, 0, '', 0, fromDay, toDay, rows.length, Date.now());
+    }),
+    /** Store one contract's candles (all-strike store) for an expiry date; rows carry epoch-second times. */
+    saveFar: h.transaction((underlying, expiry, side, strike, rows) => {
+      const ins = h.prepare('INSERT OR REPLACE INTO option_far_1m VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      for (const r of rows) ins.run(underlying, expiry, side, strike, r.time, r.open, r.high, r.low, r.close, n(r.volume), n(r.oi));
     }),
     fetched: (kind, underlying, expiryCode, side, offset, fromDay, toDay) => !!getLog.get(kind, underlying, expiryCode, side, offset, fromDay, toDay),
     /** Option candles for [fromSec, toSec), oldest first: { side, offset, time, strike, open, high, low, close, volume, oi, iv, spot }. */
