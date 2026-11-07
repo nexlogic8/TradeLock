@@ -5,6 +5,7 @@ import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from 
 import { LEVEL_REJECT } from './scalper-chart-signals.js';
 import { GAP_KEY, GAP_LABEL, GAP_RETEST_KEY, GAP_RETEST_LABEL, drawGapEquity, gapCsv, gapDefaults, gapFieldChange, gapFields, gapFromRun, gapNotes, gapPayload, gapResults, gapRunFacts, gapRunLabel } from './backtest-gap.js';
 import { EMA915_KEY, EMA915_LABEL, drawEma915Equity, ema915Csv, ema915Defaults, ema915FieldChange, ema915Fields, ema915FromRun, ema915Notes, ema915Payload, ema915Results, ema915RunFacts, ema915RunLabel } from './backtest-ema915.js';
+import { STRANGLE_KEY, STRANGLE_LABEL, drawStrangleEquity, strangleCsv, strangleDefaults, strangleFieldChange, strangleFields, strangleFromRun, strangleIndexChanged, strangleNotes, stranglePayload, strangleResults, strangleRunFacts, strangleRunLabel } from './backtest-strangle.js';
 import { CUSTOM_KEY, CUSTOM_LABEL, customCsv, customDefaults, customFieldChange, customFields, customFromRun, customNotes, customPayload, customResults, customRunFacts, customRunLabel, drawCustomEquity } from './backtest-custom.js';
 import { ORB5_KEY, ORB5_LABEL, downloadCsv, drawOrbEquity, drawOrbTradeChart, orbCsv, orbDefaults, orbFieldChange, orbFields, orbFromRun, orbNotes, orbPayload, orbResults, orbRunLabel } from './backtest-orb5.js';
 const IST_TIME = new Intl.DateTimeFormat('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', hourCycle:'h23' });
@@ -17,10 +18,11 @@ const strategies = [
   [ORB5_KEY, ORB5_LABEL],
   [GAP_KEY, GAP_LABEL],
   [EMA915_KEY, EMA915_LABEL],
+  [STRANGLE_KEY, STRANGLE_LABEL],
   [CUSTOM_KEY, CUSTOM_LABEL],
 ];
 // Strategies tested on the stored 1-minute history, which has NIFTY, BANK NIFTY and SENSEX (server: backtest/gap.js).
-const HISTORY_KEYS = [GAP_KEY, GAP_RETEST_KEY, EMA915_KEY, CUSTOM_KEY];
+const HISTORY_KEYS = [GAP_KEY, GAP_RETEST_KEY, EMA915_KEY, STRANGLE_KEY, CUSTOM_KEY];
 const INDICES = [['NIFTY','NIFTY 50'],['BANKNIFTY','BANK NIFTY'],['SENSEX','SENSEX']];
 const indexLabel = key => INDICES.find(([k])=>k===key)?.[1]||key;
 /** The index a saved run used (older runs: NIFTY). */
@@ -64,6 +66,7 @@ function runLabel(run) {
   if(run.strategy===ORB5_KEY) return orbRunLabel(run);
   if(run.strategy===GAP_KEY) return gapRunLabel(run);
   if(run.strategy===EMA915_KEY) return ema915RunLabel(run);
+  if(run.strategy===STRANGLE_KEY) return strangleRunLabel(run);
   if(run.strategy===CUSTOM_KEY) return customRunLabel(run);
   const name=strategies.find(([key])=>key===run.strategy)?.[1]||run.strategy;
   const exit=exitRuleLabel(run.exitLogic,run.horizon);
@@ -81,6 +84,7 @@ function strategyFacts(run) {
   const m=run.metrics, name=strategies.find(([key])=>key===run.strategy)?.[1]||run.strategy;
   if(run.strategy===GAP_KEY) return { name, ...gapRunFacts(run) };
   if(run.strategy===EMA915_KEY) return { ...ema915RunFacts(run), name };
+  if(run.strategy===STRANGLE_KEY) return strangleRunFacts(run);
   if(run.strategy===CUSTOM_KEY) return customRunFacts(run);
   if(run.strategy===ORB5_KEY) {
     const st=m.settings||{}, o=m.optionSummary, sum=o||m.summary;
@@ -155,7 +159,7 @@ export default {
     try { ui.savedRuns=await get('/scalper/backtest-runs'); } catch { ui.savedRuns=[]; }
     // Whether historical option data can be read (Nifty 5-Min ORB actual-options mode).
     try { ui.caps=await get('/scalper/backtest-capabilities'); } catch(error) { ui.caps={optionsData:{available:false,reason:error.message}}; }
-    gapDefaults(ui,ui.caps); ema915Defaults(ui,ui.caps); customDefaults(ui,ui.caps);
+    gapDefaults(ui,ui.caps); ema915Defaults(ui,ui.caps); strangleDefaults(ui,ui.caps); customDefaults(ui,ui.caps);
     // Opened from a strategy's Backtest button (Strategy page → My strategies): that strategy, ready to run.
     let picked=null; try { picked=Number(sessionStorage.getItem('tradelock.backtest.strategy'))||null; sessionStorage.removeItem('tradelock.backtest.strategy'); } catch { /* private window */ }
     if (picked && (ui.caps?.custom?.strategies||[]).some(x=>x.id===picked)) { ui.strategy=CUSTOM_KEY; ui.custom.strategyId=picked; ui.result=null; }
@@ -167,6 +171,7 @@ export default {
       if(last.strategy===ORB5_KEY) orbFromRun(ui,last);
       if(last.strategy===GAP_KEY) gapFromRun(ui,last);
       if(last.strategy===EMA915_KEY) ema915FromRun(ui,last);
+      if(last.strategy===STRANGLE_KEY) strangleFromRun(ui,last);
       if(last.strategy===CUSTOM_KEY) customFromRun(ui,last);
       if(HISTORY_KEYS.includes(last.strategy)) ui.underlying=runIndex(last);
     }
@@ -196,7 +201,7 @@ export default {
           <label class="strategy-field"><span>Quick range</span><select class="input" data-bt-field="range" aria-label="Quick date range"><option value="1m" ${ui.range==='1m'?'selected':''}>1 month</option><option value="2m" ${ui.range==='2m'?'selected':''}>2 months</option><option value="6m" ${ui.range==='6m'?'selected':''}>6 months</option><option value="1y" ${ui.range==='1y'?'selected':''}>1 year</option><option value="5y" ${ui.range==='5y'?'selected':''}>5 years (max)</option><option value="custom" ${ui.range==='custom'?'selected':''}>Custom dates</option></select></label>
           <label class="strategy-field"><span>Start date</span><input class="input" type="date" data-bt-field="startDate" aria-label="Backtest start date" value="${ui.startDate}" min="${earliestIntradayDate()}" max="${ui.endDate}"></label>
           <label class="strategy-field"><span>End date</span><input class="input" type="date" data-bt-field="endDate" aria-label="Backtest end date" value="${ui.endDate}" min="${ui.startDate}" max="${todayIst()}"></label>
-          ${ui.strategy===ORB5_KEY?orbFields(ui,ui.caps):ui.strategy===GAP_KEY?gapFields(ui):ui.strategy===GAP_RETEST_KEY?gapFields(ui,true):ui.strategy===EMA915_KEY?ema915Fields(ui):ui.strategy===CUSTOM_KEY?customFields(ui,ui.caps):html`<label class="strategy-field"><span>Exit logic</span><select class="input" data-bt-field="exitLogic" aria-label="Exit logic">${exitRules.map(([value,label])=>html`<option value="${value}" ${ui.exitLogic===value?'selected':''} ${ui.resultMode==='option'&&value==='emaZone'?'disabled':''}>${label}${ui.resultMode==='option'&&value==='emaZone'?' (index only)':''}</option>`)}</select></label>
+          ${ui.strategy===ORB5_KEY?orbFields(ui,ui.caps):ui.strategy===GAP_KEY?gapFields(ui):ui.strategy===GAP_RETEST_KEY?gapFields(ui,true):ui.strategy===EMA915_KEY?ema915Fields(ui):ui.strategy===STRANGLE_KEY?strangleFields(ui):ui.strategy===CUSTOM_KEY?customFields(ui,ui.caps):html`<label class="strategy-field"><span>Exit logic</span><select class="input" data-bt-field="exitLogic" aria-label="Exit logic">${exitRules.map(([value,label])=>html`<option value="${value}" ${ui.exitLogic===value?'selected':''} ${ui.resultMode==='option'&&value==='emaZone'?'disabled':''}>${label}${ui.resultMode==='option'&&value==='emaZone'?' (index only)':''}</option>`)}</select></label>
           <label class="strategy-field"><span>Stop loss</span><select class="input" data-bt-field="stopLogic" aria-label="Stop-loss rule" ${ui.strategy!=='openingRange'?'disabled':''}>${stopRules.map(([value,label])=>html`<option value="${value}" ${ui.stopLogic===value?'selected':''}>${label}</option>`)}</select></label>
           <label class="strategy-field"><span>Exit after signal</span><select class="input" data-bt-field="horizon" aria-label="Fixed exit horizon" ${ui.exitLogic!=='horizon'?'disabled':''}>${horizons.map(([value,label])=>html`<option value="${value}" ${ui.horizon===value?'selected':''}>${label} - close</option>`)}</select></label>
           <label class="strategy-field"><span>Results in</span><select class="input" data-bt-field="resultMode" aria-label="Backtest result mode"><option value="index" ${ui.resultMode==='index'?'selected':''}>Index points</option><option value="option" ${ui.resultMode==='option'?'selected':''}>ATM option ₹ (2nd expiry)</option></select></label>
@@ -207,8 +212,8 @@ export default {
         ${HISTORY_KEYS.includes(ui.strategy)&&ui.caps?.gap&&!indexCoverage(ui)?html`<div class="bt-error">${indexLabel(ui.underlying)} 1-minute history is still downloading on the server. Backtests on it open once it is in; NIFTY is ready now.</div>`:''}
         ${ui.error?html`<div class="bt-error">${ui.error}</div>`:''}
         ${ui.chartError?html`<div class="bt-error">${ui.chartError}</div>`:''}
-        ${ui.strategy===ORB5_KEY?orbNotes(ui,ui.caps):ui.strategy===GAP_KEY?gapNotes(ui,ui.caps):ui.strategy===GAP_RETEST_KEY?gapNotes(ui,ui.caps,true):ui.strategy===EMA915_KEY?ema915Notes(ui,ui.caps):ui.strategy===CUSTOM_KEY?customNotes(ui,ui.caps):''}
-        ${ui.strategy===ORB5_KEY||ui.strategy===GAP_KEY||ui.strategy===GAP_RETEST_KEY||ui.strategy===EMA915_KEY||ui.strategy===CUSTOM_KEY?'':html`<div>${''}
+        ${ui.strategy===ORB5_KEY?orbNotes(ui,ui.caps):ui.strategy===GAP_KEY?gapNotes(ui,ui.caps):ui.strategy===GAP_RETEST_KEY?gapNotes(ui,ui.caps,true):ui.strategy===EMA915_KEY?ema915Notes(ui,ui.caps):ui.strategy===STRANGLE_KEY?strangleNotes(ui,ui.caps):ui.strategy===CUSTOM_KEY?customNotes(ui,ui.caps):''}
+        ${ui.strategy===ORB5_KEY||ui.strategy===GAP_KEY||ui.strategy===GAP_RETEST_KEY||ui.strategy===EMA915_KEY||ui.strategy===STRANGLE_KEY||ui.strategy===CUSTOM_KEY?'':html`<div>${''}
         ${ui.strategy==='previousDay'?html`<p class="bt-muted">First completed 1-minute close above the previous trading session's high: CE. Below its low: PE. One trade per day, entered at the confirming close; opening gaps qualify. Up to 14 calendar days of prior history are loaded for reference levels.</p>`:''}
         ${ui.resultMode==='option'?html`<p class="bt-muted">Option rupees: each index signal buys the ATM CE/PE of the 2nd weekly expiry at that minute's option close and stays on that strike. Lots = capital ÷ (premium × lot size), whole lots only; trades that cannot afford one lot are skipped. ${ui.sizing==='compound'?'Compounding: each trade uses 100% of the running capital, so profits and losses change the size of the next trade.':'Fixed: every trade is sized from the same capital.'} The Capital column shows the running balance after each trade. ${ui.stopLogic==='breakoutCandle'?'SL is the option candle in the index breakout minute (its low, since the option is bought).':'Choose the breakout-candle stop loss to add an option SL.'} The exit time follows the exit rule on the index. Lot size follows NSE's revisions (75 until Jul 2021, 50, 25 from Apr 2024, 75 from Nov 2024, 65 from Dec 2025). Excludes brokerage, taxes and slippage.${dayCount(ui.startDate,ui.endDate)>OPTION_MAX_DAYS?html` <b>Choose up to ${OPTION_MAX_DAYS} days in this mode.</b>`:''}</p>`:''}
         ${ui.stopLogic==='breakoutCandle'?html`<p class="bt-muted">Stop loss: CE stop at the 1-minute breakout candle's low, PE stop at its high. Price coming back through it means the 5-minute range breakout was rejected. From the candle after entry, a wick touch exits at the stop and a gap through it fills at that candle's open. Checked alongside the exit rule; whichever is hit first closes the trade (the stop wins if both fall on the same candle).</p>`:''}
@@ -217,7 +222,7 @@ export default {
         ${ui.exitLogic==='swingSL'?html`<p class="bt-muted">Stop is set at the latest confirmed 2-bar swing before entry: swing low for CE and swing high for PE. A later candle wick touching the stop exits at the stop price; a gap through it fills at the candle open. If the stop is not hit, the trade exits at the session close.</p>`:''}
         <p class="strategy-footnote">Dhan minute history covers the latest five years (start date from ${earliestIntradayDate()}) and is fetched in batches of up to 90 days. A full five-year run may take longer while its history loads. ${ui.exitLogic==='emaZone'?'EMA-zone trades exit on the first later close inside the band or at the session close.':ui.exitLogic==='swingSL'?'Swing-stop trades use a confirmed 2-bar pivot and exit on a wick touch or at the session close.':'Fixed-time trades exit at the selected horizon\'s NIFTY close.'} Results exclude option premium, fees and slippage.</p></div>`}
       </section>
-      ${result&&result.strategy===CUSTOM_KEY ? html`<section class="bt-results">${runStrip(result)}${customResults(ui,result)}</section>` : result&&result.strategy===GAP_KEY ? html`<section class="bt-results">${runStrip(result)}${gapResults(ui,result)}</section>` : result&&result.strategy===EMA915_KEY ? html`<section class="bt-results">${runStrip(result)}${ema915Results(ui,result)}</section>` : result&&result.strategy===ORB5_KEY ? html`<section class="bt-results">${runStrip(result)}${orbResults(ui,result)}</section>` : result ? html`<section class="bt-results">${runStrip(result)}
+      ${result&&result.strategy===CUSTOM_KEY ? html`<section class="bt-results">${runStrip(result)}${customResults(ui,result)}</section>` : result&&result.strategy===GAP_KEY ? html`<section class="bt-results">${runStrip(result)}${gapResults(ui,result)}</section>` : result&&result.strategy===EMA915_KEY ? html`<section class="bt-results">${runStrip(result)}${ema915Results(ui,result)}</section>` : result&&result.strategy===STRANGLE_KEY ? html`<section class="bt-results">${runStrip(result)}${strangleResults(ui,result)}</section>` : result&&result.strategy===ORB5_KEY ? html`<section class="bt-results">${runStrip(result)}${orbResults(ui,result)}</section>` : result ? html`<section class="bt-results">${runStrip(result)}
         <div class="bt-result-head"><div><span class="eyebrow">${selectedName}</span><h3>Backtest results</h3><small>${result.oneMinuteBars.toLocaleString('en-IN')} one-minute bars | ${result.startDate} to ${result.endDate} IST | Exit: ${resultExit} | ${stopRuleLabel(result.stopLogic)} | saved ${stamp(result.createdAt/1000)}</small></div><span class="pill sm ${metrics.trades.length?'':'grey'}">${metrics.trades.length} CLOSED ${metrics.trades.length===1?'TRADE':'TRADES'}</span></div>
         ${metrics.option?html`<div class="bt-metrics"><article><small>Capital ${money(metrics.option.capital)} → </small><b class="${(metrics.option.endCapital??metrics.option.capital)>=metrics.option.capital?'pos':'neg'}">${money(metrics.option.endCapital??metrics.option.capital+metrics.option.totalPnl)}${Number.isFinite(metrics.option.returnPct)?html` <small>(${metrics.option.returnPct>=0?'+':''}${metrics.option.returnPct.toFixed(1)}%)</small>`:''}</b></article><article><small>Net P&amp;L (ATM option)</small><b class="${metrics.option.totalPnl>=0?'pos':'neg'}">${metrics.option.traded?rupee(metrics.option.totalPnl):'-'}</b></article><article><small>Option win rate</small><b>${metrics.option.traded?`${metrics.option.winRate.toFixed(1)}%`:'-'}</b></article><article><small>Wins / losses</small><b>${metrics.option.wins} / ${metrics.option.losses}</b></article><article><small>Avg P&amp;L / trade</small><b>${metrics.option.traded?rupee(metrics.option.averagePnl):'-'}</b></article><article><small>Max drawdown</small><b class="neg">${metrics.option.traded?`₹${Math.round(metrics.option.maxDrawdown).toLocaleString('en-IN')}${Number.isFinite(metrics.option.maxDrawdownPct)?` (${metrics.option.maxDrawdownPct.toFixed(1)}%)`:''}`:'-'}</b></article></div><p class="bt-muted">${metrics.option.sizing?sizingLabel(metrics.option.sizing):'fixed capital per trade'} | ${metrics.option.traded} option trades${metrics.option.unaffordable?` | ${metrics.option.unaffordable} skipped: one lot cost more than the capital`:''}${metrics.option.unavailable?` | ${metrics.option.unavailable} without option prices`:''} | SL and exit read from the option chart; the index supplies the entry</p>`:''}
         ${metrics.option?'':html`<div class="bt-metrics"><article><small>Win rate</small><b>${metrics.trades.length?`${metrics.winRate.toFixed(1)}%` : '-'}</b></article><article><small>Net index points</small><b class="${metrics.totalPoints>=0?'pos':'neg'}">${metrics.trades.length?signed(metrics.totalPoints) : '-'}</b></article><article><small>Wins / losses</small><b>${metrics.wins} / ${metrics.losses}</b></article><article><small>Avg points / trade</small><b>${metrics.trades.length?signed(metrics.averagePoints) : '-'}</b></article></div>`}
@@ -247,6 +252,11 @@ export default {
       ui.result=null;ui.error='';ctx.paint();
     },signal);
     on(el,'click','[data-ema915-csv]',()=>{ if(ui.result?.strategy===EMA915_KEY) downloadCsv(`ema-9-15-5m-${ui.result.startDate}-to-${ui.result.endDate}.csv`,ema915Csv(ui.result)); },signal);
+    on(el,'change','[data-strangle-field]',(_,field)=>{
+      if(!strangleFieldChange(ui,field))return;
+      ui.result=null;ui.error='';ctx.paint();
+    },signal);
+    on(el,'click','[data-strangle-csv]',()=>{ if(ui.result?.strategy===STRANGLE_KEY) downloadCsv(`ce-pe-target-${ui.result.startDate}-to-${ui.result.endDate}.csv`,strangleCsv(ui.result)); },signal);
     on(el,'change','[data-custom-field]',(_,field)=>{
       if(!customFieldChange(ui,field))return;
       ui.result=null;ui.error='';ctx.paint();
@@ -256,7 +266,7 @@ export default {
     on(el,'click','[data-gap-csv]',()=>{ if(ui.result?.strategy===GAP_KEY) downloadCsv(`gap-open-0915-${ui.result.startDate}-to-${ui.result.endDate}.csv`,gapCsv(ui.result)); },signal);
     on(el,'click','[data-orb-csv]',()=>{ if(ui.result?.strategy===ORB5_KEY) downloadCsv(`nifty-5min-orb-${ui.result.startDate}-to-${ui.result.endDate}.csv`,orbCsv(ui.result)); },signal);
     const openSaved=run=>{
-      if(run) {ui.result=run;ui.strategy=run.strategy;ui.startDate=run.startDate;ui.endDate=run.endDate;ui.horizon=run.horizon;ui.exitLogic=run.exitLogic||'horizon';ui.stopLogic=run.stopLogic||'none';ui.resultMode=run.metrics.option?'option':'index';if(run.metrics.option){ui.capital=run.metrics.option.capital;ui.sizing=run.metrics.option.sizing||'fixed';}ui.range='custom';if(run.strategy===ORB5_KEY)orbFromRun(ui,run);if(run.strategy===GAP_KEY)gapFromRun(ui,run);if(run.strategy===EMA915_KEY)ema915FromRun(ui,run);if(run.strategy===CUSTOM_KEY)customFromRun(ui,run);if(HISTORY_KEYS.includes(run.strategy))ui.underlying=runIndex(run);}
+      if(run) {ui.result=run;ui.strategy=run.strategy;ui.startDate=run.startDate;ui.endDate=run.endDate;ui.horizon=run.horizon;ui.exitLogic=run.exitLogic||'horizon';ui.stopLogic=run.stopLogic||'none';ui.resultMode=run.metrics.option?'option':'index';if(run.metrics.option){ui.capital=run.metrics.option.capital;ui.sizing=run.metrics.option.sizing||'fixed';}ui.range='custom';if(run.strategy===ORB5_KEY)orbFromRun(ui,run);if(run.strategy===GAP_KEY)gapFromRun(ui,run);if(run.strategy===EMA915_KEY)ema915FromRun(ui,run);if(run.strategy===STRANGLE_KEY)strangleFromRun(ui,run);if(run.strategy===CUSTOM_KEY)customFromRun(ui,run);if(HISTORY_KEYS.includes(run.strategy))ui.underlying=runIndex(run);}
       else ui.result=null;
       ui.chartData=null;ui.chartLoading=null;ui.chartError='';ui.chartRequest=(ui.chartRequest||0)+1;ctx.paint();
       if(run) requestAnimationFrame(()=>el.querySelector('.bt-results')?.scrollIntoView({behavior:'smooth',block:'start'}));
@@ -274,6 +284,7 @@ export default {
       if(key==='strategy'&&builtIns(ui).some(x=>x.id===field.value)) { ui.strategy=CUSTOM_KEY; ui.custom.strategyId=field.value; }
       else if(key==='strategy'&&field.value===CUSTOM_KEY&&builtInPicked(ui)) ui.custom.strategyId=(ui.caps?.custom?.strategies||[]).find(x=>!x.builtIn)?.id??ui.custom.strategyId;
       if(key==='strategy'&&field.value!=='openingRange') ui.stopLogic='none';
+      if(key==='underlying') strangleIndexChanged(ui,ui.caps);   // ₹3 on NIFTY, ₹100 on SENSEX, …
       if(key==='resultMode'&&field.value==='option'&&ui.exitLogic==='emaZone') ui.exitLogic='levelReject';
       ui.result=null;ui.chartData=null;ui.chartLoading=null;ui.chartRequest=(ui.chartRequest||0)+1;ui.chartError='';ctx.paint();
     },signal);
@@ -282,13 +293,14 @@ export default {
       ui.running=true;ui.error='';ui.chartError='';ui.result=null;ui.chartData=null;clearTradeChart(ui);ctx.paint();
       const {strategy,startDate,endDate,horizon,exitLogic,resultMode,capital,sizing}=ui,stopLogic=ui.strategy==='openingRange'?ui.stopLogic:'none';
       try {
-        const payload=strategy===ORB5_KEY?orbPayload(ui):strategy===GAP_KEY?gapPayload(ui):strategy===GAP_RETEST_KEY?gapPayload(ui,true):strategy===EMA915_KEY?ema915Payload(ui):strategy===CUSTOM_KEY?customPayload(ui):{strategy,startDate,endDate,horizon,exitLogic,stopLogic,resultMode,capital,sizing};
+        const payload=strategy===ORB5_KEY?orbPayload(ui):strategy===GAP_KEY?gapPayload(ui):strategy===GAP_RETEST_KEY?gapPayload(ui,true):strategy===EMA915_KEY?ema915Payload(ui):strategy===STRANGLE_KEY?stranglePayload(ui):strategy===CUSTOM_KEY?customPayload(ui):{strategy,startDate,endDate,horizon,exitLogic,stopLogic,resultMode,capital,sizing};
         if(HISTORY_KEYS.includes(strategy)) payload.underlying=ui.underlying;
         const run=await post('/scalper/backtest-runs',payload);
         ui.savedRuns=[run,...(ui.savedRuns||[]).filter(row=>row.id!==run.id)].slice(0,20);
         if(strategy===ORB5_KEY&&ui.strategy===ORB5_KEY) ui.result=run;
         if((strategy===GAP_KEY||strategy===GAP_RETEST_KEY)&&ui.strategy===strategy) ui.result=run;
         if(strategy===EMA915_KEY&&ui.strategy===EMA915_KEY) ui.result=run;
+        if(strategy===STRANGLE_KEY&&ui.strategy===STRANGLE_KEY) ui.result=run;
         if(strategy===CUSTOM_KEY&&ui.strategy===CUSTOM_KEY) ui.result=run;
         if(strategy===ui.strategy&&startDate===ui.startDate&&endDate===ui.endDate&&horizon===ui.horizon&&exitLogic===ui.exitLogic&&stopLogic===(ui.strategy==='openingRange'?ui.stopLogic:'none')) ui.result=run;
       } catch(error) { ui.error=error.message||'Could not save this backtest.'; }
@@ -312,6 +324,12 @@ export default {
     if(ui.result?.strategy===CUSTOM_KEY) {
       const equityHost=$('#bt-custom-equity',el);
       if(ui.equityHost!==equityHost||!ui.equityView) { ui.equityView?.remove(); ui.equityView=equityHost?drawCustomEquity(equityHost,ui.result,chartTheme()):null; ui.equityHost=equityHost; }
+      clearTradeChart(ui);
+      return;
+    }
+    if(ui.result?.strategy===STRANGLE_KEY) {
+      const equityHost=$('#bt-strangle-equity',el);
+      if(ui.equityHost!==equityHost||!ui.equityView) { ui.equityView?.remove(); ui.equityView=equityHost?drawStrangleEquity(equityHost,ui.result,chartTheme()):null; ui.equityHost=equityHost; }
       clearTradeChart(ui);
       return;
     }

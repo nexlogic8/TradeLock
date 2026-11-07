@@ -18,6 +18,7 @@ import { ORB5_EXPIRIES, ORB5_OPTION_DEFAULTS, orb5OptionTrades } from './orb5-op
 import { stmt, tx } from '../../db/index.js';
 import { BACKTEST_INDICES, GAP_DEFAULTS, gapBacktestInWorker, gapCoverage } from '../backtest/gap.js';
 import { EMA915_DEFAULTS, ema915BacktestInWorker } from '../backtest/ema915.js';
+import { STRANGLE_DEFAULTS, STRANGLE_TARGETS, strangleBacktestInWorker } from '../backtest/strangle.js';
 import { CUSTOM_BUILT_IN, CUSTOM_DEFAULTS, CUSTOM_TIMEFRAMES, customBacktestInWorker } from '../backtest/custom.js';
 import { listStrategies, normalizeStrategy } from '../strategy/service.js';
 import { openHistory } from '../backtest/history-store.js';
@@ -464,6 +465,46 @@ async function runEma915Backtest(ctx) {
   })();
   return savedBacktest(saved);
 }
+// --- "CE + PE at a target price" backtest (both sides, e.g. the ₹3 options) on the local 1-minute history ---
+function strangleSettings(body) {
+  const b = body || {}, d = STRANGLE_DEFAULTS, num = k => Number(b[k] ?? d[k]);
+  const s = { target: num('target'), tolerancePct: num('tolerancePct'), entryTime: String(b.entryTime ?? d.entryTime), waitMin: num('waitMin'), exitTime: String(b.exitTime ?? d.exitTime),
+    stopMode: String(b.stopMode ?? d.stopMode), stopPct: num('stopPct'), expiryCode: num('expiryCode'), skipExpiryDay: b.skipExpiryDay === undefined ? d.skipExpiryDay : b.skipExpiryDay === true,
+    capital: num('capital'), fundsUse: num('fundsUse'), sizing: String(b.sizing ?? d.sizing), maxVolPct: num('maxVolPct'), slippage: num('slippage') };
+  if (!numIn(s.target, 0.05, 5000)) throw bad('INVALID_STRANGLE_TARGET', 'The target option price must be ₹0.05–5,000.');
+  if (!numIn(s.tolerancePct, 1, 90)) throw bad('INVALID_STRANGLE_TOLERANCE', 'The price band must be 1–90% around the target.');
+  if (!intIn(s.waitMin, 0, 120)) throw bad('INVALID_STRANGLE_WAIT', 'Waiting for a price must be 0–120 minutes.');
+  if (!['none', 'leg', 'whole'].includes(s.stopMode)) throw bad('INVALID_STRANGLE_STOP', 'Choose no stop, a stop on each option, or one on both together.');
+  if (!numIn(s.stopPct, 1, 99)) throw bad('INVALID_STRANGLE_STOP_PCT', 'The stop must be 1–99% below the entry.');
+  if (![1, 2].includes(s.expiryCode)) throw bad('INVALID_STRANGLE_EXPIRY', 'Choose the nearest or the next expiry.');
+  if (!numIn(s.capital, 1000, 1e10)) throw bad('INVALID_STRANGLE_CAPITAL', 'Starting capital must be between ₹1,000 and ₹1,000 crore.');
+  if (!numIn(s.fundsUse, 1, 100)) throw bad('INVALID_STRANGLE_FUNDS', 'Capital used a day must be 1–100%.');
+  if (!['compound', 'fixed'].includes(s.sizing)) throw bad('INVALID_STRANGLE_SIZING', 'Choose compounding or fixed capital.');
+  if (!numIn(s.maxVolPct, 0, 100)) throw bad('INVALID_STRANGLE_VOLUME', 'The volume limit must be 0 (off) to 100%.');
+  if (!numIn(s.slippage, 0, 50)) throw bad('INVALID_STRANGLE_SLIPPAGE', 'Slippage must be ₹0–50 a unit.');
+  for (const [k, label] of [['entryTime', 'Entry'], ['exitTime', 'Exit']])
+    if (!/^\d{2}:\d{2}$/.test(s[k]) || s[k] < '09:15' || s[k] > '15:29') throw bad('INVALID_STRANGLE_TIME', `${label} time must be between 09:15 and 15:29.`);
+  if (s.exitTime <= s.entryTime) throw bad('INVALID_STRANGLE_TIME', 'The exit time must be after the entry time.');
+  return s;
+}
+async function runStrangleBacktest(ctx) {
+  const { startDate, endDate } = ctx.body || {}, now = Date.now();
+  backtestRange(startDate, endDate, ist(now).day);
+  const settings = { underlying: backtestIndex(ctx.body), ...strangleSettings(ctx.body) };
+  const coverage = historyRange(settings.underlying, startDate, endDate);
+  const run = await strangleBacktestInWorker({ startDate, endDate, ...settings });
+  const metrics = { strangle: true, coverage, ...run };
+  const saved = tx(() => {
+    const inserted = stmt(`INSERT INTO backtest_runs
+      (user_id,strategy,start_date,end_date,horizon_bars,created_at,as_of,one_minute_bars,range_sessions,signal_count,metrics_json,candles_gzip,exit_logic,stop_logic)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(ctx.user.id, 'strangle', startDate, endDate, 0, now, Date.parse(`${coverage.to}T15:30:00+05:30`), run.oneMinuteBars, run.sessions,
+        run.signals, JSON.stringify(metrics), gzipSync(Buffer.from('{}')), 'horizon', 'none');
+    stmt(`DELETE FROM backtest_runs WHERE user_id=? AND id NOT IN
+      (SELECT id FROM backtest_runs WHERE user_id=? ORDER BY id DESC LIMIT 20)`).run(ctx.user.id, ctx.user.id);
+    return stmt('SELECT * FROM backtest_runs WHERE id=? AND user_id=?').get(Number(inserted.lastInsertRowid), ctx.user.id);
+  })();
+  return savedBacktest(saved);
+}
 // --- "My strategies" backtest: a saved strategy on the local 1-minute history; no Dhan calls ---
 function customCapabilities(userId) {
   let store, coverage = null, reason = null;
@@ -582,7 +623,7 @@ export function startScalperWarmup({ everyMs = 10 * 60_000 } = {}) {
 
 export function scalperRoutes(r) {
   r.get('/api/scalper/backtest-capabilities', async ctx => ({ optionsData:await optionDataAvailability(ctx.user.id), optionExpiries:ORB5_EXPIRIES,
-    orb5:{ defaults:{ ...ORB5_DEFAULTS, options:ORB5_OPTION_DEFAULTS }, maxOptionDays:ORB5_LIMITS.maxOptionDays }, gap:gapCapabilities(ctx.user.id), admin:isAdminEmail(ctx.user.email), ema915:{ defaults:ema915Defaults(ctx.user.id) }, custom:customCapabilities(ctx.user.id) }));
+    orb5:{ defaults:{ ...ORB5_DEFAULTS, options:ORB5_OPTION_DEFAULTS }, maxOptionDays:ORB5_LIMITS.maxOptionDays }, gap:gapCapabilities(ctx.user.id), admin:isAdminEmail(ctx.user.email), ema915:{ defaults:ema915Defaults(ctx.user.id) }, strangle:{ defaults:STRANGLE_DEFAULTS, targets:STRANGLE_TARGETS }, custom:customCapabilities(ctx.user.id) }));
   // (gap.coverage is also the stored-history range ORB's weekly actual-options runs read locally.)
   r.get('/api/scalper/signal-risk', ctx => scalperSignalRisk(ctx.user.id));
   r.get('/api/scalper/backtest-candles', async ctx => {
@@ -602,6 +643,7 @@ export function scalperRoutes(r) {
     if(strategy==='orb5') return runOrb5Backtest(ctx);
     if(strategy==='gap') return runGapBacktest(ctx);
     if(strategy==='ema915') return runEma915Backtest(ctx);
+    if(strategy==='strangle') return runStrangleBacktest(ctx);
     if(strategy==='custom') return runCustomBacktest(ctx);
     const exitLogic=ctx.body.exitLogic||'horizon';
     if(!['openingRange','previousDay','ema45'].includes(strategy)) throw bad('INVALID_BACKTEST_STRATEGY','Choose a supported backtest strategy.');
