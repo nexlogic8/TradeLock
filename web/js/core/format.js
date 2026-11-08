@@ -50,11 +50,15 @@ export function fmt12(hhmm) {
 }
 export const duration = min => `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m`;
 
-/** Current IST minutes since midnight and whether NSE is in session (weekends only; no holiday calendar). */
+// Special sessions on a weekend (Diwali Muhurat trading), IST minutes: keep in step with server/src/lib/market-calendar.js.
+const SPECIAL_SESSIONS = { '2026-11-08': [855, 930] };
+
+/** Current IST minutes since midnight and whether NSE is in session (weekends + special sessions; no holiday calendar). */
 export function istNow() {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', weekday: 'short', hour12: false })
-    .formatToParts(Date.now()).map(x => [x.type, x.value]));
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: IST, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', weekday: 'short', hour12: false }).formatToParts(Date.now()).map(x => [x.type, x.value]));
   const minutes = (Number(p.hour) % 24) * 60 + Number(p.minute);
-  const open = !['Sat', 'Sun'].includes(p.weekday) && minutes >= 555 && minutes < 930;
+  const sp = SPECIAL_SESSIONS[`${p.year}-${p.month}-${p.day}`];
+  const open = sp ? minutes >= sp[0] && minutes < sp[1] : !['Sat', 'Sun'].includes(p.weekday) && minutes >= 555 && minutes < 930;
   return { minutes, open, hhmm: `${String(Number(p.hour) % 24).padStart(2, '0')}:${p.minute}` };
 }

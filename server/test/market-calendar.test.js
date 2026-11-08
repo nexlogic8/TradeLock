@@ -23,3 +23,17 @@ test('session: today before the open, in it, after it; the next open skips weeke
   const hol = sessionInfo(ist('2026-11-10T09:00:00'));
   assert.deepEqual([hol.tradingDay, hol.closed, hol.openAt], [false, 'Diwali Balipratipada', null]);
 });
+
+test('Diwali Muhurat Sunday is a special session: protection clock open, algo clock closed', async () => {
+  const { marketOpen, isTradingDay, regularMarketOpen, regularTradingDay } = await import('../src/lib/time.js');
+  assert.equal(closedReason('2026-11-08'), null);
+  const s = sessionInfo(ist('2026-11-08T14:30:00'));
+  assert.deepEqual([s.tradingDay, s.open, s.special, hhmm(s.openAt), hhmm(s.closeAt)], [true, true, 'Muhurat trading', '2026-11-08 14:15', '2026-11-08 15:30']);
+  assert.equal(hhmm(sessionInfo(ist('2026-11-08T16:00:00')).nextOpenAt), '2026-11-09 09:15', 'next day opens at the regular time');
+  assert.equal(hhmm(sessionInfo(ist('2026-11-07T16:00:00')).nextOpenAt), '2026-11-08 14:15', 'Saturday → the Muhurat session');
+  assert.deepEqual([marketOpen(ist('2026-11-08T14:29:00')), marketOpen(ist('2026-11-08T10:00:00')), marketOpen(ist('2026-11-08T15:30:00'))], [true, false, false]);
+  assert.equal(isTradingDay(ist('2026-11-08T21:00:00')), true);
+  assert.deepEqual([regularMarketOpen(ist('2026-11-08T14:29:00')), regularTradingDay(ist('2026-11-08T14:29:00'))], [false, false]);
+  assert.equal(marketOpen(ist('2026-11-15T14:29:00')), false, 'an ordinary Sunday stays closed');
+  assert.equal(marketOpen(ist('2026-11-09T10:00:00')), true);
+});

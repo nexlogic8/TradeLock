@@ -6,7 +6,7 @@
 // ever sent to a broker. Each step is kept in paper_trades, so a restart resumes the day.
 // (Internally still "retest": the account switch is retest_paper_on, the strategy key gapRetest.)
 import { stmt } from '../../db/index.js';
-import { ist, isTradingDay } from '../../lib/time.js';
+import { ist, regularTradingDay as isTradingDay } from '../../lib/time.js';
 import { adapterFor } from '../broker/registry.js';
 import { getBook } from '../broker/book.js';
 import { getRules } from '../rules/service.js';

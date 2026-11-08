@@ -13,6 +13,12 @@ export const NSE_HOLIDAYS = Object.freeze({
   '2026-10-20': 'Dussehra', '2026-11-10': 'Diwali Balipratipada', '2026-11-24': 'Guru Nanak Jayanti', '2026-12-25': 'Christmas',
 });
 
+// Special sessions on a non-trading day (Diwali Muhurat trading): open / close in IST minutes. Risk protection runs in
+// them; the algo strategies do not (they keep the regular weekday clock). Add each year's from NSE's circular.
+export const SPECIAL_SESSIONS = Object.freeze({
+  '2026-11-08': Object.freeze({ name: 'Muhurat trading', open: 14 * 60 + 15, close: 15 * 60 + 30 }),
+});
+
 const IST_MS = 330 * 60_000;
 const istDay = at => new Date(at + IST_MS).toISOString().slice(0, 10);
 const weekend = day => [0, 6].includes(new Date(`${day}T00:00:00Z`).getUTCDay());
@@ -21,6 +27,7 @@ const addDay = day => { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.g
 
 /** Why `day` has no session ('Saturday', a holiday name), or null on a trading day. */
 export function closedReason(day) {
+  if (SPECIAL_SESSIONS[day]) return null;
   if (weekend(day)) return new Date(`${day}T00:00:00Z`).getUTCDay() === 0 ? 'Sunday' : 'Saturday';
   return NSE_HOLIDAYS[day] || null;
 }
@@ -31,10 +38,10 @@ export const isMarketDay = day => !closedReason(day);
  * openAt / closeAt (today's, null when closed), nextOpenAt (today's open if still ahead, else the next trading day's) }.
  */
 export function sessionInfo(now = Date.now()) {
-  const day = istDay(now), closed = closedReason(day), { open, close } = config.market;
+  const day = istDay(now), closed = closedReason(day), { open, close } = SPECIAL_SESSIONS[day] ?? config.market;
   const openAt = closed ? null : at(day, open), closeAt = closed ? null : at(day, close);
   let next = day;
   if (closed || now >= openAt) { do next = addDay(next); while (!isMarketDay(next)); }
-  return { day, tradingDay: !closed, closed, open: !closed && now >= openAt && now < closeAt, openAt, closeAt,
-    nextOpenAt: at(next, open), nextDay: next };
+  return { day, tradingDay: !closed, closed, special: SPECIAL_SESSIONS[day]?.name ?? null, open: !closed && now >= openAt && now < closeAt, openAt, closeAt,
+    nextOpenAt: at(next, next === day ? open : (SPECIAL_SESSIONS[next] ?? config.market).open), nextDay: next };
 }

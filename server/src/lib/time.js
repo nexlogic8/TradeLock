@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { SPECIAL_SESSIONS } from './market-calendar.js';
 
 // IST is a fixed UTC+05:30 (no daylight saving), so plain arithmetic is exact and far cheaper than
 // Intl formatting. This runs thousands of times per monitor cycle.
@@ -28,13 +29,19 @@ export const toMinutes = hhmm => {
   return h * 60 + m;
 };
 
-// Weekends only. Exchange holidays are not modelled yet (see README).
-export function marketOpen(at = Date.now()) {
+// Regular weekday session. Exchange holidays are not modelled here yet (see README). The algo strategies use these.
+export function regularMarketOpen(at = Date.now()) {
   const n = ist(at);
   return !['Sat', 'Sun'].includes(n.weekday) && n.minutes >= config.market.open && n.minutes < config.market.close;
 }
+export const regularTradingDay = (at = Date.now()) => !['Sat', 'Sun'].includes(ist(at).weekday);
 
-export const isTradingDay = (at = Date.now()) => !['Sat', 'Sun'].includes(ist(at).weekday);
+// Also open in a special session (Diwali Muhurat trading on a weekend): risk protection, P&L and the dashboard.
+export function marketOpen(at = Date.now()) {
+  const n = ist(at), sp = SPECIAL_SESSIONS[n.day];
+  return sp ? n.minutes >= sp.open && n.minutes < sp.close : regularMarketOpen(at);
+}
+export const isTradingDay = (at = Date.now()) => !!SPECIAL_SESSIONS[ist(at).day] || regularTradingDay(at);
 
 export function nextTradingDay(day) {
   const d = new Date(`${day}T00:00:00Z`);

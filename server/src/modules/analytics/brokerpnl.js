@@ -3,7 +3,7 @@
 // first-in-first-out per instrument (long and short), charges are summed per day, and option lots
 // still open after expiry are closed at zero on the expiry day (they expired worthless).
 import { stmt, tx } from '../../db/index.js';
-import { ist } from '../../lib/time.js';
+import { ist, isTradingDay } from '../../lib/time.js';
 import { accountFor, adapterFor } from '../broker/registry.js';
 
 export const BACKFILL_DAYS = 180;   // first sync goes this far back
@@ -148,14 +148,14 @@ export const brokerDays = (userId, fromDay, toDay) =>
   stmt('SELECT day, gross, charges, net, trades, wins, losses FROM broker_pnl_days WHERE user_id = ? AND day >= ? AND day <= ? ORDER BY day').all(userId, fromDay, toDay);
 
 /**
- * After the close (16:00 IST, weekdays), sync every connected account once, one at a time.
+ * After the close (16:00 IST, trading days incl. a Muhurat Sunday), sync every connected account once, one at a time.
  * Checked every 10 minutes; returns a stop function.
  */
 export function startBrokerPnlSync({ log = console.log } = {}) {
   let busy = false;
   const tick = async () => {
     const t = ist();
-    if (busy || ['Sat', 'Sun'].includes(t.weekday) || t.minutes < 16 * 60) return;
+    if (busy || !isTradingDay() || t.minutes < 16 * 60) return;
     busy = true;
     try {
       const todayStart = Date.parse(`${t.day}T16:00:00+05:30`);

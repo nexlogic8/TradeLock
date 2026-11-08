@@ -48,7 +48,7 @@
 //   is turned off.
 // Each signal is acted on at most once: its row in auto_trades is written before any order is sent.
 import { stmt } from '../../db/index.js';
-import { ist, marketOpen, isTradingDay, previousTradingDays } from '../../lib/time.js';
+import { ist, regularMarketOpen as marketOpen, regularTradingDay as isTradingDay, previousTradingDays } from '../../lib/time.js';   // algo: regular sessions only (no Muhurat)
 import { accountFor, adapterFor, probeAdapter } from '../broker/registry.js';
 import { brokerBusy, switchTradeVia } from '../broker/switch.js';
 import { tradingBroker } from '../broker/per-broker.js';
