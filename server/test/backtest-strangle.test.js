@@ -138,3 +138,13 @@ test('on the expiry day the default uses the next expiry (as Algo Trading does);
   const same = strangleBacktest({ source: 'near', startDate: EXP, endDate: EXP, target: 3, stopMode: 'none', maxVolPct: 0, expiryDay: 'trade' }, s);
   assert.deepEqual([same.trades[0].expiry, same.trades[0].ce.strike], [EXP, 23500]);
 });
+
+test('"next1": the next expiry also on the trading day before expiry (Monday before a Tuesday expiry)', () => {
+  const MON = '2026-03-09', s = store([MON]);   // the nearest expiry is Tue 10 Mar
+  s.saveOptions('NIFTY', 2, 'CE', 3, MON, MON, series(MON, 23700, () => ({ close: 3 })));
+  s.saveOptions('NIFTY', 2, 'PE', -3, MON, MON, series(MON, 21400, () => ({ close: 3 })));
+  const plain = strangleBacktest({ source: 'near', startDate: MON, endDate: MON, target: 3, stopMode: 'none', maxVolPct: 0 }, s).trades[0];
+  assert.deepEqual([plain.expiry, plain.ce.strike], ['2026-03-10', 23500]);
+  const early = strangleBacktest({ source: 'near', startDate: MON, endDate: MON, target: 3, stopMode: 'none', maxVolPct: 0, expiryDay: 'next1' }, s).trades[0];
+  assert.deepEqual([early.expiry, early.ce.strike, early.pe.strike], ['2026-03-17', 23700, 21400]);
+});

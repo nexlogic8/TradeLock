@@ -484,7 +484,7 @@ function strangleSettings(body) {
   if (!['close', 'touch'].includes(s.stopCheck)) throw bad('INVALID_STRANGLE_STOP_CHECK', 'Check the stop on each minute’s close or on every price (a stop-loss order).');
   if (!numIn(s.stopPct, 1, 99)) throw bad('INVALID_STRANGLE_STOP_PCT', 'The stop must be 1–99% below the entry.');
   if (![1, 2].includes(s.expiryCode)) throw bad('INVALID_STRANGLE_EXPIRY', 'Choose the nearest or the next expiry.');
-  if (!['skip', 'trade', 'next'].includes(s.expiryDay)) throw bad('INVALID_STRANGLE_EXPIRY_DAY', 'On the expiry day: skip it, trade the expiring contract or use the next expiry.');
+  if (!['skip', 'trade', 'next', 'next1'].includes(s.expiryDay)) throw bad('INVALID_STRANGLE_EXPIRY_DAY', 'On the expiry day: skip it, trade the expiring contract or use the next expiry (from the day before).');
   if (!numIn(s.capital, 1000, 1e10)) throw bad('INVALID_STRANGLE_CAPITAL', 'Starting capital must be between ₹1,000 and ₹1,000 crore.');
   if (!numIn(s.fundsUse, 1, 100)) throw bad('INVALID_STRANGLE_FUNDS', 'Capital used a day must be 1–100%.');
   if (!['compound', 'fixed'].includes(s.sizing)) throw bad('INVALID_STRANGLE_SIZING', 'Choose compounding or fixed capital.');

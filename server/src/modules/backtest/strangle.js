@@ -17,6 +17,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
 import { BACKTEST_INDICES } from './gap.js';
+import { NSE_HOLIDAYS } from '../../lib/market-calendar.js';
 
 // source: 'all' = every strike of the contracts saved while they traded (option_far_1m, NIFTY from Sep 2026: needed for
 // far ₹3 options), 'near' = the near-ATM history (1 year+, strikes ATM ±10 / ±3 only).
@@ -126,6 +127,13 @@ function allStrikes(store, U, s) {
   };
 }
 
+/** The next weekday that is not an NSE holiday (special weekend sessions such as Muhurat do not count). */
+function nextTradingDay(day) {
+  let d = addDays(day, 1);
+  while ([0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()) || NSE_HOLIDAYS[d]) d = addDays(d, 1);
+  return d;
+}
+
 function run(store, startDate, endDate, s) {
   const U = BACKTEST_INDICES.includes(s.underlying) ? s.underlying : 'NIFTY';
   const idx = store.index(U, sec(startDate), sec(addDays(endDate, 1)));
@@ -138,9 +146,10 @@ function run(store, startDate, endDate, s) {
   let equity = s.capital, peak = equity, maxDrawdownPct = 0, oneMinuteBars = 0;
   for (const [day, bars] of sessions) {
     oneMinuteBars += bars.length;
-    // On the day the chosen contract expires: skip the day, trade it, or take the one after it (as Algo Trading does).
+    // On the day the chosen contract expires: skip the day, trade it, or take the one after it (as Algo Trading does);
+    // 'next1': the one after it also on the trading day before its expiry (e.g. Monday and Tuesday).
     let code = s.expiryCode, expiry = src.expiry(day, code);
-    if (expiry === day && s.expiryDay === 'next') { code += 1; expiry = src.expiry(day, code); }
+    if ((expiry === day && (s.expiryDay === 'next' || s.expiryDay === 'next1')) || (s.expiryDay === 'next1' && expiry === nextTradingDay(day))) { code += 1; expiry = src.expiry(day, code); }
     if (!expiry) { skipped.push({ day, reason: 'no stored contract for that day (all-strike prices start Sep 2026)' }); continue; }
     if (expiry === day && s.expiryDay === 'skip') { skipped.push({ day, reason: 'expiry day (the option expires today)' }); continue; }
     const t0 = at(day, s.entryTime), tEnd = at(day, s.exitTime);
