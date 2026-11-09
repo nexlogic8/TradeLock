@@ -809,4 +809,31 @@ export const MIGRATIONS = [
   // Algo Trading: CE + PE at a target price (both sides daily), its own switch (off until switched on) and settings (JSON).
   `ALTER TABLE broker_accounts ADD COLUMN strangle_on INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE broker_accounts ADD COLUMN strangle_cfg TEXT;`,
+  // Backtest: "Overnight ATM CE + PE" ('overnight') on the stored history.
+  `
+  DROP INDEX IF EXISTS backtest_runs_user;
+  ALTER TABLE backtest_runs RENAME TO backtest_runs_before_overnight;
+  CREATE TABLE backtest_runs (
+    id              INTEGER PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    strategy        TEXT NOT NULL CHECK (strategy IN ('openingRange', 'previousDay', 'ema45', 'orb5', 'gap', 'custom', 'ema915', 'strangle', 'overnight')),
+    start_date      TEXT NOT NULL,
+    end_date        TEXT NOT NULL,
+    horizon_bars    INTEGER NOT NULL,
+    created_at      INTEGER NOT NULL,
+    as_of           INTEGER NOT NULL,
+    one_minute_bars INTEGER NOT NULL,
+    range_sessions  INTEGER NOT NULL DEFAULT 0,
+    signal_count    INTEGER NOT NULL,
+    metrics_json    TEXT NOT NULL,
+    candles_gzip    BLOB NOT NULL,
+    exit_logic      TEXT NOT NULL DEFAULT 'horizon' CHECK (exit_logic IN ('horizon', 'emaZone', 'swingSL', 'levelReject')),
+    stop_logic      TEXT NOT NULL DEFAULT 'none' CHECK (stop_logic IN ('none', 'breakoutCandle'))
+  );
+  INSERT INTO backtest_runs (id,user_id,strategy,start_date,end_date,horizon_bars,created_at,as_of,one_minute_bars,range_sessions,signal_count,metrics_json,candles_gzip,exit_logic,stop_logic)
+    SELECT id,user_id,strategy,start_date,end_date,horizon_bars,created_at,as_of,one_minute_bars,range_sessions,signal_count,metrics_json,candles_gzip,exit_logic,stop_logic
+    FROM backtest_runs_before_overnight;
+  DROP TABLE backtest_runs_before_overnight;
+  CREATE INDEX backtest_runs_user ON backtest_runs(user_id, id DESC);
+  `,
 ];
