@@ -16,6 +16,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
 import { BACKTEST_INDICES } from './gap.js';
+import { SPECIAL_SESSIONS } from '../../lib/market-calendar.js';
 
 export const OVERNIGHT_DEFAULTS = Object.freeze({ strikes: 'atm', entryTime: '15:25', exitTime: '09:45', expiryEve: 'skip', skipBreaks: true,
   capital: 50000, fundsUse: 100, sizing: 'compound', slippage: 0 });
@@ -50,7 +51,8 @@ function run(store, startDate, endDate, s) {
   // A week past the end too: the last night sells on the next session.
   const idx = store.index(U, sec(startDate), sec(addDays(endDate, 8)));
   const sessions = new Map();
-  for (const c of idx) { const d = dayOf(c.time), h = hm(c.time); if (h < '09:15' || h >= '15:30') continue; if (!sessions.has(d)) sessions.set(d, []); sessions.get(d).push(c); }
+  // Special sessions (the one-hour Diwali Muhurat on a weekend) are not regular nights: left out.
+  for (const c of idx) { const d = dayOf(c.time), h = hm(c.time); if (h < '09:15' || h >= '15:30' || SPECIAL_SESSIONS[d]) continue; if (!sessions.has(d)) sessions.set(d, []); sessions.get(d).push(c); }
   const days = [...sessions.keys()].sort(), tradingDays = new Set(days);
   const expiry = (day, n) => indexExpiry(U, day, n, tradingDays).date;
   const atMinute = store.db.prepare(`SELECT strike, offset, open, close FROM option_1m
@@ -66,7 +68,7 @@ function run(store, startDate, endDate, s) {
     const D = days[i], N = days[i + 1];
     if (D < startDate || D > endDate) continue;
     nights++; oneMinuteBars += sessions.get(D).length;
-    if (!N) { skip(D, 'the next session is not in the history yet'); continue; }
+    if (!N) { skip(D, 'sold on the next trading day, whose prices are not stored yet (they are saved after its close)'); continue; }
     if (s.skipBreaks && addDays(D, 1) !== N) { skip(D, `the next session is ${N} (weekend or holiday): not held`); continue; }
     const eve = expiry(D, 1) === N;
     if (eve && s.expiryEve === 'skip') { skip(D, `the nearest contract expires on ${N}: night skipped`); continue; }

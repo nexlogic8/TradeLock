@@ -59,3 +59,16 @@ test('one strike out of the money on each side; fixed sizing uses the starting c
   assert.equal(x.lots, Math.floor(100000 / (135 * lot)));
   assert.equal(r.trades[1].lots, x.lots, 'fixed: the same size the next night');
 });
+
+test('a special weekend session (Diwali Muhurat) is not a night of its own: Friday → Monday is a weekend', () => {
+  const s = store(), FRI = '2026-11-06', SUN = '2026-11-08', MON = '2026-11-09', TUE = '2026-11-10';
+  for (const day of [FRI, SUN, MON, TUE]) {
+    s.saveIndex('NIFTY', day, day, minutes().map(hhmm => ({ time: t(day, hhmm), open: 22500, high: 22501, low: 22499, close: 22500 })));
+    if (day !== SUN) for (const [side, k] of [['CE', 22500], ['PE', 22500]]) s.saveOptions('NIFTY', 1, side, 0, day, day, series(day, k, () => 100));
+  }
+  const r = overnightBacktest({ startDate: FRI, endDate: SUN, underlying: 'NIFTY' }, s);
+  assert.deepEqual(r.skipped.map(x => x.day), [FRI]);
+  assert.match(r.skipped[0].reason, new RegExp(`next session is ${MON}`));
+  const held = overnightBacktest({ startDate: FRI, endDate: SUN, underlying: 'NIFTY', skipBreaks: false }, s);
+  assert.deepEqual(held.trades.map(x => [x.day, x.next]), [[FRI, MON]]);
+});
