@@ -51,8 +51,11 @@ test('the volume limit caps the lots; expiry days and days without a ₹3 pair a
   // 09:15–09:20 (the session's first 6 minutes) × 1,000 traded on each side = 6,000; 10% = 600 units → whole lots.
   assert.equal(capped.lots, Math.floor(600 / lotSizeOn('NIFTY', D)));
   assert.equal(capped.volCapped, true);
-  const r = strangleBacktest({ source: 'near', startDate: EXP, endDate: D, target: 3, maxVolPct: 0 }, store([EXP, D]));
+  const r = strangleBacktest({ source: 'near', startDate: EXP, endDate: D, target: 3, maxVolPct: 0, expiryDay: 'skip' }, store([EXP, D]));
   assert.deepEqual(r.skipped.map(x => [x.day, x.reason]), [[EXP, 'expiry day (the option expires today)']]);
+  // Older saved runs (skipExpiryDay true) still skip it.
+  const old = strangleBacktest({ source: 'near', startDate: EXP, endDate: EXP, target: 3, maxVolPct: 0, skipExpiryDay: true }, store([EXP]));
+  assert.equal(old.skipped[0].reason, 'expiry day (the option expires today)');
   const far = strangleBacktest({ source: 'near', startDate: D, endDate: D, target: 50, maxVolPct: 0 }, store());
   assert.equal(far.trades.length, 0);
   assert.match(far.skipped[0].reason, /^no call or put traded at ₹35–65 between 09:20 and 09:45/);
@@ -122,4 +125,16 @@ test('choose by distance from the ATM: the call ATM + distance, the put ATM − 
   assert.deepEqual([r.trades[0].ce.strike, r.trades[0].pe.strike], [23500, 21500]);
   const none = strangleBacktest({ source: 'near', startDate: D, endDate: D, pick: 'distance', distance: 300, capital: 100000 }, store());
   assert.match(none.skipped[0].reason, /^no call or put 300 points from the ATM traded/);
+});
+
+test('on the expiry day the default uses the next expiry (as Algo Trading does); "trade" keeps the expiring one', () => {
+  const s = store([EXP]);
+  // The next expiry (slot 2) on the expiry day: CE ₹4 → ₹5, PE ₹3.50 → ₹3.
+  s.saveOptions('NIFTY', 2, 'CE', 3, EXP, EXP, series(EXP, 23700, () => ({ close: 4 })).map(r => (r.time >= t(EXP, '15:25') ? { ...r, open: 5, close: 5, high: 5 } : r)));
+  s.saveOptions('NIFTY', 2, 'PE', -3, EXP, EXP, series(EXP, 21400, () => ({ close: 3.5 })).map(r => (r.time >= t(EXP, '15:25') ? { ...r, open: 3, close: 3, low: 3 } : r)));
+  const next = strangleBacktest({ source: 'near', startDate: EXP, endDate: EXP, target: 3, tolerancePct: 50, stopMode: 'none', maxVolPct: 0 }, s);
+  assert.equal(next.trades.length, 1);
+  assert.deepEqual([next.trades[0].expiry, next.trades[0].ce.strike, next.trades[0].ce.entry, next.trades[0].ce.exit, next.trades[0].pe.strike], ['2026-03-10', 23700, 4, 5, 21400]);
+  const same = strangleBacktest({ source: 'near', startDate: EXP, endDate: EXP, target: 3, stopMode: 'none', maxVolPct: 0, expiryDay: 'trade' }, s);
+  assert.deepEqual([same.trades[0].expiry, same.trades[0].ce.strike], [EXP, 23500]);
 });

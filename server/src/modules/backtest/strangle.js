@@ -21,7 +21,7 @@ import { BACKTEST_INDICES } from './gap.js';
 // source: 'all' = every strike of the contracts saved while they traded (option_far_1m, NIFTY from Sep 2026: needed for
 // far ₹3 options), 'near' = the near-ATM history (1 year+, strikes ATM ±10 / ±3 only).
 export const STRANGLE_DEFAULTS = Object.freeze({ source: 'all', pick: 'price', distance: 300, target: 3, tolerancePct: 30, entryTime: '09:20', waitMin: 25, exitTime: '15:25',
-  stopMode: 'leg', stopPct: 20, expiryCode: 1, skipExpiryDay: true, capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 0, slippage: 0, stopCheck: 'close', dayLossPct: 0 });
+  stopMode: 'leg', stopPct: 20, expiryCode: 1, expiryDay: 'next', capital: 600000, fundsUse: 100, sizing: 'compound', maxVolPct: 0, slippage: 0, stopCheck: 'close', dayLossPct: 0 });
 // The usual target per index (the page fills it in when the index changes).
 export const STRANGLE_TARGETS = Object.freeze({ NIFTY: 3, BANKNIFTY: 20, SENSEX: 100 });
 // Most units one order may carry (exchange freeze quantity); more is sent as several orders, each with brokerage.
@@ -46,6 +46,8 @@ export function strangleBacktestInWorker(params) {
 
 export function strangleBacktest({ startDate, endDate, ...options }, store) {
   const own = !store; store ||= openHistory();
+  // Older saved runs: skipExpiryDay true / false = skip / trade.
+  if (options.expiryDay === undefined && options.skipExpiryDay !== undefined) options = { ...options, expiryDay: options.skipExpiryDay ? 'skip' : 'trade' };
   try { return run(store, startDate, endDate, { ...STRANGLE_DEFAULTS, ...options }); }
   finally { if (own) store.close(); }
 }
@@ -96,9 +98,10 @@ function nearAtm(store, U, s, tradingDays) {
   const sideRows = store.db.prepare(`SELECT time, strike, open, high, low, close, volume FROM option_1m
     WHERE underlying = ? AND expiry_code = ? AND side = ? AND offset IN (${OFFSETS}) AND time >= ? AND time < ?`);
   return {
-    expiry: day => indexExpiry(U, day, s.expiryCode, tradingDays).date,
-    window: (_, from, to) => store.options(U, s.expiryCode, from, to),
-    strike: (_, side, strike, from, to) => sideRows.all(U, s.expiryCode, side, from, to).filter(r => r.strike === strike).sort((a, b) => a.time - b.time),
+    // Slots 1 (nearest) and 2 (next) only.
+    expiry: (day, n) => (n <= 2 ? indexExpiry(U, day, n, tradingDays).date : null),
+    window: (_, from, to, n) => store.options(U, n, from, to),
+    strike: (_, side, strike, from, to, n) => sideRows.all(U, n, side, from, to).filter(r => r.strike === strike).sort((a, b) => a.time - b.time),
   };
 }
 /** 'all': every strike of the contracts saved while they traded (option_far_1m), so far cheap options are there too. */
@@ -117,7 +120,7 @@ function allStrikes(store, U, s) {
   const hasDay = (e, day) => known.get(e).some(k => traded.get(U, e, k.side, k.strike, sec(day), sec(day) + 86_400));
   return {
     // The n-th saved contract expiring on or after the day that has prices that day (1 = nearest).
-    expiry: day => expiries.filter(e => e >= day && hasDay(e, day))[s.expiryCode - 1] ?? null,
+    expiry: (day, n) => expiries.filter(e => e >= day && hasDay(e, day))[n - 1] ?? null,
     window: (expiry, from, to) => win.all(U, from, to, expiry),
     strike: (expiry, side, strike, from, to) => one.all(U, expiry, side, strike, from, to),
   };
@@ -135,12 +138,14 @@ function run(store, startDate, endDate, s) {
   let equity = s.capital, peak = equity, maxDrawdownPct = 0, oneMinuteBars = 0;
   for (const [day, bars] of sessions) {
     oneMinuteBars += bars.length;
-    const expiry = src.expiry(day);
+    // On the day the chosen contract expires: skip the day, trade it, or take the one after it (as Algo Trading does).
+    let code = s.expiryCode, expiry = src.expiry(day, code);
+    if (expiry === day && s.expiryDay === 'next') { code += 1; expiry = src.expiry(day, code); }
     if (!expiry) { skipped.push({ day, reason: 'no stored contract for that day (all-strike prices start Sep 2026)' }); continue; }
-    if (s.skipExpiryDay && expiry === day) { skipped.push({ day, reason: 'expiry day (the option expires today)' }); continue; }
+    if (expiry === day && s.expiryDay === 'skip') { skipped.push({ day, reason: 'expiry day (the option expires today)' }); continue; }
     const t0 = at(day, s.entryTime), tEnd = at(day, s.exitTime);
     // Every stored strike only for the entry window; the two chosen strikes then for the rest of the day.
-    const lastPick = t0 + s.waitMin * 60, early = src.window(expiry, t0 - LOOKBACK - 60, lastPick + 1);
+    const lastPick = t0 + s.waitMin * 60, early = src.window(expiry, t0 - LOOKBACK - 60, lastPick + 1, code);
     if (!early.length) { skipped.push({ day, reason: 'no stored option prices that day' }); continue; }
     const legs = {};
     for (const side of ['CE', 'PE']) {
@@ -149,7 +154,7 @@ function run(store, startDate, endDate, s) {
         const p = s.pick === 'distance' ? pickStrike(strikes, t, distanceStrike(bars, t, side, s.distance, STEP[U] || 50)) : pick(strikes, t, lo, hi, s.target);
         if (p) legs[side] = { ...p, entryAt: t };
       }
-      if (legs[side]) legs[side].candles = src.strike(expiry, side, legs[side].strike, t0 - LOOKBACK - 60, tEnd + 60);
+      if (legs[side]) legs[side].candles = src.strike(expiry, side, legs[side].strike, t0 - LOOKBACK - 60, tEnd + 60, code);
     }
     if (!legs.CE || !legs.PE) {
       const which = !legs.CE && !legs.PE ? 'no call or put' : !legs.CE ? 'no call' : 'no put';

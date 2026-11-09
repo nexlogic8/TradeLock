@@ -24,7 +24,7 @@ const stopText = s => (s.stopMode === 'leg' ? `each option −${s.stopPct}%` : s
 export function strangleDefaults(ui, caps) {
   const d = caps?.strangle?.defaults || {}, targets = caps?.strangle?.targets || {};
   ui.strangle ??= { source: d.source ?? 'all', pick: d.pick ?? 'price', distance: d.distance ?? 300, target: targets[ui.underlying || 'NIFTY'] ?? d.target ?? 3, tolerancePct: d.tolerancePct ?? 30, entryTime: d.entryTime ?? '09:20', waitMin: d.waitMin ?? 25,
-    exitTime: d.exitTime ?? '15:25', stopMode: d.stopMode ?? 'leg', stopPct: d.stopPct ?? 20, expiryCode: d.expiryCode ?? 1, skipExpiryDay: d.skipExpiryDay ?? true,
+    exitTime: d.exitTime ?? '15:25', stopMode: d.stopMode ?? 'leg', stopPct: d.stopPct ?? 20, expiryCode: d.expiryCode ?? 1, expiryDay: d.expiryDay ?? 'next',
     capital: d.capital ?? 600000, fundsUse: d.fundsUse ?? 100, sizing: d.sizing ?? 'compound', maxVolPct: d.maxVolPct ?? 0, slippage: d.slippage ?? 0, stopCheck: d.stopCheck ?? 'close', dayLossPct: d.dayLossPct ?? 0 };
 }
 /** The usual target for an index (₹3 NIFTY, ₹100 SENSEX), when the index changes. */
@@ -35,13 +35,13 @@ export function strangleIndexChanged(ui, caps) {
 export function strangleFromRun(ui, run) {
   const s = run.metrics?.settings; if (!s) return;
   ui.strangle = { source:s.source ?? 'near', pick:s.pick ?? 'price', distance:s.distance ?? 300, stopCheck:s.stopCheck ?? 'touch', dayLossPct:s.dayLossPct ?? 0, target:s.target, tolerancePct:s.tolerancePct, entryTime:s.entryTime, waitMin:s.waitMin, exitTime:s.exitTime, stopMode:s.stopMode, stopPct:s.stopPct,
-    expiryCode:s.expiryCode, skipExpiryDay:s.skipExpiryDay, capital:s.capital, fundsUse:s.fundsUse, sizing:s.sizing, maxVolPct:s.maxVolPct, slippage:s.slippage };
+    expiryCode:s.expiryCode, expiryDay:s.expiryDay ?? (s.skipExpiryDay === false ? 'trade' : 'skip'), capital:s.capital, fundsUse:s.fundsUse, sizing:s.sizing, maxVolPct:s.maxVolPct, slippage:s.slippage };
 }
 export const stranglePayload = ui => ({ strategy:STRANGLE_KEY, startDate:ui.startDate, endDate:ui.endDate, ...ui.strangle });
-const TEXT = ['source', 'pick', 'entryTime', 'exitTime', 'stopMode', 'stopCheck', 'sizing'];
+const TEXT = ['source', 'pick', 'entryTime', 'exitTime', 'stopMode', 'stopCheck', 'sizing', 'expiryDay'];
 export function strangleFieldChange(ui, field) {
   const key = field.dataset.strangleField; if (!key) return false;
-  ui.strangle[key] = key === 'skipExpiryDay' ? field.value === '1' : TEXT.includes(key) ? field.value : Number(field.value);
+  ui.strangle[key] = TEXT.includes(key) ? field.value : Number(field.value);
   return true;
 }
 export function strangleRunLabel(run) {
@@ -50,7 +50,7 @@ export function strangleRunLabel(run) {
 }
 export function strangleRunFacts(run) {
   const m = run.metrics, s = m.settings || {}, x = m.summary;
-  return { name: 'CE + PE at a target price', settings: [s.source === 'all' ? 'all strikes' : 'near-ATM strikes', ...(s.dayLossPct > 0 ? [`max loss ${s.dayLossPct}% a day`] : []), s.pick === 'distance' ? `ATM ± ${s.distance} points` : `₹${s.target} ±${s.tolerancePct}%`, `${s.entryTime} → ${s.exitTime}`, stopText(s), s.expiryCode === 2 ? 'next expiry' : 'nearest expiry',
+  return { name: 'CE + PE at a target price', settings: [s.source === 'all' ? 'all strikes' : 'near-ATM strikes', ...(s.dayLossPct > 0 ? [`max loss ${s.dayLossPct}% a day`] : []), s.pick === 'distance' ? `ATM ± ${s.distance} points` : `₹${s.target} ±${s.tolerancePct}%`, `${s.entryTime} → ${s.exitTime}`, stopText(s), s.expiryCode === 2 ? 'next expiry' : 'nearest expiry', s.expiryDay === 'next' ? 'expiry day: next expiry' : s.expiryDay === 'trade' || s.skipExpiryDay === false ? 'expiry day: traded' : 'expiry day: skipped',
     `${inr(s.capital)} ${s.sizing === 'compound' ? 'compounding' : 'fixed'} · ${s.fundsUse}% a day`, s.maxVolPct > 0 ? `≤ ${s.maxVolPct}% of volume` : 'no volume limit'],
     trades: `${x.traded} days`, results: [{ label:'Capital', value:`${inr(x.startCapital)} → ${inr(x.endCapital)}`, sub:`${pct(x.returnPct)} · worst day ${pct(x.worstDayPct)}`, tone:x.net }] };
 }
@@ -73,7 +73,7 @@ export function strangleFields(ui) {
     ${num('dayLossPct', 'Max loss a day % (0 = off)', 0, 100, 0.5, 'Close both options once the day is down this percent of capital')}
     ${field('Stop checks', html`<select class="input" data-strangle-field="stopCheck" aria-label="When the stop fires"><option value="close" ${g.stopCheck === 'close' ? 'selected' : ''}>Minute close (sold at that close)</option><option value="touch" ${g.stopCheck === 'touch' ? 'selected' : ''}>Every price (a stop-loss order)</option></select>`)}
     ${field('Expiry', html`<select class="input" data-strangle-field="expiryCode" aria-label="Expiry"><option value="1" ${g.expiryCode === 1 ? 'selected' : ''}>Nearest${g.source === 'near' ? ' (strikes ATM ±10)' : ' saved contract'}</option><option value="2" ${g.expiryCode === 2 ? 'selected' : ''}>Next${g.source === 'near' ? ' (strikes ATM ±3 only)' : ' saved contract'}</option></select>`)}
-    ${field('On the expiry day', html`<select class="input" data-strangle-field="skipExpiryDay" aria-label="Trade on the day the option expires"><option value="1" ${g.skipExpiryDay ? 'selected' : ''}>Skip (option expires that day)</option><option value="0" ${g.skipExpiryDay ? '' : 'selected'}>Trade it</option></select>`)}
+    ${field('On the expiry day', html`<select class="input" data-strangle-field="expiryDay" aria-label="What to do on the day the option expires"><option value="next" ${g.expiryDay === 'next' ? 'selected' : ''}>Use the next expiry (as Algo Trading)</option><option value="skip" ${g.expiryDay === 'skip' ? 'selected' : ''}>Skip (option expires that day)</option><option value="trade" ${g.expiryDay === 'trade' ? 'selected' : ''}>Trade the expiring contract</option></select>`)}
     ${num('capital', 'Starting capital ₹', 1000, 1e10, 1000, 'Starting capital in rupees')}
     ${field('Sizing', html`<select class="input" data-strangle-field="sizing" aria-label="Sizing"><option value="compound" ${g.sizing === 'compound' ? 'selected' : ''}>Compound: % of running capital</option><option value="fixed" ${g.sizing === 'fixed' ? 'selected' : ''}>Fixed: % of starting capital</option></select>`)}
     ${num('fundsUse', 'Capital used a day %', 1, 100, 1, 'Percent of capital used each day')}

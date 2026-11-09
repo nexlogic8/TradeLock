@@ -470,7 +470,8 @@ async function runEma915Backtest(ctx) {
 function strangleSettings(body) {
   const b = body || {}, d = STRANGLE_DEFAULTS, num = k => Number(b[k] ?? d[k]);
   const s = { source: String(b.source ?? d.source), pick: String(b.pick ?? d.pick), distance: num('distance'), target: num('target'), tolerancePct: num('tolerancePct'), entryTime: String(b.entryTime ?? d.entryTime), waitMin: num('waitMin'), exitTime: String(b.exitTime ?? d.exitTime),
-    stopMode: String(b.stopMode ?? d.stopMode), stopCheck: String(b.stopCheck ?? d.stopCheck), stopPct: num('stopPct'), expiryCode: num('expiryCode'), skipExpiryDay: b.skipExpiryDay === undefined ? d.skipExpiryDay : b.skipExpiryDay === true,
+    stopMode: String(b.stopMode ?? d.stopMode), stopCheck: String(b.stopCheck ?? d.stopCheck), stopPct: num('stopPct'), expiryCode: num('expiryCode'),
+    expiryDay: String(b.expiryDay ?? (b.skipExpiryDay === undefined ? d.expiryDay : b.skipExpiryDay === true ? 'skip' : 'trade')),
     capital: num('capital'), fundsUse: num('fundsUse'), sizing: String(b.sizing ?? d.sizing), maxVolPct: num('maxVolPct'), slippage: num('slippage'), dayLossPct: num('dayLossPct') };
   if (!numIn(s.dayLossPct, 0, 100)) throw bad('INVALID_STRANGLE_DAY_LOSS', 'Max loss a day must be 0 (off) to 100% of capital.');
   if (!['all', 'near'].includes(s.source)) throw bad('INVALID_STRANGLE_SOURCE', 'Choose all strikes or the near-ATM history.');
@@ -483,6 +484,7 @@ function strangleSettings(body) {
   if (!['close', 'touch'].includes(s.stopCheck)) throw bad('INVALID_STRANGLE_STOP_CHECK', 'Check the stop on each minute’s close or on every price (a stop-loss order).');
   if (!numIn(s.stopPct, 1, 99)) throw bad('INVALID_STRANGLE_STOP_PCT', 'The stop must be 1–99% below the entry.');
   if (![1, 2].includes(s.expiryCode)) throw bad('INVALID_STRANGLE_EXPIRY', 'Choose the nearest or the next expiry.');
+  if (!['skip', 'trade', 'next'].includes(s.expiryDay)) throw bad('INVALID_STRANGLE_EXPIRY_DAY', 'On the expiry day: skip it, trade the expiring contract or use the next expiry.');
   if (!numIn(s.capital, 1000, 1e10)) throw bad('INVALID_STRANGLE_CAPITAL', 'Starting capital must be between ₹1,000 and ₹1,000 crore.');
   if (!numIn(s.fundsUse, 1, 100)) throw bad('INVALID_STRANGLE_FUNDS', 'Capital used a day must be 1–100%.');
   if (!['compound', 'fixed'].includes(s.sizing)) throw bad('INVALID_STRANGLE_SIZING', 'Choose compounding or fixed capital.');
