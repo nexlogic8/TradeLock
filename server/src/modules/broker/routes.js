@@ -167,8 +167,13 @@ export function brokerRoutes(r) {
       const c = ctx.body.strangleCfg || {}, time = (x, label) => { const s = String(x || ''); if (!/^\d{2}:\d{2}$/.test(s) || s < '09:15' || s > '15:29') throw bad('VALIDATION', `${label} must be a time from 09:15 to 15:29.`); return s; };
       const cfg = { target: v.num(c.target, 'Option price', { min: 0.05, max: 5000 }), bandPct: v.num(c.bandPct, 'Price band %', { min: 1, max: 95 }),
         entry: time(c.entry, 'Entry'), waitMin: v.num(c.waitMin, 'Wait for a price (minutes)', { min: 0, max: 120, int: true }), exit: time(c.exit, 'Exit'),
-        stopPct: v.num(c.stopPct, 'Stop %', { min: 1, max: 99 }), fundsPct: v.num(c.fundsPct, 'Funds used %', { min: 1, max: 100 }), maxVolPct: v.num(c.maxVolPct, 'Max % of volume', { min: 0, max: 100 }) };
+        stopPct: v.num(c.stopPct, 'Stop %', { min: 1, max: 99 }), fundsPct: v.num(c.fundsPct, 'Funds used %', { min: 1, max: 100 }), maxVolPct: v.num(c.maxVolPct, 'Max % of volume', { min: 0, max: 100 }),
+        expiryDay: String(c.expiryDay ?? 'next'), capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits') };
       if (cfg.exit <= cfg.entry) throw bad('VALIDATION', 'The exit time must be after the entry time.');
+      if (!['next', 'skip', 'next1'].includes(cfg.expiryDay)) throw bad('VALIDATION', 'On the expiry day: use the next expiry, skip the day, or use the next expiry from the day before.');
+      // The strategy's own capital (+ its profits) counts trades from when it was set; changing it starts again.
+      let prev = {}; try { prev = JSON.parse(acct.strangle_cfg || '{}') || {}; } catch { prev = {}; }
+      cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
       change.strangle_cfg = JSON.stringify(cfg);
     }
     // Manual trades while Algo Trading runs: on or off at any time, also during the session.

@@ -12,7 +12,8 @@ const { stmt } = await import('../src/db/index.js');
 const { setBook } = await import('../src/modules/broker/book.js');
 const { upsertAccount } = await import('../src/modules/broker/registry.js');
 const { saveRules, getRules } = await import('../src/modules/rules/service.js');
-const { strangleLegs, sizeStrangle, strangleTick, manageTrade, STRANGLE, FEED } = await import('../src/modules/scalper/autotrade.js');
+const { strangleLegs, sizeStrangle, strangleTick, manageTrade, strangleCapital, exitFromFills, STRANGLE, FEED } = await import('../src/modules/scalper/autotrade.js');
+const { optionCharges } = await import('../src/modules/scalper/orb5-options.js');
 
 const D = '2026-10-20', at = hhmm => Date.parse(`${D}T${hhmm}:00+05:30`);   // a Tuesday: the 20 Oct expiry day
 const cfg = { ...STRANGLE.defaults };
@@ -138,7 +139,38 @@ test('AI Algo Trading page: the switch and its settings', async () => {
   assert.equal(on.status, 200);
   const live = await (await fetch(`${base}/api/algo/live`, { headers: H })).json();
   assert.equal(live.account.strangleOn, true);
-  assert.deepEqual(live.account.strangleCfg, { target: 4, bandPct: 90, entry: '09:20', waitMin: 25, exit: '15:25', stopPct: 20, fundsPct: 100, maxVolPct: 10 });
+  assert.deepEqual(live.account.strangleCfg, { target: 4, bandPct: 90, entry: '09:20', waitMin: 25, exit: '15:25', stopPct: 20, fundsPct: 100, maxVolPct: 10, expiryDay: 'next', capital: 0, compound: true, capitalSince: 0 });
   const bad = await fetch(`${base}/api/brokers/${acct.id}/strategies`, { method: 'POST', headers: H, body: JSON.stringify({ strangleCfg: { ...live.account.strangleCfg, exit: '09:10' } }) });
   assert.equal(bad.status, 400);
+});
+
+test('on the expiry day: "skip" records the day as not traded; "next1" takes the next expiry already the day before', async () => {
+  flatBook();
+  const TUE = 14 * 86_400_000, MON = 13 * 86_400_000;   // Tue 3 Nov (an expiry day), Mon 2 Nov
+  const dhan = { ...fakeDhan(), async optionExpiries() { return ['2026-11-03', '2026-11-09', '2026-11-17']; } };
+  const calls = dhan.calls;
+  dhan.optionChain = async ({ expiry }) => { calls.push(['chain', expiry]); return { last_price: 25000, oc: {} }; };
+  const skip = await strangleTick({ ...acct, strangle_on: 1, strangle_cfg: JSON.stringify({ expiryDay: 'skip' }) }, { now: at('09:21') + TUE, adapter: dhan, instruments, pause: noPause });
+  assert.match(skip.skipped, /Expiry day \(2026-11-03\): skipped by your setting/);
+  assert.equal(stmt('SELECT status FROM auto_trades WHERE signal_key = ?').get('2026-11-03:strangle:CE').status, 'skipped');
+  assert.ok(!calls.some(c => c[0] === 'chain'), 'no chain read on a skipped day');
+  await strangleTick({ ...acct, strangle_on: 1, strangle_cfg: JSON.stringify({ expiryDay: 'next1' }) }, { now: at('09:21') + MON, adapter: dhan, instruments, pause: noPause });
+  assert.deepEqual(calls.filter(c => c[0] === 'chain').at(-1), ['chain', '2026-11-09'], 'Monday before the Tuesday expiry: the next one');
+  await strangleTick({ ...acct, strangle_on: 1, strangle_cfg: JSON.stringify({ expiryDay: 'next' }) }, { now: at('09:42') + MON, adapter: dhan, instruments, pause: noPause });
+  assert.deepEqual(calls.filter(c => c[0] === 'chain').at(-1), ['chain', '2026-11-03'], 'the default keeps the nearest the day before');
+});
+
+test('its own capital: ₹50,000 + its realised P&L (exit from the sell fills when the order price is unknown)', () => {
+  const since = Date.parse('2026-11-05T00:00:00+05:30'), t0 = Date.parse('2026-11-09T09:26:00+05:30');
+  const id = Number(stmt(`INSERT INTO auto_trades (user_id, day, signal_key, direction, status, symbol, expiry, strike, lots, qty, entry_price, detail, created_at, closed_at, paper)
+    VALUES (?, '2026-11-09', 'cap-test:CE', 'CE', 'closed', 'NIFTY 2026-11-17 27350 CE', '2026-11-17', 27350, 10, 650, 6, ?, ?, ?, 0)`).run(uid, JSON.stringify({ setup: { strategy: STRANGLE.name } }), t0, t0 + 900_000).lastInsertRowid);
+  const fill = (n, qty, price) => stmt(`INSERT INTO trades (user_id, day, ts, kind, ext_id, symbol, side, qty, price, status) VALUES (?, '2026-11-09', ?, 'exec', ?, 'NIFTY-Nov2026-27350-CE', 'SELL', ?, ?, 'COMPLETE')`).run(uid, t0 + 600_000 + n, `cap-${n}`, qty, price);
+  fill(1, 325, 4); fill(2, 325, 5);
+  assert.equal(exitFromFills(stmt('SELECT * FROM auto_trades WHERE id = ?').get(id)), 4.5);
+  const net = (4.5 - 6) * 650 - optionCharges('2026-11-09', 6 * 650, 4.5 * 650).total;
+  assert.equal(strangleCapital(uid, { capital: 50000, compound: true, capitalSince: since }), Math.round((50000 + net) * 100) / 100);
+  assert.equal(stmt('SELECT exit_price FROM auto_trades WHERE id = ?').get(id).exit_price, 4.5, 'saved for the Algo page');
+  assert.equal(strangleCapital(uid, { capital: 50000, compound: false, capitalSince: since }), 50000);
+  assert.equal(strangleCapital(uid, { capital: 0, compound: true }), null);
+  assert.equal(strangleCapital(uid, { capital: 50000, compound: true, capitalSince: t0 + 1 }), 50000, 'trades before the capital was set do not count');
 });

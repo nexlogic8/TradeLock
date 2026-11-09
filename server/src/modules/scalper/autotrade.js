@@ -70,6 +70,8 @@ import { normalizeScalperCandles } from './routes.js';
 import { algoUnwatch, algoWatch, liveBar, liveMinute, liveTick, onMinuteClose } from './live.js';
 import { isAdminUser, withAllowedStrategies } from '../../lib/access.js';
 import { tryKillSwitch } from '../emergency/service.js';
+import { optionCharges } from './orb5-options.js';
+import { NSE_HOLIDAYS } from '../../lib/market-calendar.js';
 
 export const AUTO = Object.freeze({
   tickMs: 5_000,
@@ -1247,8 +1249,42 @@ async function emaScalpExitDue(trade, adapter, now) {
 // on 6 Nov that sold the call at ₹2.32 before it went to ₹18.50). The other one keeps running. Whatever is still open is
 // sold at EXIT (the Risk rules cutoff instead, when it is earlier). The pair counts as one trade at the risk gate.
 export const STRANGLE = Object.freeze({ name: 'CE + PE target', underlying: 'NIFTY', blockPad: 0.12, retryMs: 20_000,
-  defaults: Object.freeze({ target: 4, bandPct: 90, entry: '09:20', waitMin: 25, exit: '15:25', stopPct: 20, fundsPct: 100, maxVolPct: 10 }) });
+  defaults: Object.freeze({ target: 4, bandPct: 90, entry: '09:20', waitMin: 25, exit: '15:25', stopPct: 20, fundsPct: 100, maxVolPct: 10,
+    // On the expiry day: 'next' = the next expiry, 'skip' = no trade, 'next1' = the next expiry also the trading day before.
+    // capital > 0: size from it (+ this strategy's realised P&L since capitalSince when compound), within the available
+    // funds and the Risk rules capital; 0 = the available funds.
+    expiryDay: 'next', capital: 0, compound: true, capitalSince: 0 }) });
 export const strangleConfig = acct => { let c = {}; try { c = JSON.parse(acct?.strangle_cfg || '{}') || {}; } catch { c = {}; } return { ...STRANGLE.defaults, ...c }; };
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** Dhan's trade-book symbol of an index option, e.g. NIFTY-Nov2026-27350-CE (the month only, not the expiry day). */
+const fillSymbol = t => (t.expiry && t.strike ? `${String(t.symbol || 'NIFTY').split(' ')[0]}-${MONTHS[Number(t.expiry.slice(5, 7)) - 1]}${t.expiry.slice(0, 4)}-${Number(t.strike)}-${t.direction}` : null);
+/** Average price of the sells of a closed trade's option from the broker fills (after its entry, up to its quantity). */
+export function exitFromFills(t) {
+  const sym = fillSymbol(t); if (!sym) return null;
+  let q = 0, v = 0;
+  for (const f of stmt(`SELECT qty, price FROM trades WHERE user_id = ? AND day = ? AND kind = 'exec' AND symbol = ? AND side = 'SELL' AND ts >= ? ORDER BY ts, id`).all(t.user_id, t.day, sym, t.created_at)) {
+    const take = Math.min(Number(f.qty), t.qty - q); if (take <= 0) break;
+    q += take; v += take * Number(f.price);
+  }
+  return q >= t.qty && q > 0 ? Math.round(v / q * 100) / 100 : null;
+}
+/** The CE + PE strategy's capital: cfg.capital, plus its realised P&L (after charges) since cfg.capitalSince when compounding. */
+export function strangleCapital(uid, cfg, paper = 0) {
+  if (!(cfg.capital > 0)) return null;
+  if (!cfg.compound) return cfg.capital;
+  let pnl = 0;
+  for (const t of stmt(`SELECT * FROM auto_trades WHERE user_id = ? AND status = 'closed' AND paper = ? AND created_at >= ? AND entry_price IS NOT NULL AND qty > 0
+      AND json_extract(detail, '$.setup.strategy') = ?`).all(uid, paper, cfg.capitalSince || 0, STRANGLE.name)) {
+    let exit = t.exit_price;
+    if (exit == null) { exit = exitFromFills(t); if (exit != null) update(t.id, { exit_price: exit }); }
+    if (exit == null) continue;
+    pnl += (exit - t.entry_price) * t.qty - optionCharges(t.day, t.entry_price * t.qty, exit * t.qty).total;
+  }
+  return Math.round((cfg.capital + pnl) * 100) / 100;
+}
+/** The next weekday that is not an NSE holiday. */
+const nextMarketDay = day => { let d = day; do { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); d = x.toISOString().slice(0, 10); } while ([0, 6].includes(new Date(`${d}T00:00:00Z`).getUTCDay()) || NSE_HOLIDAYS[d]); return d; };
 
 /** The call and the put (out of the money, traded today) whose last price is nearest cfg.target within ±cfg.bandPct %. */
 export function strangleLegs(chain, cfg) {
@@ -1309,7 +1345,14 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
 
   const u = underlyingFor(STRANGLE.underlying), seg = u.optionSegment;
   const up = [...new Set(await chainCall(uid, () => adapter.optionExpiries({ underlyingScrip: Number(u.securityId), underlyingSeg: 'IDX_I' })))].filter(e => e >= day).sort();
-  const expiry = up[0] === day ? up[1] : up[0];   // on the expiry day: the next expiry
+  // On the expiry day: the next expiry, or no trade (cfg.expiryDay 'skip'); 'next1': the next expiry also the day before.
+  if (up[0] === day && cfg.expiryDay === 'skip') {
+    const reason = `Expiry day (${day}): skipped by your setting.`;
+    stmt(`INSERT OR IGNORE INTO auto_trades (user_id, day, signal_key, direction, status, reason, detail, created_at, closed_at, paper)
+      VALUES (?, ?, ?, 'CE', 'skipped', ?, ?, ?, ?, ?)`).run(uid, day, `${key}:CE`, reason, JSON.stringify({ setup: { strategy: STRANGLE.name, cfg } }), now, now, acct.paper_mode === 1 ? 1 : 0);
+    return { skipped: reason };
+  }
+  const expiry = up[0] === day || (cfg.expiryDay === 'next1' && up[0] === nextMarketDay(day)) ? up[1] : up[0];
   if (!expiry) return later(`Dhan returned no upcoming ${u.label} expiry`);
   const chain = await chainCall(uid, () => adapter.optionChain({ underlyingScrip: Number(u.securityId), underlyingSeg: 'IDX_I', expiry }));
   const legs = strangleLegs(chain, cfg), lo = round2(cfg.target * (1 - cfg.bandPct / 100)), hi = round2(cfg.target * (1 + cfg.bandPct / 100));
@@ -1322,10 +1365,13 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
     const one = await candlesFor(adapter, L.securityId, { interval: '1', now, segment: seg });
     volumes.push(one.filter(c => c.time <= now).reduce((a, c) => a + (Number(c.volume) || 0), 0));
   }
-  const px = L => (L.ask > 0 ? L.ask : L.ltp), funds = Number(getBook(uid).funds?.available);
+  const px = L => (L.ask > 0 ? L.ask : L.ltp), available = Number(getBook(uid).funds?.available);
+  // Its own capital (+ its realised P&L when compounding), never more than the available funds.
+  const own = strangleCapital(uid, cfg, acct.paper_mode === 1 ? 1 : 0), funds = own == null ? available : Math.min(available, Math.max(0, own));
   const size = sizeStrangle({ ce: px(legs.CE), pe: px(legs.PE), lotSize, funds, fundsPct: cfg.fundsPct, capitalLimit: risk.budget?.capitalLimit ?? Infinity,
     volumes: cfg.maxVolPct > 0 ? volumes : null, maxVolPct: cfg.maxVolPct });
-  if (size.lots < 1) return later(size.why === 'volume' ? `too little traded so far (${volumes.join(' / ')} qty): ${cfg.maxVolPct}% is under one lot of each` : `₹${Math.round(funds || 0)} available buys no lot of both`);
+  if (size.lots < 1) return later(size.why === 'volume' ? `too little traded so far (${volumes.join(' / ')} qty): ${cfg.maxVolPct}% is under one lot of each`
+    : own != null && own < available ? `the strategy's capital ₹${Math.round(own)} buys no lot of both` : `₹${Math.round(available || 0)} available buys no lot of both`);
   const qty = size.lots * lotSize;
   // The pair as ONE trade at the risk gate (trade cap, one trade at a time, capital per trade on both together).
   const t = ist(now), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
@@ -1405,7 +1451,7 @@ async function strangleExitDue(trade, adapter, now) {
     bar ||= one.filter(c => c.time < lastClosed).at(-1);       // no trade in that minute: its price is the last one
   }
   strangleChecked.set(trade.id, lastClosed);
-  return bar && bar.close <= stop ? `Stop −${cfg.stopPct}%: the ${ist(lastClosed).hhmm} minute closed at ${bar.close} (stop ${stop})` : null;
+  return bar && bar.close <= stop ? `Stop −${cfg.stopPct}%: the ${ist(lastClosed).hhmm} minute closed at ${round2(bar.close)} (stop ${round2(stop)})` : null;
 }
 
 const exitTry = new Map();   // trade id -> last exit attempt
@@ -1456,7 +1502,8 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
     // Our own exit (fixed exit, strategy exit, square-off): its fill price, from the exit order it last sent.
     const exitId = !stopped && JSON.parse(trade.detail || '{}').exitOrderId;
     const exited = exitId ? await adapter.orderStatus(exitId).catch(() => null) : null;
-    const exitPrice = stopped ? Number(sl.price) || trade.sl_price : exited?.status === 'filled' ? Number(exited.price) || null : null;
+    // Sliced exits (more than the freeze quantity) and positions closed elsewhere: the average of the broker's sell fills.
+    const exitPrice = (stopped ? Number(sl.price) || trade.sl_price : exited?.status === 'filled' ? Number(exited.price) || null : null) ?? exitFromFills(trade);
     update(trade.id, { status: 'closed', closed_at: now, exit_price: exitPrice,
       reason: stopped ? 'Stop-loss hit' : trade.status === 'closing' ? trade.reason || 'Squared off' : 'Position closed outside the auto-trader' });
     notify(uid, { kind: 'risk', level: stopped ? 'warn' : 'info', title: `Algo Trading: ${trade.symbol} closed`,

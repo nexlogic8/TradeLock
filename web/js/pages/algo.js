@@ -92,6 +92,10 @@ function strangleSettings(a, rules) {
       ${f('stopPct', 'Stop % (minute close)', 'number', 1, 99)}
       ${f('fundsPct', 'Funds used %', 'number', 1, 100)}
       ${f('maxVolPct', 'Max % of volume (0 = off)', 'number', 0, 100)}
+      <label class="algo-strangle-field"><span>On the expiry day</span><select class="input" data-strangle-cfg="expiryDay" ${a ? '' : 'disabled'}>${[['next', 'Next expiry'], ['skip', 'Skip the day'], ['next1', 'Next expiry from the day before']].map(([v, t]) => html`<option value="${v}" ${(c.expiryDay || 'next') === v ? 'selected' : ''}>${t}</option>`)}</select></label>
+      ${f('capital', 'Capital ₹ (0 = available funds)', 'number', 0, 1e9, '1000')}
+      <label class="algo-strangle-field"><span>Add its profits</span><select class="input" data-strangle-cfg="compound" ${a ? '' : 'disabled'}><option value="1" ${c.compound !== false ? 'selected' : ''}>Yes (compound)</option><option value="0" ${c.compound === false ? 'selected' : ''}>No (fixed)</option></select></label>
+      ${c.capital > 0 ? html`<small class="muted">Capital now ${Number.isFinite(a?.strangleCapital) ? `₹${Math.round(a.strangleCapital).toLocaleString('en-IN')}` : `₹${Number(c.capital).toLocaleString('en-IN')}`}${c.compound !== false ? ' (₹' + Number(c.capital).toLocaleString('en-IN') + ' + its profits since it was set)' : ''}, within the available funds and your Risk rules capital.</small>` : ''}
       <small class="muted">${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? html`Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
     </div>`;
 }
@@ -333,9 +337,9 @@ export default {
       const id = ctx.data.account?.id;
       if (!id) return;
       const val = k => el.querySelector(`[data-strangle-cfg="${k}"]`)?.value;
-      const cfg = Object.fromEntries(['target', 'bandPct', 'waitMin', 'stopPct', 'fundsPct', 'maxVolPct'].map(k => [k, Number(val(k))]));
+      const cfg = Object.fromEntries(['target', 'bandPct', 'waitMin', 'stopPct', 'fundsPct', 'maxVolPct', 'capital'].map(k => [k, Number(val(k) || 0)]));
       try {
-        await post(`/brokers/${id}/strategies`, { strangleCfg: { ...cfg, entry: val('entry'), exit: val('exit') } });
+        await post(`/brokers/${id}/strategies`, { strangleCfg: { ...cfg, entry: val('entry'), exit: val('exit'), expiryDay: val('expiryDay') || 'next', compound: val('compound') !== '0' } });
         toast('CE + PE settings saved.', 'ok');
         await refresh();
       } catch (err) { toastError(err); await refresh(); }
