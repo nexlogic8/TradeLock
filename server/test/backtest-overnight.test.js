@@ -69,7 +69,7 @@ test('a special weekend session (Diwali Muhurat) is not a night of its own: Frid
   const r = overnightBacktest({ startDate: FRI, endDate: SUN, underlying: 'NIFTY' }, s);
   assert.deepEqual(r.skipped.map(x => x.day), [FRI]);
   assert.match(r.skipped[0].reason, new RegExp(`next session is ${MON}`));
-  const held = overnightBacktest({ startDate: FRI, endDate: SUN, underlying: 'NIFTY', skipBreaks: false }, s);
+  const held = overnightBacktest({ startDate: FRI, endDate: SUN, underlying: 'NIFTY', skipBreaks: false, expiryEve: 'hold' }, s);   // Friday is the eve of the 9 Nov expiry
   assert.deepEqual(held.trades.map(x => [x.day, x.next]), [[FRI, MON]]);
 });
 
