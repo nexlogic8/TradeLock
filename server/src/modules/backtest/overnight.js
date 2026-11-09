@@ -16,7 +16,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
 import { BACKTEST_INDICES } from './gap.js';
-import { SPECIAL_SESSIONS } from '../../lib/market-calendar.js';
+import { SPECIAL_SESSIONS, NSE_HOLIDAYS } from '../../lib/market-calendar.js';
 
 export const OVERNIGHT_DEFAULTS = Object.freeze({ strikes: 'atm', entryTime: '15:25', exitTime: '09:45', expiryEve: 'skip', skipBreaks: true,
   capital: 50000, fundsUse: 100, sizing: 'compound', slippage: 0 });
@@ -54,7 +54,9 @@ function run(store, startDate, endDate, s) {
   // Special sessions (the one-hour Diwali Muhurat on a weekend) are not regular nights: left out.
   for (const c of idx) { const d = dayOf(c.time), h = hm(c.time); if (h < '09:15' || h >= '15:30' || SPECIAL_SESSIONS[d]) continue; if (!sessions.has(d)) sessions.set(d, []); sessions.get(d).push(c); }
   const days = [...sessions.keys()].sort(), tradingDays = new Set(days);
-  const expiry = (day, n) => indexExpiry(U, day, n, tradingDays).date;
+  // Expiry moved back from an exchange holiday, also past the last stored day (e.g. Tue 10 Nov 2026 → Mon 9 Nov).
+  const shift = d => { while (NSE_HOLIDAYS[d]) d = addDays(d, -1); return d; };
+  const expiry = (day, n) => shift(indexExpiry(U, day, n, tradingDays).date);
   const atMinute = store.db.prepare(`SELECT strike, offset, open, close FROM option_1m
     WHERE underlying = ? AND expiry_code = ? AND side = ? AND offset IN (${OFFSETS}) AND time = ?`);
   const strikeFrom = store.db.prepare(`SELECT time, strike, open, close FROM option_1m

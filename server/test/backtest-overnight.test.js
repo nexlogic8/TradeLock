@@ -72,3 +72,15 @@ test('a special weekend session (Diwali Muhurat) is not a night of its own: Frid
   const held = overnightBacktest({ startDate: FRI, endDate: SUN, underlying: 'NIFTY', skipBreaks: false }, s);
   assert.deepEqual(held.trades.map(x => [x.day, x.next]), [[FRI, MON]]);
 });
+
+test('an expiry on an exchange holiday moves back a day, even past the last stored day (10 Nov 2026 → 9 Nov)', () => {
+  const s = store(), FRI = '2026-11-06', MON = '2026-11-09';
+  for (const day of [FRI, MON]) {
+    s.saveIndex('NIFTY', day, day, minutes().map(hhmm => ({ time: t(day, hhmm), open: 22500, high: 22501, low: 22499, close: 22500 })));
+    for (const side of ['CE', 'PE']) { s.saveOptions('NIFTY', 1, side, 0, day, day, series(day, 22500, () => 100)); s.saveOptions('NIFTY', 2, side, 0, day, day, series(day, 22500, () => 200)); }
+  }
+  const skip = overnightBacktest({ startDate: FRI, endDate: FRI, underlying: 'NIFTY', skipBreaks: false }, s);
+  assert.match(skip.skipped[0].reason, /expires on 2026-11-09/);
+  const next = overnightBacktest({ startDate: FRI, endDate: FRI, underlying: 'NIFTY', skipBreaks: false, expiryEve: 'next' }, s);
+  assert.deepEqual([next.trades[0].expiry, next.trades[0].ce.entry], ['2026-11-17', 200]);
+});
