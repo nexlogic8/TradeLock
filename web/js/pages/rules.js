@@ -91,23 +91,15 @@ const LINES = {
 
 const SET_NAMES = { manual: 'Manual trading', algo: 'Algo Trading' };
 
-/** The set in force now: Algo Trading on (with protection) → Algo rules, else Manual rules (server: rules/service.js). */
-const modeNow = ctx => {
-  const b = ctx.state.dash?.broker;
-  return b ? (b.algoOn && b.agentOn !== false ? 'algo' : 'manual') : ctx.data.mode || 'manual';
-};
-
-/** Manual | Algo switch: which rule set is being edited, and which one protects the account now. */
-function setSwitch(ctx) {
-  const set = ctx.ui.set, now = modeNow(ctx), live = set === now;
+/** Which set this is and whether it protects the account now (Manual here; Algo Trading on the AI Algo Trading page). */
+function setNote(set, now) {
+  const live = set === now;
   return html`
     <div class="rule-sets" id="rule-sets">
-      <div class="seg" role="group" aria-label="Rule set">
-        ${['manual', 'algo'].map(k => html`<button type="button" data-set="${k}" aria-pressed="${set === k}">${SET_NAMES[k]}${now === k ? html` <span class="pill sm">Active now</span>` : ''}</button>`)}
-      </div>
-      <p class="muted small" id="rule-set-note">${live
-        ? html`These rules protect your account now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
-        : html`<b>Not in force now.</b> These apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}; edits are saved for then.`}</p>
+      <p class="muted small" id="rule-set-note"><b>${SET_NAMES[set]} rules.</b> ${live
+        ? html`In force now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
+        : html`Not in force now: they apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}. Edits are saved for then.`}
+      ${set === 'manual' ? html` Algo Trading has its own rules on the <a href="/algo" data-nav="algo">AI Algo Trading</a> page.` : html` Your manual trading rules are on the <a href="/rules" data-nav="rules">Risk rules</a> page.`}</p>
     </div>`;
 }
 
@@ -118,6 +110,113 @@ function killLine(d) {
   return `Also lock the ${d?.broker?.label || 'broker'} app when a limit hits`;
 }
 
+/**
+ * One rule set's editor (rows, switches, (i) diagrams), shared by the Risk rules page (Manual trading) and the AI Algo
+ * Trading page (Algo Trading). `f` = the set's rules being edited, `set` = 'manual' | 'algo', `now` = the set in force.
+ */
+export function rulesPanel(f, { set, now, capital, dash, error = null, pending = null }) {
+  const broker = dash?.broker?.label || 'broker';
+  const tv = tipValues(f, capital, limitOf, broker);   // numbers for the (i) diagrams
+  return html`
+    ${pending ? html`<div class="banner amber mb" id="rules-pending">${icon('clock')}<div><b>Changes scheduled for ${longDay(pending)}.</b> You loosened a limit during market hours, so the new rules start next session.</div></div>` : ''}
+    <div class="panel pad srules" data-rules-set="${set}">
+      ${setNote(set, now)}
+      <div class="srules-head"><span class="muted small">Starting capital today</span><span class="srules-save" id="save-msg" aria-live="polite"></span><b class="num">${capital > 0 ? inr(capital) : 'not known yet'}</b></div>
+      ${row('maxLoss', 'Daily stop‑loss', LINES.maxLoss(f, capital), f.maxLoss, moneyInput('maxLoss', f.maxLoss), tv)}
+      ${row('capitalUse', 'Capital per trade', LINES.capitalUse(f, capital), f.capitalUse, moneyInput('capitalUse', f.capitalUse), tv)}
+      ${row('profitLock', 'Profit target', LINES.profitLock(f, capital), f.profitLock, moneyInput('profitLock', f.profitLock), tv)}
+      ${row('maxTrades', 'Trades per day', LINES.maxTrades(), f.maxTrades, countInput('maxTrades', f.maxTrades, 'trades'), tv)}
+      ${row('lossStreak', 'Losing streak', LINES.lossStreak(), f.lossStreak, countInput('lossStreak', f.lossStreak, 'losses'), tv)}
+      ${row('giveback', 'Profit give-back', LINES.giveback(f, capital), f.giveback,
+        html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-giveback" data-value="giveback" inputmode="numeric" value="${f.giveback.value}" aria-label="Give-back percent"></div>`, tv)}
+      ${set === 'algo' ? '' : row('optionSl', 'Option SL room', LINES.optionSl(f, capital), f.optionSl,
+        html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-optionSl" data-value="optionSl" inputmode="decimal" value="${f.optionSl.value}" aria-label="Option stop-loss room percent"></div>`, tv)}
+      ${row('cutoff', 'Cutoff time', LINES.cutoff(), f.cutoff,
+        html`<select class="input num" id="v-cutoff" data-cutoff aria-label="Cutoff time">${[...new Set([...CUTOFFS, f.cutoff.value])].sort().map(t => html`<option value="${t}" ${f.cutoff.value === t ? 'selected' : ''}>${label12(t)}</option>`)}</select>`, tv)}
+      ${row('killSwitch', `${broker} kill switch`, killLine(dash), f.killSwitch, '', tv)}
+    </div>
+    <div class="mt-s" id="rules-error">${formError(error)}</div>`;
+}
+
+/** The set in force now from the live dashboard (Algo Trading on with protection → 'algo'). */
+export const ruleSetNow = (dash, fallback = 'manual') => {
+  const b = dash?.broker;
+  return b ? (b.algoOn && b.agentOn !== false ? 'algo' : 'manual') : fallback;
+};
+
+/**
+ * Edits in a rules panel: every change is saved by itself (no Save button): switches, % / ₹ and the cutoff at once,
+ * typed values shortly after the last key. One save at a time; a change made meanwhile is saved right after.
+ * `state` = { form, set, error, pending } (kept by the page across repaints); `onSaved(res)` after each save.
+ */
+export function bindRules(ctx, state, { capital, onSaved = () => {} }) {
+  const { el, signal } = ctx;
+  const inPanel = n => !!n.closest(`[data-rules-set="${state.set}"]`);
+  let timer = null, saving = false, again = false;
+  const status = (text, cls = '') => { const m = $('#save-msg', el); if (m) { m.textContent = text; m.className = `srules-save ${cls}`; } };
+  const save = async () => {
+    clearTimeout(timer); timer = null;
+    if (saving) { again = true; return; }
+    saving = true; status('Saving…');
+    try {
+      const res = await put('/rules', { rules: state.form, set: state.set });
+      const hadPending = !!state.pending;
+      state.error = null; state.pending = res.pending ? res.pendingFrom : null;
+      if (res.deferred) toast(`Saved. Looser limits start ${longDay(res.pendingFrom)}.`, 'warn');
+      status('Saved', 'ok');
+      onSaved(res);
+      // The pending banner comes or goes: repaint unless a value is being typed (that would drop the cursor).
+      if (!!state.pending !== hadPending && !el.querySelector('[data-value]:focus')) ctx.paint();
+      const box = $('#rules-error', el); if (box) box.innerHTML = '';
+      // Overview reads the rules from the live dashboard: refresh it now (the server also pushes it).
+      get('/dashboard').then(dash => store.set({ dash })).catch(() => {});
+    } catch (e) {
+      state.error = e.message; status('Not saved', 'neg');
+      const box = $('#rules-error', el); if (box) box.innerHTML = String(formError(state.error));
+    } finally {
+      saving = false;
+      if (again) { again = false; save(); }
+    }
+  };
+  const saveSoon = () => { clearTimeout(timer); status('Editing…'); timer = setTimeout(save, 900); };
+  signal.addEventListener('abort', () => { if (timer) save(); }, { once: true });   // leaving mid-edit still saves
+  on(el, 'click', '[data-toggle]', (_, b) => { if (!inPanel(b)) return; const r = state.form[b.dataset.toggle]; r.on = !r.on; ctx.paint(); save(); }, signal);
+  on(el, 'click', '[data-mode]', (_, b) => {
+    if (!inPanel(b)) return;
+    const [key, mode] = b.dataset.mode.split(':');
+    const r = state.form[key];
+    if (r.mode === mode) return;
+    const cap = capital();
+    // Convert so the rupee limit stays the same when capital is known.
+    if (mode === 'percent') r.value = cap > 0 ? Math.max(0.1, Math.round((r.value / cap) * 1000) / 10) : DEFAULT_PCT[key];
+    else r.value = cap > 0 ? Math.max(key === 'capitalUse' ? 1000 : 100, Math.round(limitOf(r, cap))) : key === 'maxLoss' ? 5000 : key === 'capitalUse' ? 50000 : 10000;
+    r.mode = mode;
+    ctx.paint(); save();
+  }, signal);
+  on(el, 'change', '[data-cutoff]', (_, s) => { if (!inPanel(s)) return; state.form.cutoff.value = s.value; save(); }, signal);
+  on(el, 'input', '[data-value]', (_, i) => {
+    if (!inPanel(i)) return;
+    const r = state.form[i.dataset.value];
+    const n = r.mode === 'percent' || i.dataset.value === 'optionSl' ? parseFloat(i.value.replace(/[^\d.]/g, '')) : Number(i.value.replace(/[^\d]/g, ''));
+    r.value = Number.isFinite(n) ? n : 0;
+    // Keep the rupee amounts in the short lines in step while typing (give-back follows the stop-loss).
+    for (const k of ['maxLoss', 'capitalUse', 'profitLock', 'giveback', 'optionSl']) {
+      const line = $(`#line-${k}`, el);
+      if (line && LINES[k]) line.textContent = LINES[k](state.form, capital());
+    }
+    saveSoon();
+  }, signal);
+  on(el, 'focusout', '[data-value]', (_, i) => {
+    if (!inPanel(i)) return;
+    const r = state.form[i.dataset.value]; i.value = r.mode === 'percent' ? r.value : int(r.value);
+    if (timer) save();   // done typing: save now
+  }, signal);
+}
+
+/** A rule set from GET /rules, ready to edit (defaults older accounts may lack). */
+export const editableSet = (data, set) => withDefaults(data[set] || data.active);
+
+// Risk rules page: the Manual trading rules (Algo Trading's are on the AI Algo Trading page) and Start / Stop Protection.
 export default {
   title: 'Risk rules',
   sub: 'Set clear limits before your trading session begins',
@@ -126,40 +225,15 @@ export default {
 
   async load(ctx) {
     const data = await get('/rules');
-    // Two sets (Manual trading / Algo Trading); the page opens on the one in force.
-    ctx.ui.forms = { manual: withDefaults(data.manual || data.active), algo: withDefaults(data.algo || data.active) };
-    ctx.ui.set = ctx.ui.set || data.mode || 'manual';
-    ctx.ui.form = ctx.ui.forms[ctx.ui.set];
-    ctx.ui.error = null;
+    ctx.ui.rules = { set: 'manual', form: editableSet(data, 'manual'), error: null, pending: data.pending ? data.pendingFrom : null };
     return data;
   },
 
   view(ctx) {
-    const f = ctx.ui.form;
-    const capital = ctx.state.dash?.capital ?? ctx.data.capital;
-    const d = ctx.state.dash;
-    const broker = d?.broker?.label || 'broker';
-    const tv = tipValues(f, capital, limitOf, broker);   // numbers for the (i) diagrams
+    const d = ctx.state.dash, r = ctx.ui.rules, capital = d?.capital ?? ctx.data.capital;
     return html`
-      ${protCard(d, f, ctx.ui.set)}
-      ${ctx.data.pending ? html`<div class="banner amber mb" id="rules-pending">${icon('clock')}<div><b>Changes scheduled for ${longDay(ctx.data.pendingFrom)}.</b> You loosened a limit during market hours, so the new rules start next session.</div></div>` : ''}
-      <div class="panel pad srules">
-        ${setSwitch(ctx)}
-        <div class="srules-head"><span class="muted small">Starting capital today</span><span class="srules-save" id="save-msg" aria-live="polite"></span><b class="num">${capital > 0 ? inr(capital) : 'not known yet'}</b></div>
-        ${row('maxLoss', 'Daily stop‑loss', LINES.maxLoss(f, capital), f.maxLoss, moneyInput('maxLoss', f.maxLoss), tv)}
-        ${row('capitalUse', 'Capital per trade', LINES.capitalUse(f, capital), f.capitalUse, moneyInput('capitalUse', f.capitalUse), tv)}
-        ${row('profitLock', 'Profit target', LINES.profitLock(f, capital), f.profitLock, moneyInput('profitLock', f.profitLock), tv)}
-        ${row('maxTrades', 'Trades per day', LINES.maxTrades(), f.maxTrades, countInput('maxTrades', f.maxTrades, 'trades'), tv)}
-        ${row('lossStreak', 'Losing streak', LINES.lossStreak(), f.lossStreak, countInput('lossStreak', f.lossStreak, 'losses'), tv)}
-        ${row('giveback', 'Profit give-back', LINES.giveback(f, capital), f.giveback,
-          html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-giveback" data-value="giveback" inputmode="numeric" value="${f.giveback.value}" aria-label="Give-back percent"></div>`, tv)}
-        ${ctx.ui.set === 'algo' ? '' : row('optionSl', 'Option SL room', LINES.optionSl(f, capital), f.optionSl,
-          html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-optionSl" data-value="optionSl" inputmode="decimal" value="${f.optionSl.value}" aria-label="Option stop-loss room percent"></div>`, tv)}
-        ${row('cutoff', 'Cutoff time', LINES.cutoff(), f.cutoff,
-          html`<select class="input num" id="v-cutoff" data-cutoff aria-label="Cutoff time">${[...new Set([...CUTOFFS, f.cutoff.value])].sort().map(t => html`<option value="${t}" ${f.cutoff.value === t ? 'selected' : ''}>${label12(t)}</option>`)}</select>`, tv)}
-        ${row('killSwitch', `${broker} kill switch`, killLine(d), f.killSwitch, '', tv)}
-      </div>
-      <div class="mt-s" id="rules-error">${formError(ctx.ui.error)}</div>`;
+      ${protCard(d, r.form, 'manual')}
+      ${rulesPanel(r.form, { set: 'manual', now: ruleSetNow(d, ctx.data.mode), capital, dash: d, error: r.error, pending: r.pending })}`;
   },
 
   onStore(ctx, patch) {
@@ -167,80 +241,15 @@ export default {
     const ks = $('#line-killSwitch', ctx.el);
     if (ks) ks.innerHTML = String(killLine(patch.dash));
     const card = $('#prot-card', ctx.el);
-    if (card) card.outerHTML = String(protCard(patch.dash, ctx.ui.form, ctx.ui.set));   // only the card: unsaved edits stay
+    if (card) card.outerHTML = String(protCard(patch.dash, ctx.ui.rules.form, 'manual'));   // only the card: unsaved edits stay
     const sets = $('#rule-sets', ctx.el);
-    if (sets) sets.outerHTML = String(setSwitch(ctx));   // Algo switched on / off: "Active now" moves
+    if (sets) sets.outerHTML = String(setNote('manual', ruleSetNow(patch.dash, ctx.data.mode)));   // Algo switched on / off
   },
 
   mount(ctx) {
-    const { el, signal, ui } = ctx;
-    const capital = () => ctx.state.dash?.capital ?? ctx.data.capital;
-    // Every change is saved by itself (no Save button): switches, % / ₹ and the cutoff at once, typed values
-    // shortly after the last key. One save at a time; a change made meanwhile is saved right after.
-    // Saves carry their set, so switching Manual / Algo mid-edit still saves the edit to the set it was made in.
-    let timer = null, saving = false, again = null;
-    const status = (text, cls = '') => { const m = $('#save-msg', el); if (m) { m.textContent = text; m.className = `srules-save ${cls}`; } };
-    const save = async (set = ui.set) => {
-      clearTimeout(timer); timer = null;
-      if (saving) { again = set; return; }
-      saving = true; status('Saving…');
-      try {
-        const res = await put('/rules', { rules: ui.forms[set], set });
-        const hadPending = !!ctx.data.pending;
-        ctx.data = res; ui.error = null;
-        if (res.deferred) toast(`Saved. Looser limits start ${longDay(res.pendingFrom)}.`, 'warn');
-        status('Saved', 'ok');
-        // The pending banner comes or goes: repaint unless a value is being typed (that would drop the cursor).
-        if (!!res.pending !== hadPending && !el.querySelector('[data-value]:focus')) ctx.paint();
-        $('#rules-error', el).innerHTML = '';
-        // Overview reads the rules from the live dashboard: refresh it now (the server also pushes it).
-        get('/dashboard').then(dash => store.set({ dash })).catch(() => {});
-      } catch (e) {
-        ui.error = e.message; status('Not saved', 'neg');
-        const box = $('#rules-error', el); if (box) box.innerHTML = String(formError(ui.error));
-      } finally {
-        saving = false;
-        if (again) { const s = again; again = null; save(s); }
-      }
-    };
-    const saveSoon = () => { clearTimeout(timer); status('Editing…'); timer = setTimeout(save, 900); };
-    signal.addEventListener('abort', () => { if (timer) save(); }, { once: true });   // leaving mid-edit still saves
-    on(el, 'click', '[data-set]', (_, b) => {
-      if (b.dataset.set === ui.set) return;
-      if (timer) save(ui.set);   // a typed value not saved yet goes to the set it was typed in
-      ui.set = b.dataset.set; ui.form = ui.forms[ui.set];
-      ctx.paint();
-    }, signal);
-    on(el, 'click', '[data-toggle]', (_, b) => { const r = ui.form[b.dataset.toggle]; r.on = !r.on; ctx.paint(); save(); }, signal);
+    bindRules(ctx, ctx.ui.rules, { capital: () => ctx.state.dash?.capital ?? ctx.data.capital, onSaved: res => { ctx.data = res; } });
     // Start / Stop Protection = the top-bar switch (it flips both at once and confirms with the server).
-    on(el, 'click', '[data-prot]', () => document.getElementById('agent-btn')?.click(), signal);
-    on(el, 'click', '[data-mode]', (_, b) => {
-      const [key, mode] = b.dataset.mode.split(':');
-      const r = ui.form[key];
-      if (r.mode === mode) return;
-      const cap = capital();
-      // Convert so the rupee limit stays the same when capital is known.
-      if (mode === 'percent') r.value = cap > 0 ? Math.max(0.1, Math.round((r.value / cap) * 1000) / 10) : DEFAULT_PCT[key];
-      else r.value = cap > 0 ? Math.max(key === 'capitalUse' ? 1000 : 100, Math.round(limitOf(r, cap))) : key === 'maxLoss' ? 5000 : key === 'capitalUse' ? 50000 : 10000;
-      r.mode = mode;
-      ctx.paint(); save();
-    }, signal);
-    on(el, 'change', '[data-cutoff]', (_, s) => { ui.form.cutoff.value = s.value; save(); }, signal);
-    on(el, 'input', '[data-value]', (_, i) => {
-      const r = ui.form[i.dataset.value];
-      const n = r.mode === 'percent' || i.dataset.value === 'optionSl' ? parseFloat(i.value.replace(/[^\d.]/g, '')) : Number(i.value.replace(/[^\d]/g, ''));
-      r.value = Number.isFinite(n) ? n : 0;
-      // Keep the rupee amounts in the short lines in step while typing (give-back follows the stop-loss).
-      for (const k of ['maxLoss', 'capitalUse', 'profitLock', 'giveback', 'optionSl']) {
-        const line = $(`#line-${k}`, el);
-        if (line) line.textContent = LINES[k](ui.form, capital());
-      }
-      saveSoon();
-    }, signal);
-    on(el, 'focusout', '[data-value]', (_, i) => {
-      const r = ui.form[i.dataset.value]; i.value = r.mode === 'percent' ? r.value : int(r.value);
-      if (timer) save();   // done typing: save now
-    }, signal);
+    on(ctx.el, 'click', '[data-prot]', () => document.getElementById('agent-btn')?.click(), ctx.signal);
   },
 };
 

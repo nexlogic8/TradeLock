@@ -9,6 +9,7 @@ import { builtInFor, sharedRulesFor } from './strategy-library.js';
 import { artInfo } from './strategy-art.js';
 import { confirmAlgoStart, noticeDialog } from '../ui/dialog.js';
 import { raw } from '../core/dom.js';
+import { rulesPanel, bindRules, editableSet, ruleSetNow } from './rules.js';
 
 const inr = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 const price = n => (Number.isFinite(Number(n)) && n !== null ? Number(n).toFixed(2) : '—');
@@ -174,7 +175,7 @@ function gapLockRow(a, rules) {
       <span class="algo-strat-name"><b>Kill switch if no entry</b><small>${on_
         ? 'No Gap entry today (no gap, skipped or not filled): the Dhan kill switch locks trading for the rest of the day.'
         : 'Off: a day without a Gap entry leaves the account open for trading.'}${on_ && !rules?.killSwitch
-        ? html` <span class="warn">Needs the kill switch on in <a href="/rules" data-nav="rules">Risk rules</a>.</span>` : ''}</small></span>
+        ? html` <span class="warn">Needs the kill switch on in the <a href="#algo-rules">risk rules below</a>.</span>` : ''}</small></span>
       <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="Kill switch on a day without a Gap open 09:15 entry" data-gap-lock-toggle ${a ? '' : 'disabled'}></button>
     </div>`;
 }
@@ -187,7 +188,10 @@ export default {
 
   // Paper is the default: with no broker connected, opening the page sets up the Paper account (₹10 lakh paper wallet,
   // shared market data), so strategies can be switched on and Algo Trading started on paper at once.
-  async load() {
+  async load(ctx) {
+    // Algo Trading's own risk rules are edited here (the Risk rules page keeps the Manual trading set).
+    const rules = await get('/rules').catch(() => null);
+    if (rules) ctx.ui.algoRules = { set: 'algo', form: editableSet(rules, 'algo'), error: null, pending: rules.pending ? rules.pendingFrom : null, mode: rules.mode };
     const d = await get('/algo/live');
     if (d.account) return d;
     try { await post('/paper/account'); return await get('/algo/live'); } catch { return d; }
@@ -254,6 +258,12 @@ export default {
         </div>
       </section>
 
+      ${ctx.ui.algoRules ? html`
+      <section class="algo-rules-card" id="algo-rules">
+        <h3 class="panel-title algo-rules-title">Risk rules for Algo Trading</h3>
+        ${rulesPanel(ctx.ui.algoRules.form, { set: 'algo', now: ruleSetNow(ctx.state.dash, ctx.ui.algoRules.mode), capital: ctx.state.dash?.capital ?? d.budget?.capital, dash: ctx.state.dash, error: ctx.ui.algoRules.error, pending: ctx.ui.algoRules.pending })}
+      </section>` : ''}
+
       <section class="panel pad algo-block algo-shared">
         <h3 class="panel-title">Every automatic trade</h3>
         <dl class="algo-rules">${sharedRulesFor(admin).map(([k, v]) => html`<dt>${k}</dt><dd>${v}${k === 'Phone alarm' && window.TradeLockApp?.testTradeAlarm ? html` <button class="btn btn-sm" type="button" data-alarm-test-algo>Test alarm</button>` : ''}</dd>`)}</dl>
@@ -283,10 +293,13 @@ export default {
 
   mount(ctx) {
     const { el, signal } = ctx;
-    // A repaint would close a strategy picture someone is looking at; that refresh waits for the next round.
-    const refresh = async () => { try { const d = await get('/algo/live'); if (el.querySelector('.sart-anchor.open, .sart-anchor:focus-within, .sart-anchor:hover')) return; ctx.data = d; ctx.paint(); } catch { /* keep the last view */ } };
+    // A repaint would close a strategy picture someone is looking at, or drop the cursor from a rule value being typed;
+    // that refresh waits for the next round.
+    const refresh = async () => { try { const d = await get('/algo/live'); if (el.querySelector('.sart-anchor.open, .sart-anchor:focus-within, .sart-anchor:hover, [data-rules-set] input:focus')) return; ctx.data = d; ctx.paint(); } catch { /* keep the last view */ } };
     const timer = setInterval(refresh, 15_000);
     signal.addEventListener('abort', () => clearInterval(timer), { once: true });
+    // Algo Trading's risk rules (shared editor with the Risk rules page): saved as they change; the day's numbers follow.
+    if (ctx.ui.algoRules) bindRules(ctx, ctx.ui.algoRules, { capital: () => ctx.state.dash?.capital ?? ctx.data.budget?.capital, onSaved: () => refresh() });
     const syncTopbar = account => {
       const dash = store.get().dash;
       if (dash && account) store.set({ dash: { ...dash, broker: account } });

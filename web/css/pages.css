@@ -1617,6 +1617,8 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .algo-strangle-field .input { padding: 6px 8px; font-size: 13px; }
 /* Algo Trading grid: a strategy per row, a switch per index (NIFTY 50 · BANK NIFTY · SENSEX). */
 .algo-grid-card { margin-bottom: 16px; }
+.algo-rules-card { margin: 16px 0; }
+.algo-rules-title { margin: 4px 0 10px; }
 .algo-grid-note { margin: -4px 0 14px; max-width: 920px; }
 .algo-grid-line { display: grid; grid-template-columns: minmax(200px, 1fr) auto minmax(0, 2fr); align-items: center; gap: 12px; }
 .algo-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
