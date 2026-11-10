@@ -221,14 +221,14 @@ export default {
 
       <div class="kpis algo-kpis">
         <div class="panel kpi"><span class="lbl">Day stop-loss</span><b class="num">${d.budget.daily ? inr(d.budget.daily) : 'Off'}</b><small>${d.budget.lossLimitMode === 'percent' ? `${d.budget.lossLimitValue}% of ${inr(d.budget.capital)}` : 'Fixed amount'}</small></div>
-        <div class="panel kpi"><span class="lbl">SL left for the next trade</span><b class="num ${d.budget.left > 0 ? '' : 'neg'}">${inr(d.budget.left)}</b><small>Today’s P&L ${inr(d.budget.pnl)}</small></div>
+        <div class="panel kpi"><span class="lbl">SL left for the next trade</span><b class="num ${!d.budget.daily || d.budget.left > 0 ? '' : 'neg'}">${d.budget.daily ? inr(d.budget.left) : 'Off'}</b><small>Today’s P&L ${inr(d.budget.pnl)}</small></div>
         <div class="panel kpi"><span class="lbl">Automatic trades today</span><b class="num">${d.trades.filter(t => t.entryPrice != null).length}</b><small>${d.rules.tradeCap ? `Trade cap ${d.rules.tradeCap}` : 'No trade cap'}</small></div>
         <div class="panel kpi"><span class="lbl">Square-off</span><b class="num">${d.rules.squareOff}</b><small>${d.rules.locked ? 'Account locked for today' : d.rules.cutoff ? 'Your Risk rules cutoff' : 'Default (cutoff off)'}</small></div>
       </div>
 
       <section class="panel pad algo-grid-card">
         <h3 class="panel-title">Strategies × indices <a class="algo-strat-link" href="/strategy" data-nav="strategy">All strategies ${icon('arrow')}</a></h3>
-        <p class="muted small algo-grid-note">Switch each strategy on for the indices it should trade. Every strategy holds one trade at a time per index, and different strategies and indices run side by side. They share your Risk rules: the day’s loss limit, trade cap, cutoff and kill switch count all of them together. Funds go first come, first served.</p>
+        <p class="muted small algo-grid-note">Switch each strategy on for the indices it should trade. Every strategy holds one trade at a time per index, and different strategies and indices run side by side. ${admin ? 'Each one sizes its trades and stops from its own settings below.' : 'They share your Risk rules: the day’s loss limit, trade cap, cutoff and kill switch count all of them together.'} Funds go first come, first served.</p>
         <div class="algo-strat-list algo-grid" role="table" aria-label="Strategies by index">
           ${gridStrats.map(s => gridRow(s, a, d.trades || [], d.rules))}
           ${otherStrats.map(s => strategyRow(s, a, !!ctx.ui.info?.[s.key], d.rules))}

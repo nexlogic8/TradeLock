@@ -10,6 +10,7 @@ import { marketOpen } from '../../lib/time.js';
 import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices, strangleConfig, strangleCapital, gapConfig, gapCapital } from './autotrade.js';
 import { paperTrades, retestConfig } from './paper-retest.js';
 import { UNDERLYINGS } from './underlyings.js';
+import { isAdminUser } from '../../lib/access.js';
 import { algoGrid, GRID_INDICES, GRID_STRATEGIES } from './algo-grid.js';
 
 /** The Algo Trading grid for the page: every cell's switch; CE + PE cells with their full settings and capital now. */
@@ -32,7 +33,7 @@ export function algoReadiness(userId, acct) {
     { id: 'paper', label: 'Paper trading', ok: true, detail: `Simulated fills at live prices with the paper wallet${acct.broker === 'paper' ? ' (no broker connected)' : ''}` },
     { id: 'protection', label: 'Protection on', ok: acct.agent_on !== 0, detail: acct.agent_on !== 0 ? 'Risk rules are enforced on every entry' : 'Turn protection on first: automatic entries only run with your risk rules enforced.' },
     { id: 'subscription', label: 'Subscription', ok: !!getSubscription(userId)?.active, detail: getSubscription(userId)?.active ? 'Active' : 'An active TradeLock subscription is needed.' },
-    { id: 'lossLimit', label: 'Daily loss limit', ok: !!rules.maxLoss?.on, detail: rules.maxLoss?.on ? 'Sets how much each automatic trade may risk' : 'Turn on the daily loss limit in Risk rules: it sets how much each automatic trade may risk.' },
+    { id: 'lossLimit', label: 'Daily loss limit', ok: !!rules.maxLoss?.on || isAdminUser(userId), detail: rules.maxLoss?.on ? 'Sets how much each automatic trade may risk' : isAdminUser(userId) ? 'Off: each strategy sizes its trades and stops from its own settings' : 'Turn on the daily loss limit in Risk rules: it sets how much each automatic trade may risk.' },
   ];
   return [
     { id: 'dhan', label: 'Dhan account', ok: acct?.broker === 'dhan', detail: acct?.broker === 'dhan' ? 'Connected broker is Dhan' : 'Algo Trading needs a Dhan account.' },
@@ -42,7 +43,7 @@ export function algoReadiness(userId, acct) {
       ? { id: 'orders', label: 'Orders through StoxKart', ok: stoxkartLink(userId).status === 'verified', detail: stoxkartLink(userId).status === 'verified' ? 'StoxKart login verified; orders, stop-losses and exits go to StoxKart' : 'Test the StoxKart connection on Broker accounts: it must show "Connected".' }
       : { id: 'orders', label: 'Orders allowed from TradeLock', ok: perms?.ordersAllowed !== false, detail: perms?.ordersAllowed === false ? 'Dhan is blocking API orders from this server. Register the TradeLock server IP as your static IP in Dhan.' : 'Server IP accepted by Dhan' },
     { id: 'subscription', label: 'Subscription', ok: !!getSubscription(userId)?.active, detail: getSubscription(userId)?.active ? 'Active' : 'An active TradeLock subscription is needed to place orders.' },
-    { id: 'lossLimit', label: 'Daily loss limit', ok: !!rules.maxLoss?.on, detail: rules.maxLoss?.on ? 'Sets how much each automatic trade may risk' : 'Turn on the daily loss limit in Risk rules: it sets how much each automatic trade may risk.' },
+    { id: 'lossLimit', label: 'Daily loss limit', ok: !!rules.maxLoss?.on || isAdminUser(userId), detail: rules.maxLoss?.on ? 'Sets how much each automatic trade may risk' : isAdminUser(userId) ? 'Off: each strategy sizes its trades and stops from its own settings' : 'Turn on the daily loss limit in Risk rules: it sets how much each automatic trade may risk.' },
   ];
 }
 
