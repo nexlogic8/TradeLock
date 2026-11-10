@@ -24,6 +24,7 @@ import { Worker } from 'node:worker_threads';
 import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
+import { SPECIAL_SESSIONS } from '../../lib/market-calendar.js';
 
 export const GAP_DEFAULTS = Object.freeze({ underlying: 'NIFTY', signal: 'premium', atmFrom: 'dhan', dailySlAmount: 0, liveSizing: false, capital: 100000, compound: true, fundsUse: 90, dailySlPct: 20, lotCap: 0, slippage: 1, squareOff: '15:15', minStopPct: 1, costToCostR: 1, exitCandle: '0916', strike: 0, lateEntryPct: 5, minGapPts: 0, tradeAmount: 0, entryMode: 'open', retestMin: 15, retestSlPct: 5 });   // ENTRY_MODE 'open' (live: at 09:15) or 'retest' (a limit buy at the 09:15 open when the option comes back to it within RETEST_MIN minutes, stop RETEST_SL_PCT below)   // TRADE_AMOUNT: with fixed sizing, this many rupees a trade (0 = FUNDS_USE % of the starting capital)   // MIN_GAP_PTS: trade only when NIFTY opens at least this many points from the previous close (0 = any gap)   // exit at 09:16 any colour, as live (AUTO.gap.exitAt)   // cost to cost at 1R, as live (AUTO.costToCostR)
 export const GAP_MODES = Object.freeze({ best: 'Late entry: fill above the 09:15 open', worst: 'Worst case: fill at the 09:16 open' });
@@ -73,7 +74,9 @@ export function gapBacktest({ startDate, endDate, ...options }, store) {
 function run(store, startDate, endDate, s) {
   const UNDERLYING = indexKey(s.underlying), label = UNDERLYING === 'BANKNIFTY' ? 'BANK NIFTY' : UNDERLYING;
   const idx = store.index(UNDERLYING, sec(addDays(startDate, -10)), sec(addDays(endDate, 1))).filter(c => inSession(c.time)), byDay = new Map();
-  for (const c of idx) { const d = dayOf(c.time); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(c); }
+  // Special weekend sessions (the one-hour Diwali Muhurat) are not regular days: no option history, and the next day's
+  // gap is from the last regular close (9 Nov 2026 compares with Fri 6 Nov, not Sun 8 Nov).
+  for (const c of idx) { const d = dayOf(c.time); if (SPECIAL_SESSIONS[d]) continue; if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(c); }
   const days = [...byDay.keys()].sort();
   // Only the rows the rule needs (the ATM at 09:15, that strike's day, its previous close), not every strike.
   const q = {

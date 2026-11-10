@@ -17,7 +17,7 @@ import { openHistory } from './history-store.js';
 import { optionCharges } from '../scalper/orb5-options.js';
 import { lotSizeOn, indexExpiry } from '../scalper/option-backtest.js';
 import { BACKTEST_INDICES } from './gap.js';
-import { NSE_HOLIDAYS } from '../../lib/market-calendar.js';
+import { NSE_HOLIDAYS, SPECIAL_SESSIONS } from '../../lib/market-calendar.js';
 
 // source: 'all' = every strike of the contracts saved while they traded (option_far_1m, NIFTY from Sep 2026: needed for
 // far ₹3 options), 'near' = the near-ATM history (1 year+, strikes ATM ±10 / ±3 only).
@@ -138,7 +138,7 @@ function run(store, startDate, endDate, s) {
   const U = BACKTEST_INDICES.includes(s.underlying) ? s.underlying : 'NIFTY';
   const idx = store.index(U, sec(startDate), sec(addDays(endDate, 1)));
   const sessions = new Map();
-  for (const c of idx) { const d = dayOf(c.time), h = hm(c.time); if (h < '09:15' || h >= '15:30') continue; if (!sessions.has(d)) sessions.set(d, []); sessions.get(d).push(c); }
+  for (const c of idx) { const d = dayOf(c.time), h = hm(c.time); if (h < '09:15' || h >= '15:30' || SPECIAL_SESSIONS[d]) continue; if (!sessions.has(d)) sessions.set(d, []); sessions.get(d).push(c); }
   const tradingDays = new Set(sessions.keys());
   const lo = s.target * (1 - s.tolerancePct / 100), hi = s.target * (1 + s.tolerancePct / 100);
   const src = s.source === 'all' ? allStrikes(store, U, s) : nearAtm(store, U, s, tradingDays);
