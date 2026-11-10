@@ -132,10 +132,10 @@ const money = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 function strangleSettings(a, rules, U = 'NIFTY') {
   const cell = a?.grid?.strangle?.[U] || {}, c = cell.cfg || a?.strangleCfg || {}, dis = a ? '' : 'disabled', pct = c.capitalMode === 'percent';
   const f = (k, label, type, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="${type}" min="${min}" max="${max}" step="${step}" data-strangle-cfg="${k}" value="${c[k] ?? ''}" ${dis}></label>`;
-  const capNow = Number.isFinite(cell.capitalNow) ? cell.capitalNow : c.capital;
   return html`
     <div class="algo-strat-sub algo-strangle" data-strangle-index="${U}">
       <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
+      ${capitalFields('data-strangle-cfg', c, dis, '0 = all available funds')}
       ${f('target', 'Option price ₹', 'number', 0.05, 5000, '0.05')}
       ${f('bandPct', 'Price band ± %', 'number', 1, 95)}
       ${f('entry', 'Entry', 'time', '09:15', '15:29', '60')}
@@ -144,10 +144,7 @@ function strangleSettings(a, rules, U = 'NIFTY') {
       ${f('stopPct', 'Stop % (minute close)', 'number', 1, 99)}
       ${f('maxVolPct', 'Max % of volume (0 = off)', 'number', 0, 100)}
       <label class="algo-strangle-field"><span>On the expiry day</span><select class="input" data-strangle-cfg="expiryDay" ${dis}>${[['next', 'Next expiry'], ['skip', 'Skip the day'], ['next1', 'Next expiry from the day before']].map(([v, t]) => html`<option value="${v}" ${(c.expiryDay || 'next') === v ? 'selected' : ''}>${t}</option>`)}</select></label>
-      ${capitalFields('data-strangle-cfg', c, dis, '0 = available funds')}
-      ${pct ? '' : html`${f('fundsPct', 'Capital used %', 'number', 1, 100)}
-      <label class="algo-strangle-field"><span>Add its profits</span><select class="input" data-strangle-cfg="compound" ${dis}><option value="1" ${c.compound !== false ? 'selected' : ''}>Yes (compound)</option><option value="0" ${c.compound === false ? 'selected' : ''}>No (fixed)</option></select></label>`}
-      <small class="muted">${pct ? `Sized from ${c.capitalPct}% of the funds available at the entry` : c.capital > 0 ? `Sized from ${money(capNow)}${c.compound !== false ? ` (${money(c.capital)} + its profits since it was set)` : ''} × ${c.fundsPct}%` : `Sized from ${c.fundsPct}% of the available funds`}, within the funds and your Risk rules capital per trade. ${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? `Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
+      <small class="muted">${pct ? `Each trade uses ${c.capitalPct}% of the funds available at the entry` : c.capital > 0 ? `Each trade uses ${money(c.capital)}` : `Each trade uses all the available funds`}, within the funds and your Risk rules capital per trade. ${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? `Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
     </div>`;
 }
 
@@ -156,19 +153,16 @@ function gapSettings(a, U, rules) {
   const cell = a?.grid?.gap?.[U] || {}, c = cell.cfg || {}, dis = a ? '' : 'disabled', pct = c.capitalMode === 'percent';
   const num = (k, label, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="number" min="${min}" max="${max}" step="${step}" data-gap-cfg="${k}" value="${c[k] ?? ''}" ${dis}></label>`;
   const pick = (k, label, yes, no) => html`<label class="algo-strangle-field"><span>${label}</span><select class="input" data-gap-cfg="${k}" ${dis}><option value="1" ${c[k] ? 'selected' : ''}>${yes}</option><option value="0" ${c[k] ? '' : 'selected'}>${no}</option></select></label>`;
-  const capNow = Number.isFinite(cell.capitalNow) ? cell.capitalNow : c.capital;
   return html`
     <div class="algo-strat-sub algo-strangle" data-gap-index="${U}">
       <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
       ${capitalFields('data-gap-cfg', c, dis, '0 = Risk rules / funds')}
-      ${pct ? '' : html`${pick('compound', 'Sizing', 'Compound (+ its profits)', 'Fixed')}
-      ${num('fundsPct', 'Capital used per trade %', 1, 100)}`}
-      ${num('stopPct', 'Stop-loss % of capital (0 = day’s SL left)', 0, 100, '0.5')}
+      ${num('stopPct', 'Stop-loss % of capital', 0, 100, '0.5')}
       ${pick('costToCost', 'Cost to cost at 1R', 'On', 'Off')}
       ${pick('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
       ${pick('autoExit', 'Exit at 09:16', 'Yes, sell at 09:16:00', `No: stop, your exit or ${rules?.squareOff || '15:15'}`)}
       ${pick('noEntryLock', 'If no Gap entry today', 'Kill switch: lock the day', 'Leave the account open')}
-      <small class="muted">${pct ? `Sized from ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Sized from ${money(capNow)}${c.compound ? ` (${money(c.capital)} + its profits since it was set)` : ''} × ${c.fundsPct}%` : `Sized from your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade. ${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : 'Stop-loss: the day’s stop-loss left.'} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the Algo Trading kill switch rule on.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
+      <small class="muted">${pct ? `Each trade uses ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Each trade uses ${money(c.capital)}` : `Each trade uses your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade. ${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : html`<span class="warn">Set a stop-loss %: at 0 the stop comes from the Algo Trading daily stop-loss, and with that off Gap does not trade.</span>`} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the Algo Trading kill switch rule on.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
     </div>`;
 }
 

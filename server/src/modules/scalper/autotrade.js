@@ -1276,7 +1276,9 @@ export const STRANGLE = Object.freeze({ name: 'CE + PE target', underlying: 'NIF
     // capitalMode 'percent': CAPITAL_PCT % of the funds available at the entry instead of a ₹ capital.
     expiryDay: 'next', capitalMode: 'amount', capital: 0, capitalPct: 100, compound: true, capitalSince: 0 }) });
 /** Its settings on one index (the Algo Trading grid; NIFTY: also the older strangle_cfg), over the defaults and the index's usual target. */
-export const strangleConfig = (acct, U = STRANGLE.underlying) => ({ ...STRANGLE.defaults, target: STRANGLE_INDEX_TARGETS[U] ?? STRANGLE.defaults.target, ...slotCfg(acct, 'strangle', U) });
+/** A ₹ capital (above 0) is used as it is for every trade: no compounding and all of it (capital used 100%). */
+const fixedCapital = c => (c.capitalMode !== 'percent' && c.capital > 0 ? { ...c, compound: false, fundsPct: 100 } : c);
+export const strangleConfig = (acct, U = STRANGLE.underlying) => fixedCapital({ ...STRANGLE.defaults, target: STRANGLE_INDEX_TARGETS[U] ?? STRANGLE.defaults.target, ...slotCfg(acct, 'strangle', U) });
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** Dhan's trade-book symbol of an index option, e.g. NIFTY-Nov2026-27350-CE (the month only, not the expiry day). */
@@ -1305,7 +1307,7 @@ export const strangleCapital = (uid, cfg, paper = 0, U = STRANGLE.underlying) =>
 //   instead of a ₹ amount. autoExit: the 09:16 exit; noEntryLock: the kill switch on a day without an entry (both
 //   follow the account's older switches until set for the index).
 export const GAP_SLOT = Object.freeze({ capitalMode: 'amount', capital: 0, capitalPct: 80, compound: true, capitalSince: 0, fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false });
-export const gapConfig = (acct, U = 'NIFTY') => ({ ...GAP_SLOT, autoExit: acct?.gap_auto_exit !== 0, noEntryLock: acct?.gap_lock !== 0, ...slotCfg(acct, 'gap', U) });
+export const gapConfig = (acct, U = 'NIFTY') => fixedCapital({ ...GAP_SLOT, autoExit: acct?.gap_auto_exit !== 0, noEntryLock: acct?.gap_lock !== 0, ...slotCfg(acct, 'gap', U) });
 export const gapCapital = (uid, cfg, paper = 0, U = 'NIFTY') => strategyCapital(uid, cfg, paper, U, 'Gap 09:15');
 
 /** A strategy's own capital on an index: cfg.capital, plus its realised P&L (after charges) since cfg.capitalSince when compounding. */
