@@ -21,6 +21,21 @@ import { brokerBusy, switchTradeVia, switchPaper } from './switch.js';
 import { paperWallet, setPaperBalance, resetPaperWallet, PAPER_DEFAULT, PAPER_MIN, PAPER_MAX } from './adapters/paper.js';
 import { staticIpView } from './static-ip.js';
 import { isAdminEmail } from '../../lib/access.js';
+import { algoGrid, slotCfg, legacyColumns, GRID_STRATEGIES, GRID_INDICES } from '../scalper/algo-grid.js';
+
+/** CE + PE at a target price: its settings for one index, validated. `prev` = that index's saved settings (capital start). */
+function strangleCfgFrom(c = {}, prev = {}) {
+  const time = (x, label) => { const s = String(x || ''); if (!/^\d{2}:\d{2}$/.test(s) || s < '09:15' || s > '15:29') throw bad('VALIDATION', `${label} must be a time from 09:15 to 15:29.`); return s; };
+  const cfg = { target: v.num(c.target, 'Option price', { min: 0.05, max: 5000 }), bandPct: v.num(c.bandPct, 'Price band %', { min: 1, max: 95 }),
+    entry: time(c.entry, 'Entry'), waitMin: v.num(c.waitMin, 'Wait for a price (minutes)', { min: 0, max: 120, int: true }), exit: time(c.exit, 'Exit'),
+    stopPct: v.num(c.stopPct, 'Stop %', { min: 1, max: 99 }), fundsPct: v.num(c.fundsPct, 'Funds used %', { min: 1, max: 100 }), maxVolPct: v.num(c.maxVolPct, 'Max % of volume', { min: 0, max: 100 }),
+    expiryDay: String(c.expiryDay ?? 'next'), capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits') };
+  if (cfg.exit <= cfg.entry) throw bad('VALIDATION', 'The exit time must be after the entry time.');
+  if (!['next', 'skip', 'next1'].includes(cfg.expiryDay)) throw bad('VALIDATION', 'On the expiry day: use the next expiry, skip the day, or use the next expiry from the day before.');
+  // Its own capital (+ its profits) counts trades from when it was set; changing it starts again.
+  cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
+  return cfg;
+}
 
 function ownAccount(userId, id) {
   const acct = stmt('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?').get(Number(id), userId);
@@ -164,17 +179,10 @@ export function brokerRoutes(r) {
     // CE + PE at a target price: on/off, and its settings (saved together).
     if (ctx.body.strangle !== undefined) change.strangle_on = v.bool(ctx.body.strangle, 'CE + PE at a target price') ? 1 : 0;
     if (ctx.body.strangleCfg !== undefined) {
-      const c = ctx.body.strangleCfg || {}, time = (x, label) => { const s = String(x || ''); if (!/^\d{2}:\d{2}$/.test(s) || s < '09:15' || s > '15:29') throw bad('VALIDATION', `${label} must be a time from 09:15 to 15:29.`); return s; };
-      const cfg = { target: v.num(c.target, 'Option price', { min: 0.05, max: 5000 }), bandPct: v.num(c.bandPct, 'Price band %', { min: 1, max: 95 }),
-        entry: time(c.entry, 'Entry'), waitMin: v.num(c.waitMin, 'Wait for a price (minutes)', { min: 0, max: 120, int: true }), exit: time(c.exit, 'Exit'),
-        stopPct: v.num(c.stopPct, 'Stop %', { min: 1, max: 99 }), fundsPct: v.num(c.fundsPct, 'Funds used %', { min: 1, max: 100 }), maxVolPct: v.num(c.maxVolPct, 'Max % of volume', { min: 0, max: 100 }),
-        expiryDay: String(c.expiryDay ?? 'next'), capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits') };
-      if (cfg.exit <= cfg.entry) throw bad('VALIDATION', 'The exit time must be after the entry time.');
-      if (!['next', 'skip', 'next1'].includes(cfg.expiryDay)) throw bad('VALIDATION', 'On the expiry day: use the next expiry, skip the day, or use the next expiry from the day before.');
-      // The strategy's own capital (+ its profits) counts trades from when it was set; changing it starts again.
-      let prev = {}; try { prev = JSON.parse(acct.strangle_cfg || '{}') || {}; } catch { prev = {}; }
-      cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
+      const cfg = strangleCfgFrom(ctx.body.strangleCfg, slotCfg(acct, 'strangle', 'NIFTY'));
       change.strangle_cfg = JSON.stringify(cfg);
+      // Saved through the grid since: keep its NIFTY cell in step.
+      if (acct.algo_grid) { const g = algoGrid(acct); g.strangle.NIFTY.cfg = cfg; change.algo_grid = JSON.stringify(g); }
     }
     // Manual trades while Algo Trading runs: on or off at any time, also during the session.
     if (ctx.body.manual !== undefined) change.manual_on = v.bool(ctx.body.manual, 'Manual trades') ? 1 : 0;
@@ -197,6 +205,8 @@ export function brokerRoutes(r) {
       change.algo_underlying = ['NIFTY', 'BANKNIFTY', 'SENSEX'].filter(k => keys.includes(k)).join(',');
     }
     if (!Object.keys(change).length) throw bad('VALIDATION', 'Choose a strategy to switch on or off.');
+    // An older single switch or the index list changed: the grid is read from them again (its per-index settings are lost).
+    if (['orb_on', 'cross_on', 'gap_on', 'ema915_on', 'strangle_on', 'algo_underlying'].some(k => k in change)) change.algo_grid = null;
     const orbAfter = change.orb_on ?? acct.orb_on, crossAfter = change.cross_on ?? acct.cross_on, gapAfter = change.gap_on ?? acct.gap_on, trendAfter = change.ema915_on ?? acct.ema915_on, strangleAfter = change.strangle_on ?? acct.strangle_on;
     if (algoLocked(acct) && !orbAfter && !crossAfter && !gapAfter && !trendAfter && !strangleAfter) throw conflict('ALGO_LOCKED', `At least one strategy stays on while Algo Trading runs. ${ALGO_LOCK_MESSAGE}`);
     for (const [col, val] of Object.entries(change)) stmt(`UPDATE broker_accounts SET ${col} = ? WHERE id = ?`).run(val, acct.id);
@@ -204,6 +214,30 @@ export function brokerRoutes(r) {
     audit(ctx.user.id, 'algo.strategy_changed', change, ctx.ip);
     emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
     return { account: accountSummary(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id)) };
+  });
+
+  // Algo Trading grid: one strategy on one index switched on or off, and/or its settings (CE + PE). Each strategy + index
+  // holds its own trade; the older single switches and the watched indices follow (algo-grid.js legacyColumns).
+  r.post('/api/brokers/:id/algo-grid', async ctx => {
+    const acct = ownAccount(ctx.user.id, ctx.params.id);
+    const key = v.oneOf(String(ctx.body.strategy || ''), 'Strategy', Object.keys(GRID_STRATEGIES));
+    const U = v.oneOf(String(ctx.body.index || '').toUpperCase(), 'Index', [...GRID_INDICES]);
+    if (!isAdminEmail(ctx.user.email) && key !== 'gap') throw bad('VALIDATION', 'This strategy is not available on your account.');
+    if (ctx.body.on === undefined && ctx.body.cfg === undefined) throw bad('VALIDATION', 'Switch the strategy on or off, or change its settings.');
+    const grid = algoGrid(acct), cell = grid[key][U];
+    if (ctx.body.on !== undefined) cell.on = v.bool(ctx.body.on, `${GRID_STRATEGIES[key].label} on ${U}`);
+    if (ctx.body.cfg !== undefined) {
+      if (key !== 'strangle') throw bad('VALIDATION', `${GRID_STRATEGIES[key].label} has no settings here.`);
+      cell.cfg = strangleCfgFrom(ctx.body.cfg, cell.cfg || {});
+    }
+    const cols = legacyColumns(grid);
+    if (algoLocked(acct) && !Object.values(GRID_STRATEGIES).some(s => cols[s.column])) throw conflict('ALGO_LOCKED', `At least one strategy stays on while Algo Trading runs. ${ALGO_LOCK_MESSAGE}`);
+    const change = { ...cols, algo_grid: JSON.stringify(grid) };
+    for (const [col, val] of Object.entries(change)) stmt(`UPDATE broker_accounts SET ${col} = ? WHERE id = ?`).run(val, acct.id);
+    accountsChanged();
+    audit(ctx.user.id, 'algo.grid_changed', { strategy: key, index: U, on: cell.on, cfg: ctx.body.cfg !== undefined }, ctx.ip);
+    emit(ctx.user.id, 'snapshot', getDashboard(ctx.user.id));
+    return { account: accountSummary(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id)), grid };
   });
 
   // Which broker places the orders: the account's own (Dhan) or the linked StoxKart account (Dhan keeps the market

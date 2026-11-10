@@ -55,7 +55,7 @@ function historySection(rows) {
         <div class="bt-table-wrap"><table class="bt-table algo-trades">
           <thead><tr><th>Date</th><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>%</th><th>Status</th></tr></thead>
           <tbody>${rows.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
-            <td class="num">${t.day}</td><td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${t.day}</td><td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${INDEX_SHORT[t.underlying] || 'NIFTY 50'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnl == null ? '—' : money(t.pnl)}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnlPct == null ? '—' : `${t.pnlPct > 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%`}</td>
@@ -64,7 +64,39 @@ function historySection(rows) {
     </section>`;
 }
 
-// Compact row: name, tag, ⓘ for the full rules, on/off switch.
+// Strategy page key → the Algo Trading grid's key (server: scalper/algo-grid.js).
+const GRID_KEY = { orb: 'orb', emaCross: 'ema59', ema915: 'ema915', gap: 'gap', strangle: 'strangle' };
+const INDEX_SHORT = { NIFTY: 'NIFTY 50', BANKNIFTY: 'BANK NIFTY', SENSEX: 'SENSEX' };
+const LIVE = ['placing', 'open', 'closing'];
+
+/** One grid cell: the switch for a strategy on an index, and what it is doing today. */
+function gridCell(s, U, a, trades) {
+  const g = GRID_KEY[s.key], cell = a?.grid?.[g]?.[U], on_ = !!cell?.on, name = a?.gridStrategies?.find(x => x.key === g)?.name;
+  const mine = trades.filter(t => t.strategy === name && (t.underlying || 'NIFTY') === U);
+  const live = mine.some(t => LIVE.includes(t.status)), done = mine.some(t => t.entryPrice != null);
+  return html`<div class="algo-cell ${on_ ? 'on' : ''}" role="cell">
+    <span class="algo-cell-index">${INDEX_SHORT[U]}</span>
+    <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name} on ${INDEX_SHORT[U]}" data-grid-toggle="${g}|${U}" ${a ? '' : 'disabled'}></button>
+    ${live ? html`<span class="pill sm algo-cell-state">In trade</span>` : done ? html`<span class="pill sm grey algo-cell-state">Traded</span>` : ''}
+  </div>`;
+}
+
+/** A grid row: the strategy (ⓘ for its rules) and a switch per index; its own settings below. */
+function gridRow(s, a, trades, rules) {
+  const g = GRID_KEY[s.key], onAt = (a?.grid ? Object.entries(a.grid[g] || {}) : []).filter(([, c]) => c.on).map(([U]) => U);
+  return html`
+    <div class="algo-strat algo-grid-row ${onAt.length ? 'on' : ''}">
+      <div class="algo-grid-line">
+        <span class="algo-strat-name"><b>${s.name}</b><small>${s.tag} · ${s.timeframe}</small></span>
+        ${s.public ? '' : raw(artInfo(s.key, s.name))}
+        <div class="algo-cells" role="row">${['NIFTY', 'BANKNIFTY', 'SENSEX'].map(U => gridCell(s, U, a, trades))}</div>
+      </div>
+      ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}` : ''}
+      ${s.key === 'strangle' ? onAt.map(U => strangleSettings(a, rules, U)) : ''}
+    </div>`;
+}
+
+// Compact row (strategies outside the grid, e.g. the Gap wick paper trades): name, tag, ⓘ, on/off switch.
 function strategyRow(s, a, open, rules) {
   const on_ = !!a?.[s.flag];
   return html`
@@ -79,11 +111,14 @@ function strategyRow(s, a, open, rules) {
     </div>`;
 }
 
-/** Inside the CE + PE row: its settings, saved together when any of them changes. */
-function strangleSettings(a, rules) {
-  const c = a?.strangleCfg || {}, f = (k, label, type, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="${type}" min="${min}" max="${max}" step="${step}" data-strangle-cfg="${k}" value="${c[k] ?? ''}" ${a ? '' : 'disabled'}></label>`;
+/** Inside the CE + PE row: one index's settings, saved together when any of them changes. */
+function strangleSettings(a, rules, U = 'NIFTY') {
+  const cell = a?.grid?.strangle?.[U] || {}, c = cell.cfg || a?.strangleCfg || {};
+  const f = (k, label, type, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="${type}" min="${min}" max="${max}" step="${step}" data-strangle-cfg="${k}" value="${c[k] ?? ''}" ${a ? '' : 'disabled'}></label>`;
+  a = { ...a, strangleCapital: cell.capitalNow ?? a?.strangleCapital };
   return html`
-    <div class="algo-strat-sub algo-strangle">
+    <div class="algo-strat-sub algo-strangle" data-strangle-index="${U}">
+      <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
       ${f('target', 'Option price ₹', 'number', 0.05, 5000, '0.05')}
       ${f('bandPct', 'Price band ± %', 'number', 1, 95)}
       ${f('entry', 'Entry', 'time', '09:15', '15:29', '60')}
@@ -145,13 +180,20 @@ export default {
     const admin = isAdmin(), STRATEGIES = strategies();
     const state = running ? (d.marketOpen ? ['Running', admin ? 'Watching every 5-minute close for signals' : 'Watching the market'] : ['On', 'Starts watching at the next market open'])
       : d.ready ? ['Stopped', 'No automatic orders are placed'] : ['Setup needed', `${missing.length} item${missing.length > 1 ? 's' : ''} below`];
-    const activeStrats = STRATEGIES.filter(s => a?.[s.flag]).map(s => s.name), index = (d.underlyings || []).filter(u => (a?.underlyings || ['NIFTY']).includes(u.key)).map(u => u.label).join(' + ') || 'NIFTY 50';
+    // "CE + PE at a target price (NIFTY 50, SENSEX)": each strategy with the indices it is on for.
+    const activeStrats = STRATEGIES.map(s => {
+      const g = GRID_KEY[s.key];
+      if (!g) return a?.[s.flag] ? s.name : null;
+      const at = Object.entries(a?.grid?.[g] || {}).filter(([, c]) => c.on).map(([U]) => INDEX_SHORT[U]);
+      return at.length ? `${s.name} (${at.join(', ')})` : null;
+    }).filter(Boolean);
+    const gridStrats = STRATEGIES.filter(s => GRID_KEY[s.key]), otherStrats = STRATEGIES.filter(s => !GRID_KEY[s.key]);
     return html`
       <section class="panel pad algo-control ${running ? 'running' : ''}">
         <div class="algo-control-copy">
           <span class="pill ${running ? '' : 'ice'}"><span class="dot ${running && d.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
           <h2>Algo Trading${a?.paperMode ? html` <span class="pill ice">Paper</span>` : ''}</h2>
-          <p>${state[1]}. Trading <b>${index}</b> options · ${activeStrats.length ? html`strategies on: <b>${activeStrats.join(' + ')}</b>.` : html`<b>no strategy is on</b>: switch one on below.`}</p>
+          <p>${state[1]}. ${activeStrats.length ? html`On: <b>${activeStrats.join(' · ')}</b>.` : html`<b>No strategy is on</b>: switch one on for an index below.`}</p>
           ${a?.paperMode ? html`<p class="small algo-paper-note">Paper: trades fill at live Dhan prices with the <a href="/wallet" data-nav="wallet">paper wallet</a>'s money. No order goes to Dhan, and TradeLock is not watching your Dhan account until you switch back to Real.</p>` : ''}
         </div>
         <div class="seg algo-mode" role="group" aria-label="Real or paper trading">
@@ -175,29 +217,23 @@ export default {
         <div class="panel kpi"><span class="lbl">Square-off</span><b class="num">${d.rules.squareOff}</b><small>${d.rules.locked ? 'Account locked for today' : d.rules.cutoff ? 'Your Risk rules cutoff' : 'Default (cutoff off)'}</small></div>
       </div>
 
-      <div class="halves algo-setup-row">
-        <div class="algo-left">
-        <section class="panel pad">
-          <h3 class="panel-title">Indices to trade</h3>
-          <div class="algo-index" role="group" aria-label="Indices to trade">${(d.underlyings || []).map(u => { const on_ = (a?.underlyings || ['NIFTY']).includes(u.key); return html`
-            <label class="algo-index-item ${on_ ? 'on' : ''}"><input type="checkbox" data-algo-index="${u.key}" ${on_ ? 'checked' : ''} ${a ? '' : 'disabled'}><span>${u.label}</span></label>`; })}</div>
-          <p class="muted small algo-index-note">${admin ? 'Each ticked index is watched on its own 5-minute chart; a signal buys that index’s ATM next-expiry option. Still one trade at a time, sharing the day’s stop-loss.'
-            : 'Each ticked index is traded on its own. Still one trade at a time, sharing the day’s stop-loss.'}</p>
-        </section>
-        <section class="panel pad algo-manual-card">
-          <div class="algo-strat algo-manual ${a?.manualOn ? 'on' : ''}">
-            <div class="algo-strat-head">
-              <span class="algo-strat-name"><b>Manual trades</b><small>${a?.manualOn ? 'Allowed alongside Algo Trading. A manual position still counts as the one trade at a time and uses the day’s stop-loss.' : 'Blocked while Algo Trading is on: manual orders are refused and manual positions closed.'} On or off at any time.</small></span>
-              <button class="switch" type="button" role="switch" aria-checked="${String(!!a?.manualOn)}" aria-label="Allow manual trades while Algo Trading is on" data-manual-toggle ${a ? '' : 'disabled'}></button>
-            </div>
-          </div>
-        </section>
+      <section class="panel pad algo-grid-card">
+        <h3 class="panel-title">Strategies × indices <a class="algo-strat-link" href="/strategy" data-nav="strategy">All strategies ${icon('arrow')}</a></h3>
+        <p class="muted small algo-grid-note">Switch each strategy on for the indices it should trade. Every strategy holds one trade at a time per index, and different strategies and indices run side by side. They share your Risk rules: the day’s loss limit, trade cap, cutoff and kill switch count all of them together. Funds go first come, first served.</p>
+        <div class="algo-strat-list algo-grid" role="table" aria-label="Strategies by index">
+          ${gridStrats.map(s => gridRow(s, a, d.trades || [], d.rules))}
+          ${otherStrats.map(s => strategyRow(s, a, !!ctx.ui.info?.[s.key], d.rules))}
         </div>
-        <section class="panel pad">
-          <h3 class="panel-title">Strategies <a class="algo-strat-link" href="/strategy" data-nav="strategy">All strategies ${icon('arrow')}</a></h3>
-          <div class="algo-strat-list">${STRATEGIES.map(s => strategyRow(s, a, !!ctx.ui.info?.[s.key], d.rules))}</div>
-        </section>
-      </div>
+      </section>
+
+      <section class="panel pad algo-manual-card">
+        <div class="algo-strat algo-manual ${a?.manualOn ? 'on' : ''}">
+          <div class="algo-strat-head">
+            <span class="algo-strat-name"><b>Manual trades</b><small>${a?.manualOn ? 'Allowed alongside Algo Trading. A manual position does not stop Algo entries; it uses the day’s loss limit and counts toward the trade cap.' : 'Blocked while Algo Trading is on: manual orders are refused and manual positions closed.'} On or off at any time.</small></span>
+            <button class="switch" type="button" role="switch" aria-checked="${String(!!a?.manualOn)}" aria-label="Allow manual trades while Algo Trading is on" data-manual-toggle ${a ? '' : 'disabled'}></button>
+          </div>
+        </div>
+      </section>
 
       <section class="panel pad algo-block algo-shared">
         <h3 class="panel-title">Every automatic trade</h3>
@@ -209,7 +245,7 @@ export default {
         ${d.trades.length ? html`<div class="bt-table-wrap"><table class="bt-table algo-trades">
           <thead><tr><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>SL</th><th>Exit</th><th>Status</th></tr></thead>
           <tbody>${d.trades.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
-            <td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${INDEX_SHORT[t.underlying] || 'NIFTY 50'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
           : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
@@ -270,21 +306,6 @@ export default {
     }, signal);
     document.addEventListener('click', e => { if (!e.target.closest('.sart-anchor')) el.querySelectorAll('.sart-anchor.open').forEach(a => a.classList.remove('open')); }, { signal });
 
-    on(el, 'change', '[data-algo-index]', async (_, box) => {
-      const id = ctx.data.account?.id;
-      if (!id) return;
-      const picked = [...el.querySelectorAll('[data-algo-index]')].filter(x => x.checked).map(x => x.dataset.algoIndex);
-      if (!picked.length) { box.checked = true; toast('Keep at least one index ticked.', 'warn'); return; }
-      el.querySelectorAll('[data-algo-index]').forEach(x => { x.disabled = true; });
-      try {
-        const { account } = await post(`/brokers/${id}/strategies`, { underlyings: picked });
-        syncTopbar(account);
-        const names = (ctx.data.underlyings || []).filter(u => picked.includes(u.key)).map(u => u.label);
-        toast(`Algo Trading watches ${names.join(' + ')}.`, 'ok');
-        await refresh();
-      } catch (err) { toastError(err); await refresh(); }
-    }, signal);
-
     // Android app: ring the real trade alarm once, to check sound, vibration and the full-screen alert.
     on(el, 'click', '[data-alarm-test-algo]', () => window.TradeLockApp?.testTradeAlarm?.(), signal);
     on(el, 'click', '[data-manual-toggle]', async (_, b) => {
@@ -332,17 +353,31 @@ export default {
       } catch (err) { toastError(err); await refresh(); }
     }, signal);
 
-    // CE + PE at a target price: all its settings are saved together when one changes.
-    on(el, 'change', '[data-strangle-cfg]', async () => {
-      const id = ctx.data.account?.id;
-      if (!id) return;
-      const val = k => el.querySelector(`[data-strangle-cfg="${k}"]`)?.value;
+    // CE + PE at a target price: one index's settings, saved together when one of them changes.
+    on(el, 'change', '[data-strangle-cfg]', async (_, field) => {
+      const id = ctx.data.account?.id, box = field.closest('[data-strangle-index]'), U = box?.dataset.strangleIndex;
+      if (!id || !box) return;
+      const val = k => box.querySelector(`[data-strangle-cfg="${k}"]`)?.value;
       const cfg = Object.fromEntries(['target', 'bandPct', 'waitMin', 'stopPct', 'fundsPct', 'maxVolPct', 'capital'].map(k => [k, Number(val(k) || 0)]));
       try {
-        await post(`/brokers/${id}/strategies`, { strangleCfg: { ...cfg, entry: val('entry'), exit: val('exit'), expiryDay: val('expiryDay') || 'next', compound: val('compound') !== '0' } });
-        toast('CE + PE settings saved.', 'ok');
+        await post(`/brokers/${id}/algo-grid`, { strategy: 'strangle', index: U, cfg: { ...cfg, entry: val('entry'), exit: val('exit'), expiryDay: val('expiryDay') || 'next', compound: val('compound') !== '0' } });
+        toast(`CE + PE ${INDEX_SHORT[U]} settings saved.`, 'ok');
         await refresh();
       } catch (err) { toastError(err); await refresh(); }
+    }, signal);
+
+    // The grid: one strategy on one index, on or off.
+    on(el, 'click', '[data-grid-toggle]', async (_, b) => {
+      const id = ctx.data.account?.id, [g, U] = b.dataset.gridToggle.split('|'), next = b.getAttribute('aria-checked') !== 'true';
+      if (!id) return;
+      b.disabled = true;
+      try {
+        const { account } = await post(`/brokers/${id}/algo-grid`, { strategy: g, index: U, on: next });
+        syncTopbar(account);
+        const name = ctx.data.account?.gridStrategies?.find(x => x.key === g)?.label || g;
+        toast(`${name} ${next ? 'on' : 'off'} for ${INDEX_SHORT[U]}.`, next ? 'ok' : 'ok');
+        await refresh();
+      } catch (err) { toastError(err); b.disabled = false; }
     }, signal);
 
     on(el, 'click', '[data-gap-autoexit-toggle]', async (_, b) => {

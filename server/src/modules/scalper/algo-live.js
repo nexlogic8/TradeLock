@@ -10,6 +10,14 @@ import { marketOpen } from '../../lib/time.js';
 import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices, strangleConfig, strangleCapital } from './autotrade.js';
 import { paperTrades, retestConfig } from './paper-retest.js';
 import { UNDERLYINGS } from './underlyings.js';
+import { algoGrid, GRID_INDICES, GRID_STRATEGIES } from './algo-grid.js';
+
+/** The Algo Trading grid for the page: every cell's switch; CE + PE cells with their full settings and capital now. */
+const gridForPage = acct => {
+  const g = algoGrid(acct), paper = acct.paper_mode === 1 ? 1 : 0;
+  for (const U of GRID_INDICES) { const cfg = strangleConfig(acct, U); g.strangle[U] = { ...g.strangle[U], cfg, capitalNow: strangleCapital(acct.user_id, cfg, paper, U) }; }
+  return g;
+};
 
 /** Everything Algo Trading needs before it may place orders, as a checklist (all ok = may start). */
 export function algoReadiness(userId, acct) {
@@ -39,7 +47,7 @@ export function algoLive(userId, acct) {
   const daily = rules.maxLoss?.on ? limitAmount(rules.maxLoss, capital) : null, pnl = s.realized + s.unrealized;
   const readiness = algoReadiness(userId, acct);
   return {
-    account: acct ? { id: acct.id, broker: acct.broker, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, gapAutoExitOn: acct.gap_auto_exit !== 0, strangleOn: acct.strangle_on === 1, strangleCfg: strangleConfig(acct), strangleCapital: strangleCapital(acct.user_id, strangleConfig(acct), acct.paper_mode === 1 ? 1 : 0), retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), paperMode: acct.paper_mode === 1, underlyings: algoIndices(acct) } : null,
+    account: acct ? { id: acct.id, broker: acct.broker, algoOn: acct.algo_on === 1, orbOn: acct.orb_on !== 0, emaCrossOn: acct.cross_on !== 0, gapOn: acct.gap_on === 1, ema915On: acct.ema915_on === 1, manualOn: acct.manual_on === 1, gapLockOn: acct.gap_lock !== 0, gapAutoExitOn: acct.gap_auto_exit !== 0, strangleOn: acct.strangle_on === 1, grid: gridForPage(acct), gridStrategies: Object.entries(GRID_STRATEGIES).map(([key, s]) => ({ key, label: s.label, name: s.name })), strangleCfg: strangleConfig(acct), strangleCapital: strangleCapital(acct.user_id, strangleConfig(acct), acct.paper_mode === 1 ? 1 : 0), retestPaperOn: acct.retest_paper_on === 1, retestCfg: retestConfig(acct), paperMode: acct.paper_mode === 1, underlyings: algoIndices(acct) } : null,
     underlyings: Object.values(UNDERLYINGS).map(({ key, label }) => ({ key, label })),
     ready: readiness.every(r => r.ok), readiness, marketOpen: marketOpen(),
     budget: { capital, daily, pnl, left: daily ? riskLeft(daily, pnl) : 0, lossLimitMode: rules.maxLoss?.mode, lossLimitValue: rules.maxLoss?.value },

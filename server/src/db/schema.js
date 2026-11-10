@@ -836,4 +836,6 @@ export const MIGRATIONS = [
   DROP TABLE backtest_runs_before_overnight;
   CREATE INDEX backtest_runs_user ON backtest_runs(user_id, id DESC);
   `,
+  // Algo Trading grid: each strategy on or off per index, with its settings (JSON; null = from the older switches).
+  `ALTER TABLE broker_accounts ADD COLUMN algo_grid TEXT;`,
 ];

@@ -9,7 +9,8 @@ import { signalBudget, sizeSwingTrade, swingStopFor, openingRangeBreakout, openi
 import { niftyInstruments } from './instruments.js';
 import { config } from '../../config.js';
 
-export function scalperSignalRisk(userId) {
+// concurrent: Algo Trading entries, where each strategy + index holds its own trade, so open positions do not block.
+export function scalperSignalRisk(userId, { concurrent = false } = {}) {
   const rules = getRules(userId).active, day = dayState(userId), book = getBook(userId);
   const budget = signalBudget(rules, capitalFor(userId, day), Number(day.realized) + Number(day.unrealized));
   let reason = '';
@@ -19,7 +20,7 @@ export function scalperSignalRisk(userId) {
   else if (rules.cutoff.on && ist().minutes >= toMinutes(rules.cutoff.value)) reason = 'New-entry cutoff reached.';
   else if (budget.available <= 0) reason = 'Daily loss budget exhausted.';
   else if (!book.at || Date.now() - book.at > 60_000) reason = 'Waiting for a fresh broker sync.';
-  else if (book.positions.some(p => p.qty !== 0) || book.orders.length) reason = 'Open broker positions or pending orders block a new entry.';
+  else if (!concurrent && (book.positions.some(p => p.qty !== 0) || book.orders.length)) reason = 'Open broker positions or pending orders block a new entry.';
   else if (!(book.funds?.available > 0)) reason = 'Available broker funds are unknown or insufficient.';
   const scanReason = !config.openai.apiKey ? 'Configure the server OpenAI API key to generate AI signals.'
     : !marketOpen() ? 'Market closed. Scan during market hours.' : '';

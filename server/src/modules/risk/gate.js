@@ -42,9 +42,10 @@ export function checkOrder(order, s) {
     return block('CAPITAL_LIMIT', `This order uses ₹${Math.round(order.qty * px).toLocaleString('en-IN')}, more than your ₹${Math.round(cap).toLocaleString('en-IN')} capital per trade. Use fewer lots.`);
   }
   // One trade at a time: no new entry while a position is open, an order is pending, or one is being placed.
-  const open = s.positions.find(p => p.qty !== 0);
+  // Algo Trading (s.concurrent): each strategy + index holds its own trade, so only an order being placed blocks.
+  const open = !s.concurrent && s.positions.find(p => p.qty !== 0);
   if (open) return block('TRADE_RUNNING', `A trade is already running (${open.symbol}). Exit it before taking the next one.`);
-  if ((s.orders || []).length) return block('ORDER_PENDING', 'An order is pending at the broker. Cancel it or let it fill before the next trade.');
+  if (!s.concurrent && (s.orders || []).length) return block('ORDER_PENDING', 'An order is pending at the broker. Cancel it or let it fill before the next trade.');
   if (s.entryInFlight) return block('ORDER_IN_FLIGHT', 'Your previous order is still being placed. Wait for it to confirm.');
   return { ok: true, reducing: false };
 }

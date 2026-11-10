@@ -30,7 +30,7 @@ export const BUILT_IN = [
     ['Size', 'Equal lots of both: the funds share (100%) of your available funds, within your Capital per trade (Risk rules), at most the max % (10%) of the quantity the thinner option has traded so far today.'],
     ['Stop', 'Each option on its own: sold at market once a completed 1-minute candle closes 20% below its entry. No stop order sits at Dhan (a dip inside a minute would hit it). The other option keeps running.'],
     ['Exit', 'Whatever is still open is sold at market at the exit time (15:25), or at your Risk rules cutoff when that is earlier. Your daily loss limit still closes everything when it is hit.'],
-    ['Risk gate', 'The call and the put count as one trade: one trade at a time, the trade cap and the capital per trade apply to the pair.'],
+    ['Risk gate', 'The call and the put count as one trade: the trade cap and the capital per trade apply to the pair. Switched on per index, each index holds its own pair.'],
     ['Backtest', 'Backtest → CE + PE at a target price (all strikes): the strikes far from the money are saved daily from Sep 2026, so the history is short; it made most of its money on a few big trend days.'],
   ] },
   { key: 'gap', flag: 'gapOn', name: 'Gap open 09:15', tag: 'Opening gap · full capital', timeframe: '1-minute', auto: true, rules: [
@@ -74,7 +74,7 @@ const PUBLIC_GAP = { key: 'gap', flag: 'gapOn', name: 'Gap open 09:15', tag: 'Op
 export const PUBLIC_SHARED_RULES = [
   ['Size', 'Sized from your available funds and your Risk rules.'],
   ['Stop-loss', 'Every entry gets its stop-loss order at your broker straight away.'],
-  ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch, one trade at a time.'],
+  ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch. Each strategy holds one trade at a time per index; different strategies and indices run side by side.'],
   ['Phone alarm', 'Each entry rings the TradeLock Android app like an alarm, even closed, on silent or in DND.'],
 ];
 // Users also get the paper strategy (it only ever trades on paper), described without its rules.
@@ -94,6 +94,6 @@ export const SHARED_RULES = [
   ['Exit', 'Whichever comes first: the stop-loss fills; the strategy’s own exit (ORB: 2 five-minute index closes on the wrong side of EMA 9; EMA 5/9: the opposite crossover on a 1-minute close; EMA 9/15: the first opposite-colour 5-minute candle; Gap: 09:16:00); your manual exit; or the cutoff square-off.'],
   ['Cost to cost', 'Once the option trades at entry + 1 × the risk (entry − stop-loss), the stop-loss order at Dhan moves up to the entry price: from then on the trade can lose only charges and a little slippage. Every strategy, once per trade.'],
   ['Live ticks', 'Signals and exits are decided on live Dhan ticks (WebSocket): each 1- and 5-minute index candle is built from the feed and acted on the moment it closes. Dhan’s REST candles take over whenever the feed is down or joined mid-candle.'],
-  ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch, one trade at a time.'],
+  ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch. Each strategy holds one trade at a time per index; different strategies and indices run side by side.'],
   ['Phone alarm', 'Each entry rings the TradeLock Android app like an alarm, even closed, on silent or in DND.'],
 ];

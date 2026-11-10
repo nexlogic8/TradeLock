@@ -279,7 +279,8 @@ test('ORB 5m switch off: a confirmed ORB signal is not traded', async () => {
   const dhan = fakeDhan();
   dhan.intradayCandles = async q => q.securityId === '13'
     ? raw(spot5.map(b => b)).timestamp && { ...raw(spot5), timestamp: raw(spot5).timestamp.map(t => t + shift / 1000) } : raw([]);
-  const r = await scanForEntry({ ...acct, orb_on: 0, cross_on: 0 }, { now: ms('10:10') + shift + 3000, adapter: dhan, pause: noPause, instruments });
+  // Gap 09:15 on (idle at 10:10) keeps the index scanned; with every strategy off the scan stops at once.
+  const r = await scanForEntry({ ...acct, orb_on: 0, cross_on: 0, gap_on: 1 }, { now: ms('10:10') + shift + 3000, adapter: dhan, pause: noPause, instruments });
   assert.equal(r.skipped, 'no fresh ORB signal');
   assert.ok(!dhan.calls.some(c => c[0] === 'order'));
 });
@@ -339,7 +340,8 @@ test('several indices: stored as a list, each scanned on its own on the same 5-m
   flatBook();
   const D6 = '2026-10-26', shift = Date.parse(`${D6}T00:00:00+05:30`) - Date.parse(`${D}T00:00:00+05:30`), now = ms('10:10') + shift + 3000;
   const quiet = fakeDhan(); quiet.intradayCandles = async () => { const r = raw(spot5); return { ...r, timestamp: r.timestamp.map(t => t + shift / 1000) }; };
-  const a1 = { ...acct, algo_underlying: 'NIFTY,SENSEX', orb_on: 0, cross_on: 0 };   // scan only, no trade
+  const a1 = { ...acct, algo_underlying: 'NIFTY,SENSEX', orb_on: 0, cross_on: 0, gap_on: 1 };   // scan only, no trade (Gap is idle at 10:10)
+  assert.match((await scanForEntry({ ...a1, gap_on: 0 }, { now, adapter: quiet, pause: noPause, instruments, underlying: 'SENSEX' })).skipped, /no strategy on for SENSEX/);
   const n = await scanForEntry(a1, { now, adapter: quiet, pause: noPause, instruments, underlying: 'NIFTY' });
   const sx = await scanForEntry(a1, { now, adapter: quiet, pause: noPause, instruments, underlying: 'SENSEX' });
   assert.notEqual(sx.skipped, 'candle done', JSON.stringify([n, sx]));

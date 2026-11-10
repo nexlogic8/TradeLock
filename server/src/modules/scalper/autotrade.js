@@ -72,6 +72,7 @@ import { isAdminUser, withAllowedStrategies } from '../../lib/access.js';
 import { tryKillSwitch } from '../emergency/service.js';
 import { optionCharges } from './orb5-options.js';
 import { NSE_HOLIDAYS } from '../../lib/market-calendar.js';
+import { indexView, slotCfg, strategyIndices, STRANGLE_INDEX_TARGETS } from './algo-grid.js';
 
 export const AUTO = Object.freeze({
   tickMs: 5_000,
@@ -273,17 +274,21 @@ function update(id, patch) {
   const keys = Object.keys(patch);
   stmt(`UPDATE auto_trades SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map(k => patch[k]), id);
 }
+/** Strategy + index trades run side by side: the open automatic trade (another strategy) that already holds this option, if any. Buying it
+ * again would merge the two positions at the broker, and one exit would sell both. */
+const heldBy = (uid, securityId, exceptId = 0) => stmt(`SELECT symbol, json_extract(detail, '$.setup.strategy') AS strategy FROM auto_trades
+  WHERE user_id = ? AND security_id = ? AND id != ? AND status IN ('placing', 'open', 'closing') LIMIT 1`).get(uid, String(securityId), exceptId);
 /** Today's auto trades, newest first (for the dashboard). */
 export function autoTradesToday(userId, day = ist().day) {
   return stmt(`SELECT id, paper, direction, status, reason, symbol, strike, expiry, lots, qty, entry_price AS entryPrice, sl_price AS slPrice,
-      exit_price AS exitPrice, created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy
+      exit_price AS exitPrice, created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy, COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') AS underlying
       FROM auto_trades WHERE user_id = ? AND day = ? ORDER BY id DESC`).all(userId, day);
 }
 
 /** Earlier days' automatic trades, newest first, with each one's P&L (before charges) when it has an entry and an exit. */
 export function autoTradeHistory(userId, today = ist().day, limit = 300) {
   return stmt(`SELECT id, day, paper, direction, status, reason, symbol, lots, qty, entry_price AS entryPrice, sl_price AS slPrice, exit_price AS exitPrice,
-      created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy
+      created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy, COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') AS underlying
       FROM auto_trades WHERE user_id = ? AND day < ? ORDER BY day DESC, id DESC LIMIT ?`).all(userId, today, limit)
     .filter(t => !String(t.symbol || '').startsWith('TEST'))
     .map(t => (t.entryPrice > 0 && t.exitPrice > 0 && t.qty > 0
@@ -714,8 +719,10 @@ export const algoIndices = acct => {
  * for a fresh confirmed ORB signal on the 5-minute chart and trade it. Returns what happened.
  */
 export async function scanForEntry(acct, { now = Date.now(), adapter = adapterFor(acct), pause = sleep, instruments = optionMeta, underlying } = {}) {
-  acct = withAllowedStrategies(acct);   // non-admins: only the public strategy (Gap 09:15) runs
   const u = underlyingFor(underlying ?? algoIndices(acct)[0]), stateKey = `${acct.user_id}:${u.key}`;
+  // This index's switches (Algo Trading grid); non-admins: only the public strategy (Gap 09:15) runs.
+  acct = withAllowedStrategies(indexView(acct, u.key));
+  if (acct.gap_on !== 1 && acct.cross_on !== 1 && acct.orb_on !== 1 && acct.ema915_on !== 1) return { skipped: `no strategy on for ${u.label}` };
   const uid = acct.user_id;
   if (!marketOpen(now)) return { skipped: 'market closed' };
   if (acct.gap_on === 1) { const g = await gapCheck(acct, adapter, now, u, { pause, instruments }); if (g && !g.skipped?.startsWith('gap check')) return g; }
@@ -765,6 +772,10 @@ export async function scanForEntry(acct, { now = Date.now(), adapter = adapterFo
 /** Claim a signal (once per signal, even across restarts) and trade it. */
 async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, uid, u, day = ist(now).day, gap }) {
   const direction = setup.direction.slice(4);
+  // One trade at a time per strategy + index: others (another strategy, another index) run side by side.
+  const slot = stmt(`SELECT symbol FROM auto_trades WHERE user_id = ? AND status IN ('placing', 'open', 'closing')
+    AND json_extract(detail, '$.setup.strategy') = ? AND COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') = ? LIMIT 1`).get(uid, setup.strategy, u.key);
+  if (slot) return { skipped: `${setup.strategy} already has a ${u.label} trade open (${slot.symbol || 'being placed'})` };
   // EMA 9/15 5m: once per leg (its crossover candle), whichever candle of the leg first reached the angle.
   const key = (u.key === 'NIFTY' ? '' : `${u.key}:`) + (setup.strategy === 'Gap 09:15' ? `${day}:gap` : setup.strategy === 'ORB 5m' ? `${day}:${setup.breakoutAt}`
     : setup.strategy === EMA_TREND.name ? `${day}:t:${setup.crossAt}` : `${day}:x:${setup.breakoutAt}`);
@@ -808,7 +819,7 @@ async function enter(acct, adapter, id, setup, direction, { now, pause, instrume
     return { skipped: reason, id };
   };
   if (setup.filter && !setup.filter.ok) return skip(`Entry filter: ${setup.filter.reason}.`);
-  const risk = scalperSignalRisk(uid);
+  const risk = scalperSignalRisk(uid, { concurrent: true });
   if (risk.reason) return skip(risk.reason);
   if (entriesInFlight.has(uid)) return skip('Another order is being placed.');
 
@@ -823,6 +834,7 @@ async function enter(acct, adapter, id, setup, direction, { now, pause, instrume
   if (!meta?.lotSize || !meta?.tickSize) return skip(`Lot and tick size for ${u.label} ${c.strike} ${direction} are unavailable.`);
   const symbol = `${u.symbol} ${expiry} ${c.strike} ${direction}`, seg = u.optionSegment;
   update(id, { security_id: c.securityId, exchange_segment: seg, symbol, expiry, strike: c.strike });
+  { const h = heldBy(uid, c.securityId, id); if (h) return skip(`${symbol} is already held by the open ${h.strategy} trade: not bought again.`); }
 
   // The stop comes from the option's own candle of the signal's timeframe (5-minute ORB, 1-minute EMA 5/9).
   const iv = setup.interval || '5', ivName = iv === '1' ? '1-minute' : '5-minute';
@@ -847,7 +859,7 @@ async function enter(acct, adapter, id, setup, direction, { now, pause, instrume
 
   const order = { symbol, side: 'BUY', qty: sizing.qty, type: 'MARKET', securityId: c.securityId, exchangeSegment: seg, productType: 'INTRADAY' };
   const t = ist(), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
-  const verdict = checkOrder(order, { rules, positions: book.positions, orders: book.orders || [], entryInFlight: entriesInFlight.has(uid),
+  const verdict = checkOrder(order, { rules, positions: book.positions, orders: book.orders || [], concurrent: true, entryInFlight: entriesInFlight.has(uid),
     entries: s.entries, pnl: s.realized + s.unrealized, minutes: marketOpen() ? t.minutes : null, capital: capitalFor(uid, s), paused: !!s.paused,
     killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
@@ -918,7 +930,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     audit(uid, 'algo.auto_skipped', { id, direction, reason, strategy: 'gap' });
     return { skipped: reason, id };
   };
-  const risk = scalperSignalRisk(uid);
+  const risk = scalperSignalRisk(uid, { concurrent: true });
   if (risk.reason) return skip(risk.reason);
   if (entriesInFlight.has(uid)) return skip('Another order is being placed.');
   const u = underlyingFor(setup.underlying);
@@ -977,6 +989,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   if (!meta?.lotSize || !meta?.tickSize) return skip(`Lot and tick size for ${u.label} ${c.strike} ${direction} are unavailable.`);
   const symbol = `${u.symbol} ${expiry} ${c.strike} ${direction}`;
   update(id, { security_id: c.securityId, exchange_segment: seg, symbol, expiry, strike: c.strike });
+  { const h = heldBy(uid, c.securityId, id); if (h) return skip(`${symbol} is already held by the open ${h.strategy} trade: not bought again.`); }
   if (moved) audit(uid, 'algo.gap_strike_moved', { id, why: moved, to: symbol, pick });
   // The price the order goes by: the best offer (what sellers ask now) when known, else the last trade.
   const quoteAt = q?.ask > 0 ? q.ask : q?.ltp > 0 ? q.ltp : 0, byAsk = q?.ask > 0;
@@ -1015,7 +1028,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const waitMs = ch ? Math.max(ch.minMs, Date.parse(`${ist(now).day}T${ch.until}+05:30`) - now) : AUTO.fillWaitMs;
   const t = ist(), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
   // Capital per trade is checked at the premium the order was sized at, not at the chase limit above it.
-  const verdict = checkOrder(lim ? { ...order, price: undefined } : order, { price: quoteAt, rules, positions: book.positions, orders: book.orders || [], entryInFlight: entriesInFlight.has(uid),
+  const verdict = checkOrder(lim ? { ...order, price: undefined } : order, { price: quoteAt, rules, positions: book.positions, orders: book.orders || [], concurrent: true, entryInFlight: entriesInFlight.has(uid),
     entries: s.entries, pnl: s.realized + s.unrealized, minutes: marketOpen() ? t.minutes : null, capital: capitalFor(uid, s), paused: !!s.paused,
     killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
@@ -1254,7 +1267,8 @@ export const STRANGLE = Object.freeze({ name: 'CE + PE target', underlying: 'NIF
     // capital > 0: size from it (+ this strategy's realised P&L since capitalSince when compound), within the available
     // funds and the Risk rules capital; 0 = the available funds.
     expiryDay: 'next', capital: 0, compound: true, capitalSince: 0 }) });
-export const strangleConfig = acct => { let c = {}; try { c = JSON.parse(acct?.strangle_cfg || '{}') || {}; } catch { c = {}; } return { ...STRANGLE.defaults, ...c }; };
+/** Its settings on one index (the Algo Trading grid; NIFTY: also the older strangle_cfg), over the defaults and the index's usual target. */
+export const strangleConfig = (acct, U = STRANGLE.underlying) => ({ ...STRANGLE.defaults, target: STRANGLE_INDEX_TARGETS[U] ?? STRANGLE.defaults.target, ...slotCfg(acct, 'strangle', U) });
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** Dhan's trade-book symbol of an index option, e.g. NIFTY-Nov2026-27350-CE (the month only, not the expiry day). */
@@ -1270,12 +1284,12 @@ export function exitFromFills(t) {
   return q >= t.qty && q > 0 ? Math.round(v / q * 100) / 100 : null;
 }
 /** The CE + PE strategy's capital: cfg.capital, plus its realised P&L (after charges) since cfg.capitalSince when compounding. */
-export function strangleCapital(uid, cfg, paper = 0) {
+export function strangleCapital(uid, cfg, paper = 0, U = STRANGLE.underlying) {
   if (!(cfg.capital > 0)) return null;
   if (!cfg.compound) return cfg.capital;
   let pnl = 0;
   for (const t of stmt(`SELECT * FROM auto_trades WHERE user_id = ? AND status = 'closed' AND paper = ? AND created_at >= ? AND entry_price IS NOT NULL AND qty > 0
-      AND json_extract(detail, '$.setup.strategy') = ?`).all(uid, paper, cfg.capitalSince || 0, STRANGLE.name)) {
+      AND json_extract(detail, '$.setup.strategy') = ? AND COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') = ?`).all(uid, paper, cfg.capitalSince || 0, STRANGLE.name, U)) {
     let exit = t.exit_price;
     if (exit == null) { exit = exitFromFills(t); if (exit != null) update(t.id, { exit_price: exit }); }
     if (exit == null) continue;
@@ -1319,15 +1333,18 @@ export function sizeStrangle({ ce, pe, lotSize, funds, fundsPct, capitalLimit = 
 const strangleState = new Map();   // `${userId}:${day}` -> { nextTry, lastReason, gaveUp }
 const hhmmOf = ms => new Date(ms + 19_800_000).toISOString().slice(11, 16);
 
-/** One pass for an account with CE + PE on: inside its entry window, find the pair and buy it (once a day). */
-export async function strangleTick(acct, { now = Date.now(), adapter = adapterFor(acct), instruments = optionMeta, pause = sleep } = {}) {
-  acct = withAllowedStrategies(acct);
+/** One pass for an account with CE + PE on an index: inside its entry window, find the pair and buy it (once a day per index). */
+export async function strangleTick(acct, { now = Date.now(), adapter = adapterFor(acct), instruments = optionMeta, pause = sleep, underlying = STRANGLE.underlying } = {}) {
+  const u = underlyingFor(underlying), U = u.key, seg = u.optionSegment;
+  const raw = acct;
+  acct = withAllowedStrategies(indexView(acct, U));
   if (acct.strangle_on !== 1 || !marketOpen(now)) return { skipped: 'off' };
-  const uid = acct.user_id, day = ist(now).day, cfg = strangleConfig(acct), key = `${day}:strangle`;
+  // NIFTY keeps the key it had before the grid (one trade a day is checked across a deploy); other indices add theirs.
+  const uid = acct.user_id, day = ist(now).day, cfg = strangleConfig(raw, U), key = U === 'NIFTY' ? `${day}:strangle` : `${day}:strangle:${U}`;
   const start = Date.parse(`${day}T${cfg.entry}:00+05:30`), until = start + cfg.waitMin * 60_000;
   if (now < start) return { skipped: 'before the entry time' };
   if (stmt('SELECT 1 FROM auto_trades WHERE user_id = ? AND signal_key IN (?, ?)').get(uid, `${key}:CE`, `${key}:PE`)) return { skipped: 'done today' };
-  const sk = `${uid}:${day}`, st = strangleState.get(sk) || {};
+  const sk = `${uid}:${day}:${U}`, st = strangleState.get(sk) || {};
   if (now < (st.nextTry || 0)) return { skipped: 'waiting' };
   strangleState.set(sk, { ...st, nextTry: now + STRANGLE.retryMs });
   const later = reason => { strangleState.set(sk, { ...strangleState.get(sk), lastReason: reason }); return { skipped: reason }; };
@@ -1335,21 +1352,21 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
     // The window is over without an entry: recorded once (the Algo page lists it) and notified.
     const reason = `No entry between ${cfg.entry} and ${hhmmOf(until)}: ${st.lastReason || 'not checked in time'}.`;
     stmt(`INSERT OR IGNORE INTO auto_trades (user_id, day, signal_key, direction, status, reason, detail, created_at, closed_at, paper)
-      VALUES (?, ?, ?, 'CE', 'skipped', ?, ?, ?, ?, ?)`).run(uid, day, `${key}:CE`, reason.slice(0, 240), JSON.stringify({ setup: { strategy: STRANGLE.name, cfg } }), now, now, acct.paper_mode === 1 ? 1 : 0);
-    notify(uid, { kind: 'risk', level: 'warn', title: `Algo Trading: ${STRANGLE.name} not traded today`, body: reason });
+      VALUES (?, ?, ?, 'CE', 'skipped', ?, ?, ?, ?, ?)`).run(uid, day, `${key}:CE`, reason.slice(0, 240), JSON.stringify({ setup: { strategy: STRANGLE.name, underlying: U, cfg } }), now, now, acct.paper_mode === 1 ? 1 : 0);
+    notify(uid, { kind: 'risk', level: 'warn', title: `Algo Trading: ${STRANGLE.name} ${u.label} not traded today`, body: reason });
     return { skipped: reason };
   }
-  const risk = scalperSignalRisk(uid);
+  const risk = scalperSignalRisk(uid, { concurrent: true });   // other strategies' or indices' open trades do not block it
   if (risk.reason) return later(risk.reason);
   if (entriesInFlight.has(uid)) return later('another order was being placed');
 
-  const u = underlyingFor(STRANGLE.underlying), seg = u.optionSegment;
+
   const up = [...new Set(await chainCall(uid, () => adapter.optionExpiries({ underlyingScrip: Number(u.securityId), underlyingSeg: 'IDX_I' })))].filter(e => e >= day).sort();
   // On the expiry day: the next expiry, or no trade (cfg.expiryDay 'skip'); 'next1': the next expiry also the day before.
   if (up[0] === day && cfg.expiryDay === 'skip') {
     const reason = `Expiry day (${day}): skipped by your setting.`;
     stmt(`INSERT OR IGNORE INTO auto_trades (user_id, day, signal_key, direction, status, reason, detail, created_at, closed_at, paper)
-      VALUES (?, ?, ?, 'CE', 'skipped', ?, ?, ?, ?, ?)`).run(uid, day, `${key}:CE`, reason, JSON.stringify({ setup: { strategy: STRANGLE.name, cfg } }), now, now, acct.paper_mode === 1 ? 1 : 0);
+      VALUES (?, ?, ?, 'CE', 'skipped', ?, ?, ?, ?, ?)`).run(uid, day, `${key}:CE`, reason, JSON.stringify({ setup: { strategy: STRANGLE.name, underlying: U, cfg } }), now, now, acct.paper_mode === 1 ? 1 : 0);
     return { skipped: reason };
   }
   const expiry = up[0] === day || (cfg.expiryDay === 'next1' && up[0] === nextMarketDay(day)) ? up[1] : up[0];
@@ -1357,6 +1374,7 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
   const chain = await chainCall(uid, () => adapter.optionChain({ underlyingScrip: Number(u.securityId), underlyingSeg: 'IDX_I', expiry }));
   const legs = strangleLegs(chain, cfg), lo = round2(cfg.target * (1 - cfg.bandPct / 100)), hi = round2(cfg.target * (1 + cfg.bandPct / 100));
   if (!legs.CE || !legs.PE) return later(`no ${!legs.CE && !legs.PE ? 'call or put' : !legs.CE ? 'call' : 'put'} at ₹${lo}–${hi} that has traded today in the ${expiry} chain`);
+  for (const L of [legs.CE, legs.PE]) { const h = heldBy(uid, L.securityId); if (h) return later(`${h.symbol} is held by the open ${h.strategy} trade`); }
   const meta = await instruments(u), lotSize = meta.get(legs.CE.securityId)?.lotSize || meta.get(legs.PE.securityId)?.lotSize, tick = meta.get(legs.CE.securityId)?.tickSize || AUTO.optionTick;
   if (!(lotSize > 0)) return later(`the lot size of ${u.label} ${expiry} options is unavailable`);
   // Quantity traded so far today (1-minute candles, as the backtest's volume limit).
@@ -1367,7 +1385,7 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
   }
   const px = L => (L.ask > 0 ? L.ask : L.ltp), available = Number(getBook(uid).funds?.available);
   // Its own capital (+ its realised P&L when compounding), never more than the available funds.
-  const own = strangleCapital(uid, cfg, acct.paper_mode === 1 ? 1 : 0), funds = own == null ? available : Math.min(available, Math.max(0, own));
+  const own = strangleCapital(uid, cfg, acct.paper_mode === 1 ? 1 : 0, U), funds = own == null ? available : Math.min(available, Math.max(0, own));
   const size = sizeStrangle({ ce: px(legs.CE), pe: px(legs.PE), lotSize, funds, fundsPct: cfg.fundsPct, capitalLimit: risk.budget?.capitalLimit ?? Infinity,
     volumes: cfg.maxVolPct > 0 ? volumes : null, maxVolPct: cfg.maxVolPct });
   if (size.lots < 1) return later(size.why === 'volume' ? `too little traded so far (${volumes.join(' / ')} qty): ${cfg.maxVolPct}% is under one lot of each`
@@ -1376,7 +1394,7 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
   // The pair as ONE trade at the risk gate (trade cap, one trade at a time, capital per trade on both together).
   const t = ist(now), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
   const verdict = checkOrder({ symbol: `${u.symbol} ${expiry} CE+PE`, side: 'BUY', qty, price: round2(px(legs.CE) + px(legs.PE)) }, { rules, positions: book.positions, orders: book.orders || [],
-    entryInFlight: entriesInFlight.has(uid), entries: s.entries, pnl: s.realized + s.unrealized, minutes: t.minutes, capital: capitalFor(uid, s), paused: !!s.paused,
+    concurrent: true, entryInFlight: entriesInFlight.has(uid), entries: s.entries, pnl: s.realized + s.unrealized, minutes: t.minutes, capital: capitalFor(uid, s), paused: !!s.paused,
     killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return later(verdict.reason);
 
@@ -1413,7 +1431,7 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
         update(id, { status: 'failed', reason: String(fill.reason || 'Entry order rejected').slice(0, 240), closed_at: Date.now() });
         if (side === 'CE') {
           update(ids.PE, { status: 'skipped', reason: 'The call was not bought, so the put was not either.', closed_at: Date.now() });
-          notify(uid, { kind: 'risk', level: 'critical', title: `Algo Trading: ${STRANGLE.name} not traded`, body: `The ${symbol} buy failed (${fill.reason || 'rejected'}), so neither option was bought. Check Dhan for anything open.` });
+          notify(uid, { kind: 'risk', level: 'critical', title: `Algo Trading: ${STRANGLE.name} ${u.label} not traded`, body: `The ${symbol} buy failed (${fill.reason || 'rejected'}), so neither option was bought. Check Dhan for anything open.` });
           return { failed: fill.reason };
         }
         notify(uid, { kind: 'risk', level: 'critical', title: `Algo Trading: ${symbol} not bought`, body: `${fill.reason || 'Rejected'}. The call that was bought keeps its own stop and exit.` });
@@ -1425,7 +1443,7 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
       bought.push(`${symbol}: ${Math.round(filledQty / lotSize)} lot${filledQty / lotSize > 1 ? 's' : ''} at ${entryPrice} (stop ${stop} on a 1-minute close)`);
     }
   } finally { entriesInFlight.delete(uid); }
-  if (bought.length) notify(uid, { kind: 'risk', level: 'ok', title: `Algo Trading: ${STRANGLE.name} bought`,
+  if (bought.length) notify(uid, { kind: 'risk', level: 'ok', title: `Algo Trading: ${STRANGLE.name} ${u.label} bought`,
     body: `${bought.join('; ')}. Each is sold at market if a 1-minute candle closes ${cfg.stopPct}% below its entry; the rest at ${strangleSquareOff(cfg, getRules(uid).active)} IST.${size.why === 'volume' ? ` Size kept to ${cfg.maxVolPct}% of the quantity traded so far.` : ''}` });
   syncAccount(acct, { force: true }).catch(() => {});
   return { entered: bought.length, ids };
@@ -1658,11 +1676,11 @@ function scheduleGap(now = Date.now()) {
     catch (e) { console.error('[autotrade] gap', e.message); return []; }
   };
   setTimeout(() => {
-    for (const acct of gapAccounts()) for (const k of algoIndices(acct))
+    for (const acct of gapAccounts()) for (const k of strategyIndices(acct, 'gap'))
       gapPrefetch(acct, adapterFor(acct), underlyingFor(k)).catch(e => console.error('[autotrade] gap prefetch', k, e.message));
   }, Math.max(0, open - G.prefetchMs - now));
   if (G.firstTick) setTimeout(() => {
-    for (const acct of gapAccounts()) for (const k of algoIndices(acct))
+    for (const acct of gapAccounts()) for (const k of strategyIndices(acct, 'gap'))
       gapFirstTick(acct, adapterFor(acct), underlyingFor(k), { pause: sleep, instruments: optionMeta }).catch(e => console.error('[autotrade] gap first tick', k, e.message));
   }, Math.max(0, open - G.leadMs - now));
   // The fixed gap exit, exactly at EXIT_AT (09:16:00.000): open gap trades are checked then, not on the next tick.
@@ -1675,7 +1693,7 @@ function scheduleGap(now = Date.now()) {
   if (!G.firstTick) setTimeout(() => {
     if (!marketOpen()) return;
     for (const acct of gapAccounts()) (async () => {
-      for (const k of algoIndices(acct)) await gapCheck(acct, adapterFor(acct), Date.now(), underlyingFor(k), { pause: sleep, instruments: optionMeta })
+      for (const k of strategyIndices(acct, 'gap')) await gapCheck(withAllowedStrategies(indexView(acct, k)), adapterFor(acct), Date.now(), underlyingFor(k), { pause: sleep, instruments: optionMeta })
         .catch(e => console.error('[autotrade] gap', k, e.message));
     })();
   }, Math.max(0, open + G.checkAfterMs - now));
@@ -1840,8 +1858,11 @@ export function startAutoTrader({ tickMs = AUTO.tickMs } = {}) {
       if (!busy.has(g)) { busy.add(g); closeManualEntries(acct).catch(e => console.error('[autotrade] manual guard', e.message)).finally(() => busy.delete(g)); }
       scan(acct);
       // CE + PE at a target price: its own entry window (09:20 …), checked on every tick.
-      const sKey = `s:${acct.user_id}`;
-      if (acct.strangle_on === 1 && !busy.has(sKey)) { busy.add(sKey); strangleTick(acct).catch(e => console.error('[autotrade] strangle', e.message)).finally(() => busy.delete(sKey)); }
+      // One pass per index it is switched on for (Algo Trading grid), each with its own settings.
+      if (acct.strangle_on === 1) for (const U of strategyIndices(acct, 'strangle')) {
+        const sKey = `s:${acct.user_id}:${U}`;
+        if (!busy.has(sKey)) { busy.add(sKey); strangleTick(acct, { underlying: U }).catch(e => console.error('[autotrade] strangle', U, e.message)).finally(() => busy.delete(sKey)); }
+      }
     }
   }, tickMs);
   return () => { clearInterval(timer); offMinute(); for (const uid of feedUsers) FEED.unwatch(uid); feedUsers = new Set(); };

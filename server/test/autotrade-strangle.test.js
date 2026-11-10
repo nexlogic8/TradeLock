@@ -174,3 +174,36 @@ test('its own capital: ₹50,000 + its realised P&L (exit from the sell fills wh
   assert.equal(strangleCapital(uid, { capital: 0, compound: true }), null);
   assert.equal(strangleCapital(uid, { capital: 50000, compound: true, capitalSince: t0 + 1 }), 50000, 'trades before the capital was set do not count');
 });
+
+test('grid: CE + PE on SENSEX with its own settings: BSE orders, its own key, alongside an open NIFTY position', async () => {
+  // A NIFTY position is open: with the grid each strategy + index holds its own trade, so SENSEX still enters.
+  setBook(uid, { positions: [{ securityId: 'NIFTY-OPEN', symbol: 'NIFTY-OPEN', qty: 65 }], orders: [], funds: { available: 100000, used: 0 }, at: Date.now() });
+  const WED = 86_400_000, dhan = fakeDhan({ candles: vol });
+  const grid = { strangle: { NIFTY: { on: false }, SENSEX: { on: true, cfg: { ...STRANGLE.defaults, target: 4, maxVolPct: 0 } } } };
+  const a = { ...acct, strangle_on: 1, algo_grid: JSON.stringify(grid) };
+  assert.equal((await strangleTick(a, { now: at('09:21') + WED, adapter: dhan, instruments, pause: noPause, underlying: 'NIFTY' })).skipped, 'off', 'NIFTY is off in the grid');
+  const r = await strangleTick(a, { now: at('09:21') + WED, adapter: dhan, instruments, pause: noPause, underlying: 'SENSEX' });
+  assert.equal(r.entered, 2, JSON.stringify(r));
+  const orders = dhan.calls.filter(c => c[0] === 'order').map(c => c[1]);
+  assert.deepEqual(orders.map(o => [o.securityId, o.exchangeSegment]), [['C257', 'BSE_FNO'], ['P224', 'BSE_FNO']]);
+  const rows = stmt("SELECT signal_key, json_extract(detail, '$.setup.underlying') AS u FROM auto_trades WHERE user_id = ? AND day = '2026-10-21' ORDER BY id").all(uid);
+  assert.deepEqual(rows.map(x => [x.signal_key, x.u]), [['2026-10-21:strangle:SENSEX:CE', 'SENSEX'], ['2026-10-21:strangle:SENSEX:PE', 'SENSEX']]);
+  stmt("UPDATE auto_trades SET status = 'closed' WHERE user_id = ? AND day = '2026-10-21'").run(uid);
+});
+
+test('AI Algo Trading page: the grid switches a strategy on per index, with its own settings; the older switches follow', async () => {
+  const base = `http://127.0.0.1:${server.address().port}`, H = { 'Content-Type': 'application/json', Cookie: cookie };
+  const post = body => fetch(`${base}/api/brokers/${acct.id}/algo-grid`, { method: 'POST', headers: H, body: JSON.stringify(body) });
+  assert.equal((await post({ strategy: 'strangle', index: 'SENSEX', on: true })).status, 200);
+  const cfg = { target: 120, bandPct: 50, entry: '09:30', waitMin: 20, exit: '15:20', stopPct: 25, fundsPct: 50, maxVolPct: 0, expiryDay: 'skip', capital: 0, compound: true };
+  assert.equal((await post({ strategy: 'strangle', index: 'SENSEX', cfg })).status, 200);
+  assert.equal((await post({ strategy: 'gap', index: 'BANKNIFTY', on: true })).status, 200);
+  const live = (await (await fetch(`${base}/api/algo/live`, { headers: H })).json()).account;
+  assert.equal(live.grid.strangle.SENSEX.on, true);
+  assert.deepEqual({ ...live.grid.strangle.SENSEX.cfg, capitalSince: undefined }, { ...STRANGLE.defaults, ...cfg, capitalSince: undefined });
+  assert.equal(live.grid.gap.BANKNIFTY.on, true);
+  const row = stmt('SELECT strangle_on, gap_on, algo_underlying FROM broker_accounts WHERE id = ?').get(acct.id);
+  assert.deepEqual([row.strangle_on, row.gap_on, row.algo_underlying.split(',').sort()], [1, 1, ['BANKNIFTY', 'NIFTY', 'SENSEX']]);
+  assert.equal((await post({ strategy: 'gap', index: 'NOPE', on: true })).status, 400);
+  assert.equal((await post({ strategy: 'gap', index: 'NIFTY', cfg: {} })).status, 400, 'only CE + PE has settings');
+});

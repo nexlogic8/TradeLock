@@ -1615,6 +1615,21 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .algo-strangle { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 10px; align-items: end; }
 .algo-strangle-field { display: grid; gap: 4px; font-size: 11px; color: var(--dim); }
 .algo-strangle-field .input { padding: 6px 8px; font-size: 13px; }
+/* Algo Trading grid: a strategy per row, a switch per index (NIFTY 50 · BANK NIFTY · SENSEX). */
+.algo-grid-card { margin-bottom: 16px; }
+.algo-grid-note { margin: -4px 0 14px; max-width: 920px; }
+.algo-grid-line { display: grid; grid-template-columns: minmax(200px, 1fr) auto minmax(0, 2fr); align-items: center; gap: 12px; }
+.algo-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.algo-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2, transparent); transition: border-color .15s, background .15s; }
+.algo-cell.on { border-color: var(--mint); background: var(--mint-soft); }
+.algo-cell-index { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.algo-cell.on .algo-cell-index { color: var(--fg); }
+.algo-cell .switch { flex: none; }
+.algo-cell-state { flex: none; }
+.algo-grid .algo-grid-row { padding: 12px 14px; }
+.algo-strangle-title { grid-column: 1 / -1; font-size: 12px; letter-spacing: .04em; color: var(--mint); }
+@media (max-width: 900px) { .algo-grid-line { grid-template-columns: 1fr auto; } .algo-cells { grid-column: 1 / -1; } }
+@media (max-width: 480px) { .algo-cells { grid-template-columns: 1fr; } }
 .algo-strangle small { grid-column: 1 / -1; }
 .algo-retest-cfg { flex-wrap: wrap; }
 .algo-retest-cfg label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
