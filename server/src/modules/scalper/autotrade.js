@@ -852,6 +852,7 @@ async function enter(acct, adapter, id, setup, direction, { now, pause, instrume
   const stop = premiumStop(breakoutBar, meta.tickSize);
   const entry = c.ask > 0 ? c.ask : c.ltp;
   if (!stop || !(entry > stop)) return skip(`${symbol} premium ${entry} is already at or below the stop-loss ${stop}.`);
+  if (!risk.budget) return skip(`${setup.strategy} sizes its stop from the Algo Trading daily stop-loss, which is off.`);
   const today = dayState(uid), budget = riskLeft(risk.budget?.daily, today.realized + today.unrealized);
   const funds = Number(getBook(uid).funds?.available);
   // 95% of the funds (a market buy is charged a little above the last price, and brokerage on top), within the
@@ -1014,6 +1015,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
   if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < fits ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
   // Stop-loss room per unit: STOP % of its capital (Gap settings), else what the Risk rules still allow to lose today, over the quantity.
+  if (!(gc.stopPct > 0) && !risk.budget) return skip(`Set “Stop-loss % of capital” in the ${u.label} Gap settings: the Algo Trading daily stop-loss is off, so there is no day's stop-loss to place the stop from.`);
   const today = dayState(uid), budget = gc.stopPct > 0 ? round2((own != null ? Math.max(0, own) : funds) * gc.stopPct / 100) : riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
   if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The stop-loss ${gc.stopPct > 0 ? `(${gc.stopPct}% of the capital, ₹${budget})` : `left for today (₹${budget})`} is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);
 

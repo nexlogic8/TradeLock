@@ -168,7 +168,7 @@ function gapSettings(a, U, rules) {
       ${pick('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
       ${pick('autoExit', 'Exit at 09:16', 'Yes, sell at 09:16:00', `No: stop, your exit or ${rules?.squareOff || '15:15'}`)}
       ${pick('noEntryLock', 'If no Gap entry today', 'Kill switch: lock the day', 'Leave the account open')}
-      <small class="muted">${pct ? `Sized from ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Sized from ${money(capNow)}${c.compound ? ` (${money(c.capital)} + its profits since it was set)` : ''} × ${c.fundsPct}%` : `Sized from your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade. ${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : 'Stop-loss: the day’s stop-loss left.'} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the kill switch on in the <a href="#algo-rules">risk rules below</a>.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
+      <small class="muted">${pct ? `Sized from ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Sized from ${money(capNow)}${c.compound ? ` (${money(c.capital)} + its profits since it was set)` : ''} × ${c.fundsPct}%` : `Sized from your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade. ${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : 'Stop-loss: the day’s stop-loss left.'} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the Algo Trading kill switch rule on.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
     </div>`;
 }
 
@@ -181,9 +181,9 @@ export default {
   // Paper is the default: with no broker connected, opening the page sets up the Paper account (₹10 lakh paper wallet,
   // shared market data), so strategies can be switched on and Algo Trading started on paper at once.
   async load(ctx) {
-    // Algo Trading's own risk rules are edited here (the Risk rules page keeps the Manual trading set).
-    const rules = await get('/rules').catch(() => null);
-    if (rules) ctx.ui.algoRules = { set: 'algo', form: editableSet(rules, 'algo'), error: null, pending: rules.pending ? rules.pendingFrom : null, mode: rules.mode };
+    // Other users edit their Algo Trading risk rules here; administrators size each strategy from its own settings.
+    const rules = isAdmin() ? null : await get('/rules').catch(() => null);
+    ctx.ui.algoRules = rules ? { set: 'algo', form: editableSet(rules, 'algo'), error: null, pending: rules.pending ? rules.pendingFrom : null, mode: rules.mode } : null;
     const d = await get('/algo/live');
     if (d.account) return d;
     try { await post('/paper/account'); return await get('/algo/live'); } catch { return d; }
@@ -250,6 +250,7 @@ export default {
         </div>
       </section>
 
+
       ${ctx.ui.algoRules ? html`
       <section class="algo-rules-card" id="algo-rules">
         <h3 class="panel-title algo-rules-title">Risk rules for Algo Trading</h3>
@@ -290,7 +291,6 @@ export default {
     const refresh = async () => { try { const d = await get('/algo/live'); if (el.querySelector('.sart-anchor.open, .sart-anchor:focus-within, .sart-anchor:hover, [data-rules-set] input:focus')) return; ctx.data = d; ctx.paint(); } catch { /* keep the last view */ } };
     const timer = setInterval(refresh, 15_000);
     signal.addEventListener('abort', () => clearInterval(timer), { once: true });
-    // Algo Trading's risk rules (shared editor with the Risk rules page): saved as they change; the day's numbers follow.
     if (ctx.ui.algoRules) bindRules(ctx, ctx.ui.algoRules, { capital: () => ctx.state.dash?.capital ?? ctx.data.budget?.capital, onSaved: () => refresh() });
     const syncTopbar = account => {
       const dash = store.get().dash;

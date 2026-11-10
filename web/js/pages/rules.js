@@ -99,7 +99,7 @@ function setNote(set, now) {
       <p class="muted small" id="rule-set-note"><b>${SET_NAMES[set]} rules.</b> ${live
         ? html`In force now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
         : html`Not in force now: they apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}. Edits are saved for then.`}
-      ${set === 'manual' ? html` Algo Trading has its own rules on the <a href="/algo" data-nav="algo">AI Algo Trading</a> page.` : html` Your manual trading rules are on the <a href="/rules" data-nav="rules">Risk rules</a> page.`}</p>
+      ${set === 'manual' ? html` Algo Trading does not use them: each strategy's own settings on the <a href="/algo" data-nav="algo">AI Algo Trading</a> page size its trades and stops.` : ''}</p>
     </div>`;
 }
 

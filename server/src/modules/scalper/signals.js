@@ -14,11 +14,12 @@ export function scalperSignalRisk(userId, { concurrent = false } = {}) {
   const rules = getRules(userId).active, day = dayState(userId), book = getBook(userId);
   const budget = signalBudget(rules, capitalFor(userId, day), Number(day.realized) + Number(day.unrealized));
   let reason = '';
-  if (!budget) reason = 'A daily stop-loss and starting capital are needed to size a trade.';
+  // Algo Trading entries (concurrent) size from their own strategy settings, so its daily stop-loss may be off.
+  if (!budget && !concurrent) reason = 'A daily stop-loss and starting capital are needed to size a trade.';
   else if (day.paused || day.ks_armed || getKillStatus(userId)?.active) reason = 'Broker trading is locked by your risk rules.';
   else if (rules.maxTrades.on && day.entries >= rules.maxTrades.value) reason = 'Daily trade limit reached.';
   else if (rules.cutoff.on && ist().minutes >= toMinutes(rules.cutoff.value)) reason = 'New-entry cutoff reached.';
-  else if (budget.available <= 0) reason = 'Daily loss budget exhausted.';
+  else if (budget && budget.available <= 0) reason = 'Daily loss budget exhausted.';
   else if (!book.at || Date.now() - book.at > 60_000) reason = 'Waiting for a fresh broker sync.';
   else if (!concurrent && (book.positions.some(p => p.qty !== 0) || book.orders.length)) reason = 'Open broker positions or pending orders block a new entry.';
   else if (!(book.funds?.available > 0)) reason = 'Available broker funds are unknown or insufficient.';

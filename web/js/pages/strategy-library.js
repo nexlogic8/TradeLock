@@ -94,6 +94,6 @@ export const SHARED_RULES = [
   ['Exit', 'Whichever comes first: the stop-loss fills; the strategy’s own exit (ORB: 2 five-minute index closes on the wrong side of EMA 9; EMA 5/9: the opposite crossover on a 1-minute close; EMA 9/15: the first opposite-colour 5-minute candle; Gap: 09:16:00); your manual exit; or the cutoff square-off.'],
   ['Cost to cost', 'Once the option trades at entry + 1 × the risk (entry − stop-loss), the stop-loss order at Dhan moves up to the entry price: from then on the trade can lose only charges and a little slippage. Every strategy, once per trade.'],
   ['Live ticks', 'Signals and exits are decided on live Dhan ticks (WebSocket): each 1- and 5-minute index candle is built from the feed and acted on the moment it closes. Dhan’s REST candles take over whenever the feed is down or joined mid-candle.'],
-  ['Risk rules', 'Every entry passes your Risk rules: daily loss limit, cutoff, trade cap (if on), kill switch. Each strategy holds one trade at a time per index; different strategies and indices run side by side.'],
+  ['Limits', 'Each strategy sizes its trades and stops from its own settings on this page. Each strategy holds one trade at a time per index; different strategies and indices run side by side.'],
   ['Phone alarm', 'Each entry rings the TradeLock Android app like an alarm, even closed, on silent or in DND.'],
 ];
