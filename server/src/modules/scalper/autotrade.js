@@ -552,7 +552,7 @@ function gapNoTrade(acct, adapter, u, day, title, body) {
   const plain = !isAdminUser(acct.user_id);   // users: no premiums or gap figures
   notify(acct.user_id, { kind: 'risk', level: 'info', title, body: plain ? `${u.label}: no Gap 09:15 trade today.` : body });
   audit(acct.user_id, 'algo.gap_no_trade', { underlying: u.key, day, title, body });
-  lockAfterNoGapEntry(acct, adapter);
+  lockAfterNoGapEntry(acct, adapter, u.key);
 }
 
 /**
@@ -795,7 +795,7 @@ async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, ui
     }
     return { error: e.message };
   } finally {
-    if (setup.strategy === 'Gap 09:15' && ['skipped', 'failed'].includes(row(id)?.status)) lockAfterNoGapEntry(acct, adapter);
+    if (setup.strategy === 'Gap 09:15' && ['skipped', 'failed'].includes(row(id)?.status)) lockAfterNoGapEntry(acct, adapter, u.key);
   }
 }
 
@@ -805,9 +805,10 @@ async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, ui
  * other strategy left to trade today, the broker's kill switch locks the account for the rest of the day (armed until
  * flat, if anything is open).
  */
-export function lockAfterNoGapEntry(acct, adapter) {
+export function lockAfterNoGapEntry(acct, adapter, U = 'NIFTY') {
   const a = withAllowedStrategies(acct);
-  if (acct.gap_lock === 0 || a.orb_on || a.cross_on || a.ema915_on || a.strangle_on || !getRules(acct.user_id).active?.killSwitch?.on || !getSubscription(acct.user_id)?.active) return;
+  // "If no Gap entry" in that index's Gap settings (Algo Trading grid; before them, the gap_lock switch).
+  if (gapConfig(acct, U).noEntryLock === false || a.orb_on || a.cross_on || a.ema915_on || a.strangle_on || !getRules(acct.user_id).active?.killSwitch?.on || !getSubscription(acct.user_id)?.active) return;
   tryKillSwitch(acct.user_id, acct, 'gap:no-entry', adapter).catch(e => console.error('[autotrade] kill switch', e.message));
 }
 
@@ -1006,12 +1007,12 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // MARKET (GAP_LIVE.market): a market order, re-sent if not filled; else LIM: our own limit, chased.
   const ch = GAP_LIVE.chase, mkt = !!(ch && GAP_LIVE.market), lim = !!(ch && !mkt);
   const cap = risk.budget?.capitalLimit ?? null, fits = funds * 0.98 / (1 + (lim ? ch.cap : G.blockPad));
-  // Its own capital (+ its profits) × CAPITAL USED % when set, else the Risk rules' Capital per trade or CAPITAL USED % of the funds.
-  const own = gapCapital(uid, gc, acct.paper_mode === 1 ? 1 : 0, u.key);
-  const spend = own != null ? Math.min(Math.max(0, own) * gc.fundsPct / 100, cap ?? Infinity, fits) : Math.min(cap != null ? cap : funds * gc.fundsPct / 100, fits);
+  // Capital (Gap settings): % of the funds now; or its own ₹ capital (+ its profits) × CAPITAL USED %; or (₹ 0) the Risk
+  // rules' Capital per trade, else CAPITAL USED % of the funds. Always within the Risk rules' Capital per trade and the funds.
+  const pct = gc.capitalMode === 'percent', own = pct ? round2(funds * gc.capitalPct / 100) : gapCapital(uid, gc, acct.paper_mode === 1 ? 1 : 0, u.key);
+  const spend = pct ? Math.min(own, cap ?? Infinity, fits) : own != null ? Math.min(Math.max(0, own) * gc.fundsPct / 100, cap ?? Infinity, fits) : Math.min(cap != null ? cap : funds * gc.fundsPct / 100, fits);
   let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
   if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < fits ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
-  // Stop-loss room per unit: what the Risk rules still allow to lose today, spread over the whole quantity.
   // Stop-loss room per unit: STOP % of its capital (Gap settings), else what the Risk rules still allow to lose today, over the quantity.
   const today = dayState(uid), budget = gc.stopPct > 0 ? round2((own != null ? Math.max(0, own) : funds) * gc.stopPct / 100) : riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
   if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The stop-loss ${gc.stopPct > 0 ? `(${gc.stopPct}% of the capital, ₹${budget})` : `left for today (₹${budget})`} is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);
@@ -1270,7 +1271,8 @@ export const STRANGLE = Object.freeze({ name: 'CE + PE target', underlying: 'NIF
     // On the expiry day: 'next' = the next expiry, 'skip' = no trade, 'next1' = the next expiry also the trading day before.
     // capital > 0: size from it (+ this strategy's realised P&L since capitalSince when compound), within the available
     // funds and the Risk rules capital; 0 = the available funds.
-    expiryDay: 'next', capital: 0, compound: true, capitalSince: 0 }) });
+    // capitalMode 'percent': CAPITAL_PCT % of the funds available at the entry instead of a ₹ capital.
+    expiryDay: 'next', capitalMode: 'amount', capital: 0, capitalPct: 100, compound: true, capitalSince: 0 }) });
 /** Its settings on one index (the Algo Trading grid; NIFTY: also the older strangle_cfg), over the defaults and the index's usual target. */
 export const strangleConfig = (acct, U = STRANGLE.underlying) => ({ ...STRANGLE.defaults, target: STRANGLE_INDEX_TARGETS[U] ?? STRANGLE.defaults.target, ...slotCfg(acct, 'strangle', U) });
 
@@ -1297,8 +1299,11 @@ export const strangleCapital = (uid, cfg, paper = 0, U = STRANGLE.underlying) =>
 //   and the Risk rules' Capital per trade. stopPct > 0: the stop-loss is STOP_PCT % of that capital spread over the
 //   quantity (as the backtest's "daily stop-loss % of capital"), else the day's stop-loss left. costToCost: the stop
 //   moves to the entry at 1R. requireGreen: buy only when the premium is still above its 09:15 open in the first seconds.
-export const GAP_SLOT = Object.freeze({ capital: 0, compound: true, capitalSince: 0, fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false });
-export const gapConfig = (acct, U = 'NIFTY') => ({ ...GAP_SLOT, ...slotCfg(acct, 'gap', U) });
+//   capitalMode 'percent': CAPITAL_PCT % of the funds available at the entry (within the Risk rules' Capital per trade)
+//   instead of a ₹ amount. autoExit: the 09:16 exit; noEntryLock: the kill switch on a day without an entry (both
+//   follow the account's older switches until set for the index).
+export const GAP_SLOT = Object.freeze({ capitalMode: 'amount', capital: 0, capitalPct: 80, compound: true, capitalSince: 0, fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false });
+export const gapConfig = (acct, U = 'NIFTY') => ({ ...GAP_SLOT, autoExit: acct?.gap_auto_exit !== 0, noEntryLock: acct?.gap_lock !== 0, ...slotCfg(acct, 'gap', U) });
 export const gapCapital = (uid, cfg, paper = 0, U = 'NIFTY') => strategyCapital(uid, cfg, paper, U, 'Gap 09:15');
 
 /** A strategy's own capital on an index: cfg.capital, plus its realised P&L (after charges) since cfg.capitalSince when compounding. */
@@ -1403,8 +1408,10 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
   }
   const px = L => (L.ask > 0 ? L.ask : L.ltp), available = Number(getBook(uid).funds?.available);
   // Its own capital (+ its realised P&L when compounding), never more than the available funds.
-  const own = strangleCapital(uid, cfg, acct.paper_mode === 1 ? 1 : 0, U), funds = own == null ? available : Math.min(available, Math.max(0, own));
-  const size = sizeStrangle({ ce: px(legs.CE), pe: px(legs.PE), lotSize, funds, fundsPct: cfg.fundsPct, capitalLimit: risk.budget?.capitalLimit ?? Infinity,
+  // Capital: % of the funds available now (capitalMode 'percent'), else its own ₹ capital (+ its profits) × FUNDS %, or (₹ 0) FUNDS % of the funds.
+  const pctMode = cfg.capitalMode === 'percent', usePct = pctMode ? cfg.capitalPct : cfg.fundsPct;
+  const own = pctMode ? null : strangleCapital(uid, cfg, acct.paper_mode === 1 ? 1 : 0, U), funds = own == null ? available : Math.min(available, Math.max(0, own));
+  const size = sizeStrangle({ ce: px(legs.CE), pe: px(legs.PE), lotSize, funds, fundsPct: usePct, capitalLimit: risk.budget?.capitalLimit ?? Infinity,
     volumes: cfg.maxVolPct > 0 ? volumes : null, maxVolPct: cfg.maxVolPct });
   if (size.lots < 1) return later(size.why === 'volume' ? `too little traded so far (${volumes.join(' / ')} qty): ${cfg.maxVolPct}% is under one lot of each`
     : own != null && own < available ? `the strategy's capital ₹${Math.round(own)} buys no lot of both` : `₹${Math.round(available || 0)} available buys no lot of both`);
@@ -1550,9 +1557,9 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
   if (!pos) return;
   if (trade.status === 'open') await costToCost(trade, adapter, now).catch(e => console.error('[autotrade] cost-to-cost', e.message));
   if (trade.status === 'open') {
-    const strategy = JSON.parse(trade.detail || '{}').setup?.strategy;
-    // Gap open 09:15 with its auto exit switched off (Algo page): no 09:16 exit; the stop-loss, a manual exit or the cutoff.
-    const why = strategy === 'Gap 09:15' && acct?.gap_auto_exit === 0 ? null : await (strategy === 'Gap 09:15' ? gapExitDue : strategy === STRANGLE.name ? strangleExitDue : strategy === EMA_SCALP.name ? emaScalpExitDue : strategy === EMA_TREND.name ? emaTrendExitDue : emaExitDue)(trade, adapter, now).catch(() => null);
+    const st = JSON.parse(trade.detail || '{}').setup || {}, strategy = st.strategy;
+    // Gap open 09:15 with its 09:16 exit off (that index's Gap settings): no 09:16 exit; the stop-loss, a manual exit or the cutoff.
+    const why = strategy === 'Gap 09:15' && acct && gapConfig(acct, st.underlying || 'NIFTY').autoExit === false ? null : await (strategy === 'Gap 09:15' ? gapExitDue : strategy === STRANGLE.name ? strangleExitDue : strategy === EMA_SCALP.name ? emaScalpExitDue : strategy === EMA_TREND.name ? emaTrendExitDue : emaExitDue)(trade, adapter, now).catch(() => null);
     // Users see that the strategy closed it, not its exit rule (lib/access.js).
     const shown = why && strategy === 'Gap 09:15' && !isAdminUser(uid) ? 'Strategy exit' : why;
     if (why) { update(trade.id, { status: 'closing', reason: shown }); trade = { ...trade, status: 'closing', reason: shown }; }

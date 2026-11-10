@@ -92,7 +92,7 @@ function gridRow(s, a, trades, rules) {
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <div class="algo-cells" role="row">${['NIFTY', 'BANKNIFTY', 'SENSEX'].map(U => gridCell(s, U, a, trades))}</div>
       </div>
-      ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}${onAt.map(U => gapSettings(a, U))}` : ''}
+      ${s.key === 'gap' ? onAt.map(U => gapSettings(a, U, rules)) : ''}
       ${s.key === 'strangle' ? onAt.map(U => strangleSettings(a, rules, U)) : ''}
     </div>`;
 }
@@ -107,16 +107,32 @@ function strategyRow(s, a, open, rules) {
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="${s.name}" data-strategy-toggle="${s.key}" ${a ? '' : 'disabled'}></button>
       </div>
-      ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}` : ''}
+
       ${s.key === 'strangle' ? strangleSettings(a, rules) : ''}
     </div>`;
 }
 
+/** Capital: a fixed ₹ amount or a % of the funds available at the entry (the dropdown), and its value box. */
+function capitalFields(attr, c, dis, zeroText) {
+  const pct = c.capitalMode === 'percent';
+  return html`
+    <label class="algo-strangle-field"><span>Capital in</span><select class="input" ${raw(`${attr}="capitalMode"`)} ${dis}>
+      <option value="amount" ${pct ? '' : 'selected'}>₹ fixed amount</option><option value="percent" ${pct ? 'selected' : ''}>% of available funds</option></select></label>
+    <label class="algo-strangle-field"><span>${pct ? 'Capital % of available funds' : `Capital ₹ (${zeroText})`}</span><input class="input" type="number" min="${pct ? 1 : 0}" max="${pct ? 100 : 1e9}" step="${pct ? 1 : 1000}" ${raw(`${attr}="capitalValue"`)} value="${pct ? c.capitalPct : c.capital}" ${dis}></label>`;
+}
+/** The capital fields' values for a save: the value box sets the chosen mode's number; the other one is kept. */
+function capitalFrom(box, attr, cur) {
+  const mode = box.querySelector(`[${attr}="capitalMode"]`)?.value || 'amount', v = Number(box.querySelector(`[${attr}="capitalValue"]`)?.value || 0);
+  const same = mode === (cur.capitalMode || 'amount');   // a changed mode keeps both numbers; the box shows the other one next
+  return { capitalMode: mode, capital: same && mode === 'amount' ? v : Number(cur.capital || 0), capitalPct: same && mode === 'percent' ? v : Number(cur.capitalPct || (attr === 'data-gap-cfg' ? 80 : 100)) };
+}
+const money = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
+
 /** Inside the CE + PE row: one index's settings, saved together when any of them changes. */
 function strangleSettings(a, rules, U = 'NIFTY') {
-  const cell = a?.grid?.strangle?.[U] || {}, c = cell.cfg || a?.strangleCfg || {};
-  const f = (k, label, type, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="${type}" min="${min}" max="${max}" step="${step}" data-strangle-cfg="${k}" value="${c[k] ?? ''}" ${a ? '' : 'disabled'}></label>`;
-  a = { ...a, strangleCapital: cell.capitalNow ?? a?.strangleCapital };
+  const cell = a?.grid?.strangle?.[U] || {}, c = cell.cfg || a?.strangleCfg || {}, dis = a ? '' : 'disabled', pct = c.capitalMode === 'percent';
+  const f = (k, label, type, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="${type}" min="${min}" max="${max}" step="${step}" data-strangle-cfg="${k}" value="${c[k] ?? ''}" ${dis}></label>`;
+  const capNow = Number.isFinite(cell.capitalNow) ? cell.capitalNow : c.capital;
   return html`
     <div class="algo-strat-sub algo-strangle" data-strangle-index="${U}">
       <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
@@ -126,57 +142,33 @@ function strangleSettings(a, rules, U = 'NIFTY') {
       ${f('waitMin', 'Wait (min)', 'number', 0, 120)}
       ${f('exit', 'Exit', 'time', '09:16', '15:29', '60')}
       ${f('stopPct', 'Stop % (minute close)', 'number', 1, 99)}
-      ${f('fundsPct', 'Funds used %', 'number', 1, 100)}
       ${f('maxVolPct', 'Max % of volume (0 = off)', 'number', 0, 100)}
-      <label class="algo-strangle-field"><span>On the expiry day</span><select class="input" data-strangle-cfg="expiryDay" ${a ? '' : 'disabled'}>${[['next', 'Next expiry'], ['skip', 'Skip the day'], ['next1', 'Next expiry from the day before']].map(([v, t]) => html`<option value="${v}" ${(c.expiryDay || 'next') === v ? 'selected' : ''}>${t}</option>`)}</select></label>
-      ${f('capital', 'Capital ₹ (0 = available funds)', 'number', 0, 1e9, '1000')}
-      <label class="algo-strangle-field"><span>Add its profits</span><select class="input" data-strangle-cfg="compound" ${a ? '' : 'disabled'}><option value="1" ${c.compound !== false ? 'selected' : ''}>Yes (compound)</option><option value="0" ${c.compound === false ? 'selected' : ''}>No (fixed)</option></select></label>
-      ${c.capital > 0 ? html`<small class="muted">Capital now ${Number.isFinite(a?.strangleCapital) ? `₹${Math.round(a.strangleCapital).toLocaleString('en-IN')}` : `₹${Number(c.capital).toLocaleString('en-IN')}`}${c.compound !== false ? ' (₹' + Number(c.capital).toLocaleString('en-IN') + ' + its profits since it was set)' : ''}, within the available funds and your Risk rules capital.</small>` : ''}
-      <small class="muted">${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? html`Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
+      <label class="algo-strangle-field"><span>On the expiry day</span><select class="input" data-strangle-cfg="expiryDay" ${dis}>${[['next', 'Next expiry'], ['skip', 'Skip the day'], ['next1', 'Next expiry from the day before']].map(([v, t]) => html`<option value="${v}" ${(c.expiryDay || 'next') === v ? 'selected' : ''}>${t}</option>`)}</select></label>
+      ${capitalFields('data-strangle-cfg', c, dis, '0 = available funds')}
+      ${pct ? '' : html`${f('fundsPct', 'Capital used %', 'number', 1, 100)}
+      <label class="algo-strangle-field"><span>Add its profits</span><select class="input" data-strangle-cfg="compound" ${dis}><option value="1" ${c.compound !== false ? 'selected' : ''}>Yes (compound)</option><option value="0" ${c.compound === false ? 'selected' : ''}>No (fixed)</option></select></label>`}
+      <small class="muted">${pct ? `Sized from ${c.capitalPct}% of the funds available at the entry` : c.capital > 0 ? `Sized from ${money(capNow)}${c.compound !== false ? ` (${money(c.capital)} + its profits since it was set)` : ''} × ${c.fundsPct}%` : `Sized from ${c.fundsPct}% of the available funds`}, within the funds and your Risk rules capital per trade. ${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? `Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
     </div>`;
 }
 
 /** Inside the Gap open 09:15 row: one index's settings (as the Gap backtest's inputs), saved together when one changes. */
-function gapSettings(a, U) {
-  const cell = a?.grid?.gap?.[U] || {}, c = cell.cfg || {}, dis = a ? '' : 'disabled';
+function gapSettings(a, U, rules) {
+  const cell = a?.grid?.gap?.[U] || {}, c = cell.cfg || {}, dis = a ? '' : 'disabled', pct = c.capitalMode === 'percent';
   const num = (k, label, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="number" min="${min}" max="${max}" step="${step}" data-gap-cfg="${k}" value="${c[k] ?? ''}" ${dis}></label>`;
-  const yesNo = (k, label, yes, no) => html`<label class="algo-strangle-field"><span>${label}</span><select class="input" data-gap-cfg="${k}" ${dis}><option value="1" ${c[k] ? 'selected' : ''}>${yes}</option><option value="0" ${c[k] ? '' : 'selected'}>${no}</option></select></label>`;
+  const pick = (k, label, yes, no) => html`<label class="algo-strangle-field"><span>${label}</span><select class="input" data-gap-cfg="${k}" ${dis}><option value="1" ${c[k] ? 'selected' : ''}>${yes}</option><option value="0" ${c[k] ? '' : 'selected'}>${no}</option></select></label>`;
   const capNow = Number.isFinite(cell.capitalNow) ? cell.capitalNow : c.capital;
   return html`
     <div class="algo-strat-sub algo-strangle" data-gap-index="${U}">
       <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
-      ${num('capital', 'Capital ₹ (0 = Risk rules / funds)', 0, 1e9, '1000')}
-      ${yesNo('compound', 'Sizing', 'Compound (+ its profits)', 'Fixed')}
-      ${num('fundsPct', 'Capital used per trade %', 1, 100)}
+      ${capitalFields('data-gap-cfg', c, dis, '0 = Risk rules / funds')}
+      ${pct ? '' : html`${pick('compound', 'Sizing', 'Compound (+ its profits)', 'Fixed')}
+      ${num('fundsPct', 'Capital used per trade %', 1, 100)}`}
       ${num('stopPct', 'Stop-loss % of capital (0 = day’s SL left)', 0, 100, '0.5')}
-      ${yesNo('costToCost', 'Cost to cost at 1R', 'On', 'Off')}
-      ${yesNo('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
-      <small class="muted">${c.capital > 0 ? `Sized from ₹${Math.round(capNow).toLocaleString('en-IN')}${c.compound ? ` (₹${Number(c.capital).toLocaleString('en-IN')} + its profits since it was set)` : ''} × ${c.fundsPct}%, within the funds and your Risk rules capital per trade. ` : `Sized from your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds. `}${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : 'Stop-loss: the day’s stop-loss left.'} Strike ITM2, exit at 09:16 (Auto exit above). The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
-    </div>`;
-}
-
-/** Inside the Gap open 09:15 row: the automatic exit at 09:16, on or off. */
-function autoExitRow(a, rules) {
-  const on_ = a?.gapAutoExitOn !== false;
-  return html`
-    <div class="algo-strat-head algo-strat-sub">
-      <span class="algo-strat-name"><b>Auto exit at 09:16</b><small>${on_
-        ? 'Sells at market at 09:16:00, about one minute after the entry (or the stop-loss before then).'
-        : html`Off: the trade stays open with its stop-loss at the broker until the stop is hit, you exit it, or the ${rules?.squareOff || '15:00'} square-off.`}</small></span>
-      <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="Automatic exit of the Gap open 09:15 trade at 09:16" data-gap-autoexit-toggle ${a ? '' : 'disabled'}></button>
-    </div>`;
-}
-
-/** Inside the Gap open 09:15 row: the kill switch on a day the strategy has no entry. */
-function gapLockRow(a, rules) {
-  const on_ = !!a?.gapLockOn;
-  return html`
-    <div class="algo-strat-head algo-strat-sub">
-      <span class="algo-strat-name"><b>Kill switch if no entry</b><small>${on_
-        ? 'No Gap entry today (no gap, skipped or not filled): the Dhan kill switch locks trading for the rest of the day.'
-        : 'Off: a day without a Gap entry leaves the account open for trading.'}${on_ && !rules?.killSwitch
-        ? html` <span class="warn">Needs the kill switch on in the <a href="#algo-rules">risk rules below</a>.</span>` : ''}</small></span>
-      <button class="switch" type="button" role="switch" aria-checked="${String(on_)}" aria-label="Kill switch on a day without a Gap open 09:15 entry" data-gap-lock-toggle ${a ? '' : 'disabled'}></button>
+      ${pick('costToCost', 'Cost to cost at 1R', 'On', 'Off')}
+      ${pick('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
+      ${pick('autoExit', 'Exit at 09:16', 'Yes, sell at 09:16:00', `No: stop, your exit or ${rules?.squareOff || '15:15'}`)}
+      ${pick('noEntryLock', 'If no Gap entry today', 'Kill switch: lock the day', 'Leave the account open')}
+      <small class="muted">${pct ? `Sized from ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Sized from ${money(capNow)}${c.compound ? ` (${money(c.capital)} + its profits since it was set)` : ''} × ${c.fundsPct}%` : `Sized from your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade. ${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : 'Stop-loss: the day’s stop-loss left.'} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the kill switch on in the <a href="#algo-rules">risk rules below</a>.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
     </div>`;
 }
 
@@ -389,10 +381,11 @@ export default {
     on(el, 'change', '[data-strangle-cfg]', async (_, field) => {
       const id = ctx.data.account?.id, box = field.closest('[data-strangle-index]'), U = box?.dataset.strangleIndex;
       if (!id || !box) return;
-      const val = k => box.querySelector(`[data-strangle-cfg="${k}"]`)?.value;
-      const cfg = Object.fromEntries(['target', 'bandPct', 'waitMin', 'stopPct', 'fundsPct', 'maxVolPct', 'capital'].map(k => [k, Number(val(k) || 0)]));
+      // A field hidden for the capital choice (% of funds: no Capital used % / compounding) keeps its saved value.
+      const cur = ctx.data.account?.grid?.strangle?.[U]?.cfg || {}, val = k => box.querySelector(`[data-strangle-cfg="${k}"]`)?.value ?? (cur[k] == null ? undefined : String(cur[k] === true ? 1 : cur[k] === false ? 0 : cur[k]));
+      const cfg = Object.fromEntries(['target', 'bandPct', 'waitMin', 'stopPct', 'fundsPct', 'maxVolPct'].map(k => [k, Number(val(k) || 0)]));
       try {
-        await post(`/brokers/${id}/algo-grid`, { strategy: 'strangle', index: U, cfg: { ...cfg, entry: val('entry'), exit: val('exit'), expiryDay: val('expiryDay') || 'next', compound: val('compound') !== '0' } });
+        await post(`/brokers/${id}/algo-grid`, { strategy: 'strangle', index: U, cfg: { ...cfg, ...capitalFrom(box, 'data-strangle-cfg', cur), entry: val('entry'), exit: val('exit'), expiryDay: val('expiryDay') || 'next', compound: val('compound') !== '0' } });
         toast(`CE + PE ${INDEX_SHORT[U]} settings saved.`, 'ok');
         await refresh();
       } catch (err) { toastError(err); await refresh(); }
@@ -402,9 +395,9 @@ export default {
     on(el, 'change', '[data-gap-cfg]', async (_, field) => {
       const id = ctx.data.account?.id, box = field.closest('[data-gap-index]'), U = box?.dataset.gapIndex;
       if (!id || !box) return;
-      const val = k => box.querySelector(`[data-gap-cfg="${k}"]`)?.value;
-      const cfg = { capital: Number(val('capital') || 0), fundsPct: Number(val('fundsPct') || 80), stopPct: Number(val('stopPct') || 0),
-        compound: val('compound') === '1', costToCost: val('costToCost') === '1', requireGreen: val('requireGreen') === '1' };
+      const cur = ctx.data.account?.grid?.gap?.[U]?.cfg || {}, val = k => box.querySelector(`[data-gap-cfg="${k}"]`)?.value ?? (cur[k] == null ? undefined : String(cur[k] === true ? 1 : cur[k] === false ? 0 : cur[k]));
+      const cfg = { ...capitalFrom(box, 'data-gap-cfg', cur), fundsPct: Number(val('fundsPct') || 80), stopPct: Number(val('stopPct') || 0), compound: val('compound') === '1',
+        costToCost: val('costToCost') === '1', requireGreen: val('requireGreen') === '1', autoExit: val('autoExit') === '1', noEntryLock: val('noEntryLock') === '1' };
       try {
         await post(`/brokers/${id}/algo-grid`, { strategy: 'gap', index: U, cfg });
         toast(`Gap open 09:15 ${INDEX_SHORT[U]} settings saved.`, 'ok');
@@ -422,30 +415,6 @@ export default {
         syncTopbar(account);
         const name = ctx.data.account?.gridStrategies?.find(x => x.key === g)?.label || g;
         toast(`${name} ${next ? 'on' : 'off'} for ${INDEX_SHORT[U]}.`, next ? 'ok' : 'ok');
-        await refresh();
-      } catch (err) { toastError(err); b.disabled = false; }
-    }, signal);
-
-    on(el, 'click', '[data-gap-autoexit-toggle]', async (_, b) => {
-      const id = ctx.data.account?.id, next = b.getAttribute('aria-checked') !== 'true';
-      if (!id) return;
-      b.disabled = true;
-      try {
-        const { account } = await post(`/brokers/${id}/strategies`, { gapAutoExit: next });
-        syncTopbar(account);
-        toast(next ? 'Gap open 09:15 exits automatically at 09:16.' : 'Gap open 09:15 stays open after 09:16: the stop-loss, your exit or the square-off closes it.', next ? 'ok' : 'warn');
-        await refresh();
-      } catch (err) { toastError(err); b.disabled = false; }
-    }, signal);
-
-    on(el, 'click', '[data-gap-lock-toggle]', async (_, b) => {
-      const id = ctx.data.account?.id, next = b.getAttribute('aria-checked') !== 'true';
-      if (!id) return;
-      b.disabled = true;
-      try {
-        const { account } = await post(`/brokers/${id}/strategies`, { gapLock: next });
-        syncTopbar(account);
-        toast(next ? 'The kill switch locks the day when Gap open 09:15 has no entry.' : 'A day without a Gap entry no longer locks the account.', 'ok');
         await refresh();
       } catch (err) { toastError(err); b.disabled = false; }
     }, signal);

@@ -29,7 +29,9 @@ function strangleCfgFrom(c = {}, prev = {}) {
   const cfg = { target: v.num(c.target, 'Option price', { min: 0.05, max: 5000 }), bandPct: v.num(c.bandPct, 'Price band %', { min: 1, max: 95 }),
     entry: time(c.entry, 'Entry'), waitMin: v.num(c.waitMin, 'Wait for a price (minutes)', { min: 0, max: 120, int: true }), exit: time(c.exit, 'Exit'),
     stopPct: v.num(c.stopPct, 'Stop %', { min: 1, max: 99 }), fundsPct: v.num(c.fundsPct, 'Funds used %', { min: 1, max: 100 }), maxVolPct: v.num(c.maxVolPct, 'Max % of volume', { min: 0, max: 100 }),
-    expiryDay: String(c.expiryDay ?? 'next'), capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits') };
+    expiryDay: String(c.expiryDay ?? 'next'), capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits'),
+    capitalMode: String(c.capitalMode ?? 'amount'), capitalPct: v.num(c.capitalPct ?? 100, 'Capital %', { min: 1, max: 100 }) };
+  if (!['amount', 'percent'].includes(cfg.capitalMode)) throw bad('VALIDATION', 'Capital: choose a ₹ amount or a % of the funds.');
   if (cfg.exit <= cfg.entry) throw bad('VALIDATION', 'The exit time must be after the entry time.');
   if (!['next', 'skip', 'next1'].includes(cfg.expiryDay)) throw bad('VALIDATION', 'On the expiry day: use the next expiry, skip the day, or use the next expiry from the day before.');
   // Its own capital (+ its profits) counts trades from when it was set; changing it starts again.
@@ -41,7 +43,10 @@ function strangleCfgFrom(c = {}, prev = {}) {
 function gapCfgFrom(c = {}, prev = {}) {
   const cfg = { capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits'),
     fundsPct: v.num(c.fundsPct ?? 80, 'Capital used %', { min: 1, max: 100 }), stopPct: v.num(c.stopPct ?? 0, 'Stop-loss % of capital', { min: 0, max: 100 }),
-    costToCost: c.costToCost === undefined ? true : v.bool(c.costToCost, 'Cost to cost'), requireGreen: c.requireGreen === undefined ? false : v.bool(c.requireGreen, 'Green premium') };
+    costToCost: c.costToCost === undefined ? true : v.bool(c.costToCost, 'Cost to cost'), requireGreen: c.requireGreen === undefined ? false : v.bool(c.requireGreen, 'Green premium'),
+    capitalMode: String(c.capitalMode ?? 'amount'), capitalPct: v.num(c.capitalPct ?? 80, 'Capital %', { min: 1, max: 100 }),
+    autoExit: c.autoExit === undefined ? true : v.bool(c.autoExit, 'Exit at 09:16'), noEntryLock: c.noEntryLock === undefined ? true : v.bool(c.noEntryLock, 'Kill switch if no entry') };
+  if (!['amount', 'percent'].includes(cfg.capitalMode)) throw bad('VALIDATION', 'Capital: choose a ₹ amount or a % of the funds.');
   cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
   return cfg;
 }

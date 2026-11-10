@@ -139,7 +139,7 @@ test('AI Algo Trading page: the switch and its settings', async () => {
   assert.equal(on.status, 200);
   const live = await (await fetch(`${base}/api/algo/live`, { headers: H })).json();
   assert.equal(live.account.strangleOn, true);
-  assert.deepEqual(live.account.strangleCfg, { target: 4, bandPct: 90, entry: '09:20', waitMin: 25, exit: '15:25', stopPct: 20, fundsPct: 100, maxVolPct: 10, expiryDay: 'next', capital: 0, compound: true, capitalSince: 0 });
+  assert.deepEqual(live.account.strangleCfg, { target: 4, bandPct: 90, entry: '09:20', waitMin: 25, exit: '15:25', stopPct: 20, fundsPct: 100, maxVolPct: 10, expiryDay: 'next', capitalMode: 'amount', capital: 0, capitalPct: 100, compound: true, capitalSince: 0 });
   const bad = await fetch(`${base}/api/brokers/${acct.id}/strategies`, { method: 'POST', headers: H, body: JSON.stringify({ strangleCfg: { ...live.account.strangleCfg, exit: '09:10' } }) });
   assert.equal(bad.status, 400);
 });
@@ -209,7 +209,8 @@ test('AI Algo Trading page: the grid switches a strategy on per index, with its 
 });
 
 test('Gap open 09:15 settings per index: defaults keep the live behaviour; saved and validated through the grid', async () => {
-  assert.deepEqual(gapConfig({ algo_underlying: 'NIFTY' }, 'SENSEX'), { ...GAP_SLOT });
+  assert.deepEqual(gapConfig({ algo_underlying: 'NIFTY' }, 'SENSEX'), { ...GAP_SLOT, autoExit: true, noEntryLock: true });
+  assert.deepEqual([gapConfig({ gap_auto_exit: 0, gap_lock: 0 }, 'NIFTY').autoExit, gapConfig({ gap_auto_exit: 0, gap_lock: 0 }, 'NIFTY').noEntryLock], [false, false], 'until set per index they follow the older switches');
   assert.deepEqual({ fundsPct: GAP_SLOT.fundsPct, stopPct: GAP_SLOT.stopPct, costToCost: GAP_SLOT.costToCost, requireGreen: GAP_SLOT.requireGreen, capital: GAP_SLOT.capital }, { fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false, capital: 0 });
   const base = `http://127.0.0.1:${server.address().port}`, H = { 'Content-Type': 'application/json', Cookie: cookie };
   const post = body => fetch(`${base}/api/brokers/${acct.id}/algo-grid`, { method: 'POST', headers: H, body: JSON.stringify(body) });
@@ -217,10 +218,15 @@ test('Gap open 09:15 settings per index: defaults keep the live behaviour; saved
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', on: true })).status, 200);
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg })).status, 200);
   const saved = gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
-  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, capitalSince: undefined });
+  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, capitalMode: 'amount', capitalPct: 80, autoExit: true, noEntryLock: true, capitalSince: undefined });
   assert.ok(saved.capitalSince > 0, 'its capital counts trades from now');
   const live = (await (await fetch(`${base}/api/algo/live`, { headers: H })).json()).account;
   assert.equal(live.grid.gap.SENSEX.capitalNow, 50000);
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, fundsPct: 0 } })).status, 400);
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, stopPct: 150 } })).status, 400);
+  // Capital as a % of the funds; the 09:16 exit and the no-entry lock per index.
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, capitalMode: 'percent', capitalPct: 60, autoExit: false, noEntryLock: false } })).status, 200);
+  const pctCfg = gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
+  assert.deepEqual([pctCfg.capitalMode, pctCfg.capitalPct, pctCfg.capital, pctCfg.autoExit, pctCfg.noEntryLock], ['percent', 60, 50000, false, false]);
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, capitalMode: 'lots' } })).status, 400);
 });
