@@ -12,7 +12,7 @@ const { stmt } = await import('../src/db/index.js');
 const { setBook } = await import('../src/modules/broker/book.js');
 const { upsertAccount } = await import('../src/modules/broker/registry.js');
 const { saveRules, getRules } = await import('../src/modules/rules/service.js');
-const { strangleLegs, sizeStrangle, strangleTick, manageTrade, strangleCapital, exitFromFills, STRANGLE, FEED } = await import('../src/modules/scalper/autotrade.js');
+const { strangleLegs, sizeStrangle, strangleTick, manageTrade, strangleCapital, exitFromFills, STRANGLE, FEED, gapConfig, GAP_SLOT } = await import('../src/modules/scalper/autotrade.js');
 const { optionCharges } = await import('../src/modules/scalper/orb5-options.js');
 
 const D = '2026-10-20', at = hhmm => Date.parse(`${D}T${hhmm}:00+05:30`);   // a Tuesday: the 20 Oct expiry day
@@ -205,5 +205,22 @@ test('AI Algo Trading page: the grid switches a strategy on per index, with its 
   const row = stmt('SELECT strangle_on, gap_on, algo_underlying FROM broker_accounts WHERE id = ?').get(acct.id);
   assert.deepEqual([row.strangle_on, row.gap_on, row.algo_underlying.split(',').sort()], [1, 1, ['BANKNIFTY', 'NIFTY', 'SENSEX']]);
   assert.equal((await post({ strategy: 'gap', index: 'NOPE', on: true })).status, 400);
-  assert.equal((await post({ strategy: 'gap', index: 'NIFTY', cfg: {} })).status, 400, 'only CE + PE has settings');
+  assert.equal((await post({ strategy: 'orb', index: 'NIFTY', cfg: {} })).status, 400, 'only CE + PE and Gap have settings');
+});
+
+test('Gap open 09:15 settings per index: defaults keep the live behaviour; saved and validated through the grid', async () => {
+  assert.deepEqual(gapConfig({ algo_underlying: 'NIFTY' }, 'SENSEX'), { ...GAP_SLOT });
+  assert.deepEqual({ fundsPct: GAP_SLOT.fundsPct, stopPct: GAP_SLOT.stopPct, costToCost: GAP_SLOT.costToCost, requireGreen: GAP_SLOT.requireGreen, capital: GAP_SLOT.capital }, { fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false, capital: 0 });
+  const base = `http://127.0.0.1:${server.address().port}`, H = { 'Content-Type': 'application/json', Cookie: cookie };
+  const post = body => fetch(`${base}/api/brokers/${acct.id}/algo-grid`, { method: 'POST', headers: H, body: JSON.stringify(body) });
+  const cfg = { capital: 50000, compound: true, fundsPct: 90, stopPct: 20, costToCost: false, requireGreen: true };   // Backtest #699
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', on: true })).status, 200);
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg })).status, 200);
+  const saved = gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
+  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, capitalSince: undefined });
+  assert.ok(saved.capitalSince > 0, 'its capital counts trades from now');
+  const live = (await (await fetch(`${base}/api/algo/live`, { headers: H })).json()).account;
+  assert.equal(live.grid.gap.SENSEX.capitalNow, 50000);
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, fundsPct: 0 } })).status, 400);
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, stopPct: 150 } })).status, 400);
 });

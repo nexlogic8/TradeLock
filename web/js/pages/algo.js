@@ -91,7 +91,7 @@ function gridRow(s, a, trades, rules) {
         ${s.public ? '' : raw(artInfo(s.key, s.name))}
         <div class="algo-cells" role="row">${['NIFTY', 'BANKNIFTY', 'SENSEX'].map(U => gridCell(s, U, a, trades))}</div>
       </div>
-      ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}` : ''}
+      ${s.key === 'gap' ? html`${autoExitRow(a, rules)}${gapLockRow(a, rules)}${onAt.map(U => gapSettings(a, U))}` : ''}
       ${s.key === 'strangle' ? onAt.map(U => strangleSettings(a, rules, U)) : ''}
     </div>`;
 }
@@ -132,6 +132,25 @@ function strangleSettings(a, rules, U = 'NIFTY') {
       <label class="algo-strangle-field"><span>Add its profits</span><select class="input" data-strangle-cfg="compound" ${a ? '' : 'disabled'}><option value="1" ${c.compound !== false ? 'selected' : ''}>Yes (compound)</option><option value="0" ${c.compound === false ? 'selected' : ''}>No (fixed)</option></select></label>
       ${c.capital > 0 ? html`<small class="muted">Capital now ${Number.isFinite(a?.strangleCapital) ? `₹${Math.round(a.strangleCapital).toLocaleString('en-IN')}` : `₹${Number(c.capital).toLocaleString('en-IN')}`}${c.compound !== false ? ' (₹' + Number(c.capital).toLocaleString('en-IN') + ' + its profits since it was set)' : ''}, within the available funds and your Risk rules capital.</small>` : ''}
       <small class="muted">${rules?.cutoff && rules.cutoff < (c.exit || '15:25') ? html`Your Risk rules cutoff ${rules.cutoff} comes first, so it sells at ${rules.cutoff}. ` : ''}Real money when Algo Trading is on Real.</small>
+    </div>`;
+}
+
+/** Inside the Gap open 09:15 row: one index's settings (as the Gap backtest's inputs), saved together when one changes. */
+function gapSettings(a, U) {
+  const cell = a?.grid?.gap?.[U] || {}, c = cell.cfg || {}, dis = a ? '' : 'disabled';
+  const num = (k, label, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="number" min="${min}" max="${max}" step="${step}" data-gap-cfg="${k}" value="${c[k] ?? ''}" ${dis}></label>`;
+  const yesNo = (k, label, yes, no) => html`<label class="algo-strangle-field"><span>${label}</span><select class="input" data-gap-cfg="${k}" ${dis}><option value="1" ${c[k] ? 'selected' : ''}>${yes}</option><option value="0" ${c[k] ? '' : 'selected'}>${no}</option></select></label>`;
+  const capNow = Number.isFinite(cell.capitalNow) ? cell.capitalNow : c.capital;
+  return html`
+    <div class="algo-strat-sub algo-strangle" data-gap-index="${U}">
+      <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
+      ${num('capital', 'Capital ₹ (0 = Risk rules / funds)', 0, 1e9, '1000')}
+      ${yesNo('compound', 'Sizing', 'Compound (+ its profits)', 'Fixed')}
+      ${num('fundsPct', 'Capital used per trade %', 1, 100)}
+      ${num('stopPct', 'Stop-loss % of capital (0 = day’s SL left)', 0, 100, '0.5')}
+      ${yesNo('costToCost', 'Cost to cost at 1R', 'On', 'Off')}
+      ${yesNo('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
+      <small class="muted">${c.capital > 0 ? `Sized from ₹${Math.round(capNow).toLocaleString('en-IN')}${c.compound ? ` (₹${Number(c.capital).toLocaleString('en-IN')} + its profits since it was set)` : ''} × ${c.fundsPct}%, within the funds and your Risk rules capital per trade. ` : `Sized from your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds. `}${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : 'Stop-loss: the day’s stop-loss left.'} Strike ITM2, exit at 09:16 (Auto exit above). The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
     </div>`;
 }
 
@@ -362,6 +381,20 @@ export default {
       try {
         await post(`/brokers/${id}/algo-grid`, { strategy: 'strangle', index: U, cfg: { ...cfg, entry: val('entry'), exit: val('exit'), expiryDay: val('expiryDay') || 'next', compound: val('compound') !== '0' } });
         toast(`CE + PE ${INDEX_SHORT[U]} settings saved.`, 'ok');
+        await refresh();
+      } catch (err) { toastError(err); await refresh(); }
+    }, signal);
+
+    // Gap open 09:15: one index's settings, saved together when one of them changes.
+    on(el, 'change', '[data-gap-cfg]', async (_, field) => {
+      const id = ctx.data.account?.id, box = field.closest('[data-gap-index]'), U = box?.dataset.gapIndex;
+      if (!id || !box) return;
+      const val = k => box.querySelector(`[data-gap-cfg="${k}"]`)?.value;
+      const cfg = { capital: Number(val('capital') || 0), fundsPct: Number(val('fundsPct') || 80), stopPct: Number(val('stopPct') || 0),
+        compound: val('compound') === '1', costToCost: val('costToCost') === '1', requireGreen: val('requireGreen') === '1' };
+      try {
+        await post(`/brokers/${id}/algo-grid`, { strategy: 'gap', index: U, cfg });
+        toast(`Gap open 09:15 ${INDEX_SHORT[U]} settings saved.`, 'ok');
         await refresh();
       } catch (err) { toastError(err); await refresh(); }
     }, signal);

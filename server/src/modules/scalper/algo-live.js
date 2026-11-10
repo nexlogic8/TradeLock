@@ -7,7 +7,7 @@ import { getRules } from '../rules/service.js';
 import { limitAmount } from '../rules/limits.js';
 import { dayState, capitalFor } from '../risk/service.js';
 import { marketOpen } from '../../lib/time.js';
-import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices, strangleConfig, strangleCapital } from './autotrade.js';
+import { autoTradesToday, autoTradeHistory, riskLeft, squareOffTime, algoIndices, strangleConfig, strangleCapital, gapConfig, gapCapital } from './autotrade.js';
 import { paperTrades, retestConfig } from './paper-retest.js';
 import { UNDERLYINGS } from './underlyings.js';
 import { algoGrid, GRID_INDICES, GRID_STRATEGIES } from './algo-grid.js';
@@ -15,7 +15,11 @@ import { algoGrid, GRID_INDICES, GRID_STRATEGIES } from './algo-grid.js';
 /** The Algo Trading grid for the page: every cell's switch; CE + PE cells with their full settings and capital now. */
 const gridForPage = acct => {
   const g = algoGrid(acct), paper = acct.paper_mode === 1 ? 1 : 0;
-  for (const U of GRID_INDICES) { const cfg = strangleConfig(acct, U); g.strangle[U] = { ...g.strangle[U], cfg, capitalNow: strangleCapital(acct.user_id, cfg, paper, U) }; }
+  for (const U of GRID_INDICES) {
+    const cfg = strangleConfig(acct, U), gcfg = gapConfig(acct, U);
+    g.strangle[U] = { ...g.strangle[U], cfg, capitalNow: strangleCapital(acct.user_id, cfg, paper, U) };
+    g.gap[U] = { ...g.gap[U], cfg: gcfg, capitalNow: gapCapital(acct.user_id, gcfg, paper, U) };
+  }
   return g;
 };
 

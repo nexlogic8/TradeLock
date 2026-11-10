@@ -37,6 +37,15 @@ function strangleCfgFrom(c = {}, prev = {}) {
   return cfg;
 }
 
+/** Gap open 09:15: its settings for one index, validated (0 capital = the Risk rules / the funds; 0 stop = the day's stop-loss left). */
+function gapCfgFrom(c = {}, prev = {}) {
+  const cfg = { capital: v.num(c.capital ?? 0, 'Capital ₹', { min: 0, max: 1e9 }), compound: c.compound === undefined ? true : v.bool(c.compound, 'Add its profits'),
+    fundsPct: v.num(c.fundsPct ?? 80, 'Capital used %', { min: 1, max: 100 }), stopPct: v.num(c.stopPct ?? 0, 'Stop-loss % of capital', { min: 0, max: 100 }),
+    costToCost: c.costToCost === undefined ? true : v.bool(c.costToCost, 'Cost to cost'), requireGreen: c.requireGreen === undefined ? false : v.bool(c.requireGreen, 'Green premium') };
+  cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
+  return cfg;
+}
+
 function ownAccount(userId, id) {
   const acct = stmt('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?').get(Number(id), userId);
   if (!acct) throw notFound('Broker account not found');
@@ -227,8 +236,9 @@ export function brokerRoutes(r) {
     const grid = algoGrid(acct), cell = grid[key][U];
     if (ctx.body.on !== undefined) cell.on = v.bool(ctx.body.on, `${GRID_STRATEGIES[key].label} on ${U}`);
     if (ctx.body.cfg !== undefined) {
-      if (key !== 'strangle') throw bad('VALIDATION', `${GRID_STRATEGIES[key].label} has no settings here.`);
-      cell.cfg = strangleCfgFrom(ctx.body.cfg, cell.cfg || {});
+      if (key === 'strangle') cell.cfg = strangleCfgFrom(ctx.body.cfg, cell.cfg || {});
+      else if (key === 'gap') cell.cfg = gapCfgFrom(ctx.body.cfg, cell.cfg || {});
+      else throw bad('VALIDATION', `${GRID_STRATEGIES[key].label} has no settings here.`);
     }
     const cols = legacyColumns(grid);
     if (algoLocked(acct) && !Object.values(GRID_STRATEGIES).some(s => cols[s.column])) throw conflict('ALGO_LOCKED', `At least one strategy stays on while Algo Trading runs. ${ALGO_LOCK_MESSAGE}`);

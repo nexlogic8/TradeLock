@@ -609,10 +609,11 @@ function gapDecide(acct, adapter, u, { day, now, prep, index, atm, opt, source, 
     const last = prep.prevLast?.get(String(c.securityId));
     return [s, { strike: c.strike, prev: last ?? (c.ltp || null), prevFrom: last != null ? 'last trade' : 'NSE close', open: opt[c.securityId]?.open ?? null, ltp: opt[c.securityId]?.ltp ?? null }];
   }));
-  const g = gapPick(sides, { requireGreen: AUTO.gap.requireGreen }), at = clockMs(now);
+  const greenRule = AUTO.gap.requireGreen || gapConfig(acct, u.key).requireGreen;   // this index's Gap settings (Algo Trading grid)
+  const g = gapPick(sides, { requireGreen: greenRule }), at = clockMs(now);
   if (g.skip) {
     const line = x => (x ? `${x.strike} ${x === sides.CE ? 'CE' : 'PE'} ${x.prev ?? '—'} → open ${x.open ?? '—'} → ${x.ltp ?? '—'} at ${at}` : '');
-    const green = AUTO.gap.requireGreen ? ' and stayed green' : '';
+    const green = greenRule ? ' and stayed green' : '';
     const why = /both/.test(g.skip) ? `both premiums gapped up${green} (no clear side)` : `neither premium gapped up above its previous close${green}`;
     gapNoTrade(acct, adapter, u, day, `Algo Trading: no Gap 09:15 trade today`,
       `${u.label} opened ${index.open ?? '—'} (${index.ltp} at ${at}), ATM ${sides.CE?.strike ?? sides.PE?.strike}: ${why}.\n${[line(sides.CE), line(sides.PE)].filter(Boolean).join('\n')}\n(previous close = ${sides.CE?.prevFrom || sides.PE?.prevFrom}).`);
@@ -933,7 +934,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const risk = scalperSignalRisk(uid, { concurrent: true });
   if (risk.reason) return skip(risk.reason);
   if (entriesInFlight.has(uid)) return skip('Another order is being placed.');
-  const u = underlyingFor(setup.underlying);
+  const u = underlyingFor(setup.underlying), gc = gapConfig(acct, u.key);   // this index's Gap settings (Algo Trading grid)
   const { expiry, chain } = gap.prep || await gapPrefetch(acct, adapter, u, now);
   if (!expiry) return skip(`Dhan returned no upcoming ${u.label} expiry.`);
   // ATM at the price now (the prefetched chain's own spot is from before the open).
@@ -994,7 +995,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // The price the order goes by: the best offer (what sellers ask now) when known, else the last trade.
   const quoteAt = q?.ask > 0 ? q.ask : q?.ltp > 0 ? q.ltp : 0, byAsk = q?.ask > 0;
   if (!(quoteAt > 0)) return skip(GAP_LIVE.liquid ? `${symbol} has no sellers and no trade yet today (no live price), so it cannot be priced.` : `${symbol} has no last price yet.`);
-  if (G.requireGreen && !premiumGreen(q)) return skip(`${symbol} premium is ${quoteAt} vs its 09:15 open ${q?.open ?? '—'}: not green in the first seconds, so no trade today.`);
+  if ((G.requireGreen || gc.requireGreen) && !premiumGreen(q)) return skip(`${symbol} premium is ${quoteAt} vs its 09:15 open ${q?.open ?? '—'}: not green in the first seconds, so no trade today.`);
   const limit = roundTick(quoteAt + Math.max(G.minPad, quoteAt * G.padPct), meta.tickSize);
   const funds = Number(getBook(uid).funds?.available);
   if (!(funds > 0)) return skip('Dhan did not report the available funds, so the trade cannot be sized.');
@@ -1005,12 +1006,15 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // MARKET (GAP_LIVE.market): a market order, re-sent if not filled; else LIM: our own limit, chased.
   const ch = GAP_LIVE.chase, mkt = !!(ch && GAP_LIVE.market), lim = !!(ch && !mkt);
   const cap = risk.budget?.capitalLimit ?? null, fits = funds * 0.98 / (1 + (lim ? ch.cap : G.blockPad));
-  const spend = Math.min(cap != null ? cap : funds * G.fundsUse, fits);
+  // Its own capital (+ its profits) × CAPITAL USED % when set, else the Risk rules' Capital per trade or CAPITAL USED % of the funds.
+  const own = gapCapital(uid, gc, acct.paper_mode === 1 ? 1 : 0, u.key);
+  const spend = own != null ? Math.min(Math.max(0, own) * gc.fundsPct / 100, cap ?? Infinity, fits) : Math.min(cap != null ? cap : funds * gc.fundsPct / 100, fits);
   let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
   if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < fits ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
   // Stop-loss room per unit: what the Risk rules still allow to lose today, spread over the whole quantity.
-  const today = dayState(uid), budget = riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
-  if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The day's stop-loss left (₹${budget}) is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);
+  // Stop-loss room per unit: STOP % of its capital (Gap settings), else what the Risk rules still allow to lose today, over the quantity.
+  const today = dayState(uid), budget = gc.stopPct > 0 ? round2((own != null ? Math.max(0, own) : funds) * gc.stopPct / 100) : riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
+  if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The stop-loss ${gc.stopPct > 0 ? `(${gc.stopPct}% of the capital, ₹${budget})` : `left for today (₹${budget})`} is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);
 
   // CHASE: our own limit above the fresh price (a buy limit pays the sellers' price, the limit is only the ceiling).
   // Otherwise refPrice / marketBand: a broker that turns market orders into limits (StoxKart) prices it from this tick.
@@ -1284,12 +1288,26 @@ export function exitFromFills(t) {
   return q >= t.qty && q > 0 ? Math.round(v / q * 100) / 100 : null;
 }
 /** The CE + PE strategy's capital: cfg.capital, plus its realised P&L (after charges) since cfg.capitalSince when compounding. */
-export function strangleCapital(uid, cfg, paper = 0, U = STRANGLE.underlying) {
+export const strangleCapital = (uid, cfg, paper = 0, U = STRANGLE.underlying) => strategyCapital(uid, cfg, paper, U, STRANGLE.name);
+
+// ---- Gap open 09:15: its own settings per index (Algo Trading grid), like the Gap backtest's inputs ----
+// Defaults = the live behaviour before these settings: capital from the Risk rules' Capital per trade (else 80% of the
+// funds), the stop from the day's stop-loss left, cost to cost at 1R, no green check.
+//   capital > 0: size from it (+ its own realised P&L since capitalSince when compound) × FUNDS_PCT %, within the funds
+//   and the Risk rules' Capital per trade. stopPct > 0: the stop-loss is STOP_PCT % of that capital spread over the
+//   quantity (as the backtest's "daily stop-loss % of capital"), else the day's stop-loss left. costToCost: the stop
+//   moves to the entry at 1R. requireGreen: buy only when the premium is still above its 09:15 open in the first seconds.
+export const GAP_SLOT = Object.freeze({ capital: 0, compound: true, capitalSince: 0, fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false });
+export const gapConfig = (acct, U = 'NIFTY') => ({ ...GAP_SLOT, ...slotCfg(acct, 'gap', U) });
+export const gapCapital = (uid, cfg, paper = 0, U = 'NIFTY') => strategyCapital(uid, cfg, paper, U, 'Gap 09:15');
+
+/** A strategy's own capital on an index: cfg.capital, plus its realised P&L (after charges) since cfg.capitalSince when compounding. */
+export function strategyCapital(uid, cfg, paper, U, name) {
   if (!(cfg.capital > 0)) return null;
   if (!cfg.compound) return cfg.capital;
   let pnl = 0;
   for (const t of stmt(`SELECT * FROM auto_trades WHERE user_id = ? AND status = 'closed' AND paper = ? AND created_at >= ? AND entry_price IS NOT NULL AND qty > 0
-      AND json_extract(detail, '$.setup.strategy') = ? AND COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') = ?`).all(uid, paper, cfg.capitalSince || 0, STRANGLE.name, U)) {
+      AND json_extract(detail, '$.setup.strategy') = ? AND COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') = ?`).all(uid, paper, cfg.capitalSince || 0, name, U)) {
     let exit = t.exit_price;
     if (exit == null) { exit = exitFromFills(t); if (exit != null) update(t.id, { exit_price: exit }); }
     if (exit == null) continue;
@@ -1604,7 +1622,12 @@ export function manualExcess(positions, autoTrades) {
 // ---- Dynamic SL: cost to cost ----
 const costTry = new Map();   // trade id -> last attempt (a refused modify is retried, not hammered)
 /** The trade's cost-to-cost R from AUTO.costToCostR (by its strategy). */
-const costR = trade => { const k = JSON.parse(trade.detail || '{}').setup?.strategy; return AUTO.costToCostR[k] ?? AUTO.costToCostR.default; };
+const costR = trade => {
+  const setup = JSON.parse(trade.detail || '{}').setup || {}, k = setup.strategy;
+  // Gap 09:15 with cost to cost switched off in its settings (that index, Algo Trading grid): the stop stays where it was placed.
+  if (k === 'Gap 09:15' && gapConfig(accountFor(trade.user_id), setup.underlying || 'NIFTY').costToCost === false) return 0;
+  return AUTO.costToCostR[k] ?? AUTO.costToCostR.default;
+};
 /**
  * Once the option trades at entry + R × the risk (entry − stop), the stop-loss order at Dhan is moved up to the entry
  * price: from then on the trade cannot lose (only charges and a little slippage). Once per trade. Live tick prices.
