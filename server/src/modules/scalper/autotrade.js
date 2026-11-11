@@ -149,7 +149,9 @@ export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400, liquid: true, market
 // FIRST_PAD: Dhan prices an option market order from the last trade (+ ~10%), which at 09:15:00 is still yesterday's, so
 // the 09:15:00 order is our LIMIT at the estimate + FIRST_PAD; not filled within the market re-send interval (1 s) → it is
 // cancelled and market orders follow, as for the usual entry.
-export const GAP_PRE = { decideAt: '09:14:30', fireMs: 20, delta: 0.6, firstPad: 0.15 };
+// EXTRA_STEPS: strikes deeper than the usual GAP_LIVE.strike (ITM2 + 1 = ITM3 from the pre-open ATM: CE one strike lower,
+// PE one higher).
+export const GAP_PRE = { decideAt: '09:14:30', fireMs: 20, delta: 0.6, firstPad: 0.15, extraSteps: 1 };
 const FEED_FROM = 9 * 60 + 13, FEED_TO = 15 * 60 + 31;   // IST minutes: subscribed from just before the open to the close
 const TICK_FRESH_MS = 3_000;
 /** A 5-minute index candle from the feed's five 1-minute candles (each complete), or null. */
@@ -978,7 +980,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const atm = atmContract({ ...chain, last_price: setup.ltp || setup.open }, direction);
   if (!atm) return skip(`No ATM ${direction} found in the ${expiry} option chain.`);
   // The contract bought: GAP_LIVE.strike steps from the ATM (ITM2 by default).
-  let steps = GAP_LIVE.strike || 0;
+  // Pre-open: EXTRA_STEPS more into the money (the user's choice, 12 Nov: the index often moves back in the first seconds,
+  // 11 Nov 82,248 → 82,078, so ITM2 at 09:15:02 was one strike deeper than ITM2 at the pre-open).
+  let steps = (GAP_LIVE.strike || 0) + (gap.preopen ? GAP_PRE.extraSteps : 0);
   const pickOf = n => (n ? `${n > 0 ? 'ITM' : 'OTM'}${Math.abs(n)}` : 'ATM');
   let c = strikeFrom(chain, atm, direction, steps), pick = pickOf(steps);
   if (!c) return skip(`No ${pick} ${direction} (${steps > 0 ? 'in' : 'out of'} the money from the ATM ${atm.strike}) in the ${expiry} option chain.`);
