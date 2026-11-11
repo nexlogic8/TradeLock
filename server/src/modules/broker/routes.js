@@ -45,8 +45,10 @@ function gapCfgFrom(c = {}, prev = {}) {
     fundsPct: v.num(c.fundsPct ?? 80, 'Capital used %', { min: 1, max: 100 }), stopPct: v.num(c.stopPct ?? 0, 'Stop-loss % of capital', { min: 0, max: 100 }),
     costToCost: c.costToCost === undefined ? true : v.bool(c.costToCost, 'Cost to cost'), requireGreen: c.requireGreen === undefined ? false : v.bool(c.requireGreen, 'Green premium'),
     capitalMode: String(c.capitalMode ?? 'amount'), capitalPct: v.num(c.capitalPct ?? 80, 'Capital %', { min: 1, max: 100 }),
-    autoExit: c.autoExit === undefined ? true : v.bool(c.autoExit, 'Exit at 09:16'), noEntryLock: c.noEntryLock === undefined ? true : v.bool(c.noEntryLock, 'Kill switch if no entry') };
+    autoExit: c.autoExit === undefined ? true : v.bool(c.autoExit, 'Exit at 09:16'), noEntryLock: c.noEntryLock === undefined ? true : v.bool(c.noEntryLock, 'Kill switch if no entry'),
+    decide: String(c.decide ?? 'premium'), lots: Math.floor(v.num(c.lots ?? 0, 'Fixed lots', { min: 0, max: 500 })) };
   if (!['amount', 'percent'].includes(cfg.capitalMode)) throw bad('VALIDATION', 'Capital: choose a ₹ amount or a % of the funds.');
+  if (!['premium', 'preopen'].includes(cfg.decide)) throw bad('VALIDATION', 'Decide the side: the premium at 09:15 or the index pre-open.');
   cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
   return cfg;
 }

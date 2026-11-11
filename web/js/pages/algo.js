@@ -122,6 +122,7 @@ function capitalFields(attr, c, dis, zeroText) {
 }
 /** The capital fields' values for a save: the value box sets the chosen mode's number; the other one is kept. */
 function capitalFrom(box, attr, cur) {
+  if (!box.querySelector(`[${attr}="capitalMode"]`)) return { capitalMode: cur.capitalMode || 'amount', capital: Number(cur.capital || 0), capitalPct: Number(cur.capitalPct || 80) };   // hidden (fixed lots): kept
   const mode = box.querySelector(`[${attr}="capitalMode"]`)?.value || 'amount', v = Number(box.querySelector(`[${attr}="capitalValue"]`)?.value || 0);
   const same = mode === (cur.capitalMode || 'amount');   // a changed mode keeps both numbers; the box shows the other one next
   return { capitalMode: mode, capital: same && mode === 'amount' ? v : Number(cur.capital || 0), capitalPct: same && mode === 'percent' ? v : Number(cur.capitalPct || (attr === 'data-gap-cfg' ? 80 : 100)) };
@@ -156,13 +157,15 @@ function gapSettings(a, U, rules) {
   return html`
     <div class="algo-strat-sub algo-strangle" data-gap-index="${U}">
       <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
-      ${capitalFields('data-gap-cfg', c, dis, '0 = Risk rules / funds')}
-      ${num('stopPct', 'Stop-loss % of capital', 0, 100, '0.5')}
+      <label class="algo-strangle-field"><span>Decide the side</span><select class="input" data-gap-cfg="decide" ${dis}>${[['premium', 'ATM premium at 09:15 (backtested)'], ['preopen', 'Index pre-open, order at 09:15:00']].map(([v, t]) => html`<option value="${v}" ${(c.decide || 'premium') === v ? 'selected' : ''}>${t}</option>`)}</select></label>
+      ${num('lots', 'Fixed lots (0 = from capital)', 0, 500)}
+      ${c.lots > 0 ? '' : capitalFields('data-gap-cfg', c, dis, '0 = Risk rules / funds')}
+      ${num('stopPct', c.lots > 0 ? 'Stop-loss % of the premium paid' : 'Stop-loss % of capital', 0, 100, '0.5')}
       ${pick('costToCost', 'Cost to cost at 1R', 'On', 'Off')}
       ${pick('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
       ${pick('autoExit', 'Exit at 09:16', 'Yes, sell at 09:16:00', `No: stop, your exit or ${rules?.squareOff || '15:15'}`)}
       ${pick('noEntryLock', 'If no Gap entry today', 'Kill switch: lock the day', 'Leave the account open')}
-      <small class="muted">${pct ? `Each trade uses ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Each trade uses ${money(c.capital)}` : `Each trade uses your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade. ${c.stopPct > 0 ? `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.` : html`<span class="warn">Set a stop-loss %: at 0 the stop comes from the Algo Trading daily stop-loss, and with that off Gap does not trade.</span>`} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the Algo Trading kill switch rule on.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
+      <small class="muted">${c.decide === 'preopen' ? 'Side from the index pre-open (09:00–09:08 auction) vs its previous close: up → CE, down → PE, decided at 09:14:30; the buy goes at 09:15:00 (a limit at the estimated premium + 15%, then market orders each second if not filled). The green rule does not apply. ' : ''}${c.lots > 0 ? `Each trade buys ${c.lots} lot${c.lots > 1 ? 's' : ''} (the funds must cover them).` : `${pct ? `Each trade uses ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Each trade uses ${money(c.capital)}` : `Each trade uses your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade.`} ${c.stopPct > 0 ? (c.lots > 0 ? `Stop-loss ${c.stopPct}% below the fill price.` : `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.`) : html`<span class="warn">Set a stop-loss %: at 0 the stop comes from the Algo Trading daily stop-loss, and with that off Gap does not trade.</span>`} Strike ITM2. ${c.noEntryLock && !rules?.killSwitch ? html`<span class="warn">“Kill switch: lock the day” needs the Algo Trading kill switch rule on.</span> ` : ''}The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.</small>
     </div>`;
 }
 
@@ -391,7 +394,8 @@ export default {
       if (!id || !box) return;
       const cur = ctx.data.account?.grid?.gap?.[U]?.cfg || {}, val = k => box.querySelector(`[data-gap-cfg="${k}"]`)?.value ?? (cur[k] == null ? undefined : String(cur[k] === true ? 1 : cur[k] === false ? 0 : cur[k]));
       const cfg = { ...capitalFrom(box, 'data-gap-cfg', cur), fundsPct: Number(val('fundsPct') || 80), stopPct: Number(val('stopPct') || 0), compound: val('compound') === '1',
-        costToCost: val('costToCost') === '1', requireGreen: val('requireGreen') === '1', autoExit: val('autoExit') === '1', noEntryLock: val('noEntryLock') === '1' };
+        costToCost: val('costToCost') === '1', requireGreen: val('requireGreen') === '1', autoExit: val('autoExit') === '1', noEntryLock: val('noEntryLock') === '1',
+        decide: val('decide') || 'premium', lots: Number(val('lots') || 0) };
       try {
         await post(`/brokers/${id}/algo-grid`, { strategy: 'gap', index: U, cfg });
         toast(`Gap open 09:15 ${INDEX_SHORT[U]} settings saved.`, 'ok');

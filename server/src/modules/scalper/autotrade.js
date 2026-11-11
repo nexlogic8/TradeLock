@@ -140,6 +140,16 @@ export const FEED = { tick: liveTick, minute: liveMinute, bar: liveBar, watch: a
 export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400, liquid: true, market: true,
   // ASK_BUFFER: when the price is the best offer in the market depth (what sellers ask now), the limit is that + 5%.
   chase: { buffer: 0.15, askBuffer: 0.05, cap: 0.25, step: 0.02, everyMs: 1_000, pollMs: 250, until: '09:15:30', minMs: 15_000 } };
+// Gap "decide the side from the index pre-open" (Gap settings: decide = 'preopen'; 11 Nov 2026, the user's choice after a
+// 09:15:01.9 REST decision bought SENSEX 81900 CE at 648.42 in a 404 → 694 first minute): at DECIDE_AT (IST) the index's
+// pre-open price (set by the 09:00–09:08 auction) vs its previous close picks the side (up → CE, down → PE), the ITM2
+// contract and the lots are prepared, and the MARKET buy is sent FIRE_MS after 09:15:00.000, with no wait for a first
+// trade. The index unchanged / no price → the usual first-tick check decides instead. DELTA: the option's move per index
+// point, only for the estimated premium (sizing when no fixed lots, the market order's reference, the stop check).
+// FIRST_PAD: Dhan prices an option market order from the last trade (+ ~10%), which at 09:15:00 is still yesterday's, so
+// the 09:15:00 order is our LIMIT at the estimate + FIRST_PAD; not filled within the market re-send interval (1 s) → it is
+// cancelled and market orders follow, as for the usual entry.
+export const GAP_PRE = { decideAt: '09:14:30', fireMs: 20, delta: 0.6, firstPad: 0.15 };
 const FEED_FROM = 9 * 60 + 13, FEED_TO = 15 * 60 + 31;   // IST minutes: subscribed from just before the open to the close
 const TICK_FRESH_MS = 3_000;
 /** A 5-minute index candle from the feed's five 1-minute candles (each complete), or null. */
@@ -625,6 +635,31 @@ function gapDecide(acct, adapter, u, { day, now, prep, index, atm, opt, source, 
   return claimAndEnter(acct, adapter, setup, { ...opts, now, uid: acct.user_id, u, day, gap: { prep, optionQuotes: opt } });
 }
 
+/**
+ * Gap open 09:15 decided before the open (GAP_PRE): the index's pre-open price vs its previous close picks CE (up) or PE
+ * (down); the entry is prepared now and its market buy sent at 09:15:00 (enterGap). No pre-open price, or the index
+ * unchanged → returns { fallback } and the first-tick watcher decides at 09:15 as usual.
+ */
+export async function gapPreopen(acct, adapter, u, opts = {}, { clock = () => Date.now() } = {}) {
+  const uid = acct.user_id, now = clock(), day = ist(now).day, key = `${uid}:${u.key}`, open = Date.parse(`${day}T09:15:00+05:30`);
+  if (gapChecked.get(key) === day || now > open + 1_000) return null;   // after the open: the usual check
+  const prep = await gapPrefetch(acct, adapter, u, now).catch(() => null);
+  const q = await adapter.quote?.('IDX_I', u.securityId).catch(() => null);
+  const pre = Number(q?.ltp) || 0, prev = Number(prep?.prevClose) || Number(q?.close) || 0;
+  if (!prep?.chain || !(pre > 0) || !(prev > 0) || pre === prev) {
+    const why = !prep?.chain ? 'no option chain' : !(pre > 0) ? 'no index pre-open price' : !(prev > 0) ? 'no previous close' : 'index unchanged';
+    audit(uid, 'algo.gap_preopen_fallback', { underlying: u.key, why, pre, prev });
+    return { fallback: why };
+  }
+  if (gapChecked.get(key) === day) return null;
+  gapChecked.set(key, day);   // the first-tick watcher and the scanner do not decide again
+  await syncAccount(acct, { force: true }).catch(() => {});   // a fresh book for the risk check before the open
+  const direction = pre > prev ? 'CE' : 'PE', gapPct = round2((pre - prev) / prev * 100);
+  const setup = { strategy: 'Gap 09:15', direction: `BUY_${direction}`, underlying: u.key, prevClose: prev, open: pre, ltp: pre, premiumLtp: null, gapPct,
+    indexOpen: pre, indexPrevClose: prev, prevFrom: 'index close', checkedAt: clock(), priceSource: 'index pre-open', preopen: true };
+  return claimAndEnter(acct, adapter, setup, { ...opts, now: clock(), uid, u, day, gap: { prep, preopen: true } });
+}
+
 /** A feed tick that is the option's first trade of the day: received after the open, with today's open (and volume). */
 const firstTrade = (t, open) => !!t && t.at >= open && t.ltp > 0 && t.dayOpen > 0 && t.volume !== 0;
 
@@ -973,18 +1008,27 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     const r = await adapter.depthQuote(seg, cc.securityId).catch(() => null);
     return r ? fromTick({ ltp: r.ltp || r.ask, volume: r.volume, dayOpen: r.open, depth: r.ask ? [{ ask: r.ask, askQty: r.askQty }] : [] }) : null;
   };
-  let q = await priced(c, GAP_LIVE.strikeTickWaitMs, GAP_LIVE.liquid), moved = null;
+  // Decided at the pre-open (GAP_PRE): nothing has traded yet. The estimated premium = the contract's previous close +
+  // DELTA × the index's move (at least its intrinsic value at the pre-open price); the market order pays the market.
+  const pre = !!gap.preopen;
+  const preEstimate = () => {
+    const prevPx = Number(gap.prep?.prevLast?.get(String(c.securityId))) || c.ltp || 0;
+    const intrinsic = Math.max(0, direction === 'CE' ? setup.ltp - c.strike : c.strike - setup.ltp);
+    const est = Math.max(prevPx + GAP_PRE.delta * Math.abs(setup.ltp - setup.indexPrevClose), intrinsic);
+    return est > 0 ? { ltp: roundTick(est, AUTO.optionTick), ask: null, estimate: true, prevPx } : null;
+  };
+  let q = pre ? preEstimate() : await priced(c, GAP_LIVE.strikeTickWaitMs, GAP_LIVE.liquid), moved = null;
   // LIQUID: no offer and no trade yet today → the next strike toward the ATM that has one (the ATM always has a trade:
   // the gap was decided on it).
-  for (let n = steps - Math.sign(steps); !q && GAP_LIVE.liquid && steps && Math.abs(n) < Math.abs(steps); n -= Math.sign(steps)) {
+  for (let n = steps - Math.sign(steps); !pre && !q && GAP_LIVE.liquid && steps && Math.abs(n) < Math.abs(steps); n -= Math.sign(steps)) {
     const cc = strikeFrom(chain, atm, direction, n), qq = cc && await priced(cc, 0);
     if (qq) { moved = `${pick} ${c.strike} ${direction} had no sellers and no trade yet today`; c = cc; q = qq; steps = n; pick = pickOf(n); }
   }
-  if (!q && GAP_LIVE.liquid && steps) {
+  if (!pre && !q && GAP_LIVE.liquid && steps) {
     const qq = await priced(atm, 0);
     if (qq) { moved = `${pick} ${c.strike} ${direction} had no sellers and no trade yet today`; c = atm; q = qq; steps = 0; pick = 'ATM'; }
   }
-  if (!q) {   // one more quote: with LIQUID, only if it shows a trade today
+  if (!pre && !q) {   // one more quote: with LIQUID, only if it shows a trade today
     const r = await adapter.quote?.(seg, c.securityId).catch(() => null);
     if (r?.ltp > 0 && (!GAP_LIVE.liquid || r.open > 0)) q = r;
   }
@@ -996,8 +1040,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   if (moved) audit(uid, 'algo.gap_strike_moved', { id, why: moved, to: symbol, pick });
   // The price the order goes by: the best offer (what sellers ask now) when known, else the last trade.
   const quoteAt = q?.ask > 0 ? q.ask : q?.ltp > 0 ? q.ltp : 0, byAsk = q?.ask > 0;
+  if (pre && !(quoteAt > 0)) return skip(`${symbol} has no previous price, so the pre-open entry cannot be sized.`);
   if (!(quoteAt > 0)) return skip(GAP_LIVE.liquid ? `${symbol} has no sellers and no trade yet today (no live price), so it cannot be priced.` : `${symbol} has no last price yet.`);
-  if ((G.requireGreen || gc.requireGreen) && !premiumGreen(q)) return skip(`${symbol} premium is ${quoteAt} vs its 09:15 open ${q?.open ?? '—'}: not green in the first seconds, so no trade today.`);
+  if (!pre && (G.requireGreen || gc.requireGreen) && !premiumGreen(q)) return skip(`${symbol} premium is ${quoteAt} vs its 09:15 open ${q?.open ?? '—'}: not green in the first seconds, so no trade today.`);
   const limit = roundTick(quoteAt + Math.max(G.minPad, quoteAt * G.padPct), meta.tickSize);
   const funds = Number(getBook(uid).funds?.available);
   if (!(funds > 0)) return skip('Dhan did not report the available funds, so the trade cannot be sized.');
@@ -1012,11 +1057,14 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // rules' Capital per trade, else CAPITAL USED % of the funds. Always within the Risk rules' Capital per trade and the funds.
   const pct = gc.capitalMode === 'percent', own = pct ? round2(funds * gc.capitalPct / 100) : gapCapital(uid, gc, acct.paper_mode === 1 ? 1 : 0, u.key);
   const spend = pct ? Math.min(own, cap ?? Infinity, fits) : own != null ? Math.min(Math.max(0, own) * gc.fundsPct / 100, cap ?? Infinity, fits) : Math.min(cap != null ? cap : funds * gc.fundsPct / 100, fits);
-  let lots = Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
+  // Fixed lots (Gap settings, > 0): that many lots whatever the capital (the broker still refuses what the funds cannot buy).
+  let lots = gc.lots > 0 ? Math.floor(gc.lots) : Math.floor(Math.min(spend / (limit * meta.lotSize), G.lotCap === false ? Infinity : freeze / meta.lotSize) + 1e-9), qty = lots * meta.lotSize;
   if (lots < 1) return skip(`1 lot of ${symbol} needs ₹${round2(limit * meta.lotSize)}; ${cap != null && cap < fits ? `your capital per trade is ₹${round2(cap)}` : `₹${round2(funds)} is available`}.`);
   // Stop-loss room per unit: STOP % of its capital (Gap settings), else what the Risk rules still allow to lose today, over the quantity.
   if (!(gc.stopPct > 0) && !risk.budget) return skip(`Set “Stop-loss % of capital” in the ${u.label} Gap settings: the Algo Trading daily stop-loss is off, so there is no day's stop-loss to place the stop from.`);
-  const today = dayState(uid), budget = gc.stopPct > 0 ? round2((own != null ? Math.max(0, own) : funds) * gc.stopPct / 100) : riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
+  // Fixed lots: STOP % of the position's cost (premium × qty), set again from the fill below.
+  const today = dayState(uid);
+  let budget = gc.stopPct > 0 && gc.lots > 0 ? round2(quoteAt * qty * gc.stopPct / 100) : gc.stopPct > 0 ? round2((own != null ? Math.max(0, own) : funds) * gc.stopPct / 100) : riskLeft(risk.budget?.daily, today.realized + today.unrealized), room = budget / qty;
   if (!(room >= Math.max(2 * meta.tickSize, quoteAt * G.minStopPct))) return skip(`The stop-loss ${gc.stopPct > 0 ? `(${gc.stopPct}% of the capital, ₹${budget})` : `left for today (₹${budget})`} is only ₹${round2(room)} a unit on ${qty} qty of ${symbol} at ${quoteAt}: too tight a stop.`);
 
   // CHASE: our own limit above the fresh price (a buy limit pays the sellers' price, the limit is only the ceiling).
@@ -1028,17 +1076,22 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   const order = { symbol, side: 'BUY', qty, ...(lim ? { type: 'LIMIT', price: Math.min(ceiling, roundTick(quoteAt * (1 + buf), meta.tickSize)) }
     : mkt || G.market ? { type: 'MARKET', refPrice: quoteAt, marketBand: G.marketBand } : { type: 'LIMIT', price: limit }), securityId: c.securityId, exchangeSegment: seg, productType: 'INTRADAY',
     ...(qty > freeze ? { slice: true } : {}) };
-  const how = mkt ? `market buy of ${qty} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())}; sent again every ${ch.everyMs / 1000} s if not filled)`
+  // Pre-open: the first order (09:15:00) is a limit at the estimate + FIRST_PAD; the market re-sends follow if not filled.
+  const firstLimit = pre && mkt ? roundTick(quoteAt * (1 + GAP_PRE.firstPad), meta.tickSize) : null;
+  const how = pre && mkt ? `buy of ${qty} sent at 09:15:00: limit ${firstLimit} (premium estimated ${quoteAt} from its previous ${q.prevPx || '—'} + ${Math.round(GAP_PRE.firstPad * 100)}%), then market orders every ${ch.everyMs / 1000} s if not filled`
+    : mkt ? `market buy of ${qty} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())}; sent again every ${ch.everyMs / 1000} s if not filled)`
     : lim ? `limit buy at ${order.price} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())} + ${Math.round(buf * 100)}%, raised up to ${ceiling} if not filled)`
     : G.market ? `market buy (premium ${limit} at ${clockMs(setup.checkedAt || now)})` : `limit buy at ${limit} (premium ${quoteAt} at ${clockMs(setup.checkedAt || now)} + ${Math.round(G.padPct * 100)}%)`;
   // How long the entry may stay unfilled: CHASE until UNTIL (at least MIN_MS), else the fixed fill wait.
-  const waitMs = ch ? Math.max(ch.minMs, Date.parse(`${ist(now).day}T${ch.until}+05:30`) - now) : AUTO.fillWaitMs;
+  const waitMs = ch ? Math.max(ch.minMs, Date.parse(`${ist(now).day}T${ch.until}+05:30`) - (pre ? Math.max(now, open915) : now)) : AUTO.fillWaitMs;
   const t = ist(), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
   // Capital per trade is checked at the premium the order was sized at, not at the chase limit above it.
   const verdict = checkOrder(lim ? { ...order, price: undefined } : order, { price: quoteAt, rules, positions: book.positions, orders: book.orders || [], concurrent: true, entryInFlight: entriesInFlight.has(uid),
     entries: s.entries, pnl: s.realized + s.unrealized, minutes: marketOpen() ? t.minutes : null, capital: capitalFor(uid, s), paused: !!s.paused,
     killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
+  // Pre-open decision: everything is ready; the order goes FIRE_MS after 09:15:00.000 (exchanges take none before).
+  if (pre) { const w = open915 + GAP_PRE.fireMs - Date.now(); if (w > 0) await sleep(w); }
 
   // What Dhan holds of this contract (asked a few times, a fill can take a moment to show): before any "not filled",
   // "rejected" or failed placement, so a position the order status missed (4 Nov: Dhan split the order and answered
@@ -1099,7 +1152,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   try {
     let placed;
     for (let attempt = 0; ; attempt++) {
-      try { placed = await adapter.placeOrder(order); }
+      try { placed = await adapter.placeOrder(firstLimit && attempt === 0 ? { ...order, type: 'LIMIT', price: firstLimit } : order); }
       catch (e) {   // the order may still have gone through
         const h = await held();
         if (!h) throw e;
@@ -1167,6 +1220,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   } finally { entriesInFlight.delete(uid); }
 
   const entryPrice = Number(fill.price) || limit;
+  if (gc.stopPct > 0 && gc.lots > 0) budget = round2(entryPrice * qty * gc.stopPct / 100);   // fixed lots: STOP % below the fill
   // Rounded up to a tick, so a fill at the stop never loses more than the budget (slippage aside).
   const stop = Math.max(meta.tickSize, roundTick(Math.ceil((entryPrice - budget / qty) / meta.tickSize - 1e-9) * meta.tickSize, meta.tickSize));
   update(id, { entry_price: entryPrice, sl_price: stop });
@@ -1187,7 +1241,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   notify(uid, { kind: 'risk', level: 'ok', title: `Algo Trading: bought ${lots} lot${lots > 1 ? 's' : ''} ${symbol}`,
     // Users get the trade, not the strategy's rules (lib/access.js); admins get the full reasoning.
     body: !isAdminUser(uid) ? `Gap 09:15 ${direction}: entry ${entryPrice}, stop-loss ${stop} (from your Risk rules). TradeLock exits it automatically.`
-      : `Gap 09:15 ${direction} (${pick}${steps ? `, ATM ${atm.strike}` : ''}${moved ? `; ${moved}` : ''}): the ATM premium opened ${setup.open} vs ${setup.prevClose} yesterday (${setup.gapPct > 0 ? '+' : ''}${setup.gapPct}%), ${setup.premiumLtp} at ${clockMs(setup.checkedAt || now)} (NIFTY ${setup.ltp}; prices from ${setup.priceSource || 'REST'}). Entry ${entryPrice} (${how}), stop-loss ${stop} (₹${budget} of today's stop-loss left ÷ ${qty} qty), risk ≈ ₹${round2((entryPrice - stop) * qty)}. Exits on the first ${direction === 'CE' ? 'red' : 'green'} 1-minute candle, the stop-loss, or at ${squareOffTime(getRules(uid).active)} IST.` });
+      : `Gap 09:15 ${direction} (${pick}${steps ? `, ATM ${atm.strike}` : ''}${moved ? `; ${moved}` : ''}): ${pre
+        ? `${u.label} pre-open ${setup.ltp} vs ${setup.indexPrevClose} at the previous close (${setup.gapPct > 0 ? '+' : ''}${setup.gapPct}%), decided at ${clockMs(setup.checkedAt || now)}`
+        : `the ATM premium opened ${setup.open} vs ${setup.prevClose} yesterday (${setup.gapPct > 0 ? '+' : ''}${setup.gapPct}%), ${setup.premiumLtp} at ${clockMs(setup.checkedAt || now)} (${u.label} ${setup.ltp}; prices from ${setup.priceSource || 'REST'})`}. Entry ${entryPrice} (${how}), stop-loss ${stop} (₹${budget}${gc.stopPct > 0 ? ` = ${gc.stopPct}% of ${gc.lots > 0 ? 'the position' : 'the capital'}` : " of today's stop-loss left"} ÷ ${qty} qty), risk ≈ ₹${round2((entryPrice - stop) * qty)}. Exits ${gc.autoExit && G.exitAt ? `at ${G.exitAt}:00, ` : 'on '}the stop-loss, your own exit, or at ${squareOffTime(getRules(uid).active)} IST.` });
   audit(uid, 'algo.auto_entered', { id, strategy: 'Gap 09:15', symbol, qty, entryPrice, stop });
   syncAccount(acct, { force: true }).catch(() => {});
   return { entered: true, id, symbol, qty, entryPrice, stop };
@@ -1306,7 +1362,9 @@ export const strangleCapital = (uid, cfg, paper = 0, U = STRANGLE.underlying) =>
 //   capitalMode 'percent': CAPITAL_PCT % of the funds available at the entry (within the Risk rules' Capital per trade)
 //   instead of a ₹ amount. autoExit: the 09:16 exit; noEntryLock: the kill switch on a day without an entry (both
 //   follow the account's older switches until set for the index).
-export const GAP_SLOT = Object.freeze({ capitalMode: 'amount', capital: 0, capitalPct: 80, compound: true, capitalSince: 0, fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false });
+// decide: 'premium' (the ATM premiums at 09:15, as backtested) | 'preopen' (the index's pre-open vs its close, order at
+// 09:15:00: GAP_PRE). lots: fixed lots per trade (0 = sized from the capital).
+export const GAP_SLOT = Object.freeze({ capitalMode: 'amount', capital: 0, capitalPct: 80, compound: true, capitalSince: 0, fundsPct: 80, stopPct: 0, costToCost: true, requireGreen: false, decide: 'premium', lots: 0 });
 export const gapConfig = (acct, U = 'NIFTY') => fixedCapital({ ...GAP_SLOT, autoExit: acct?.gap_auto_exit !== 0, noEntryLock: acct?.gap_lock !== 0, ...slotCfg(acct, 'gap', U) });
 export const gapCapital = (uid, cfg, paper = 0, U = 'NIFTY') => strategyCapital(uid, cfg, paper, U, 'Gap 09:15');
 
@@ -1713,6 +1771,12 @@ function scheduleGap(now = Date.now()) {
     for (const acct of gapAccounts()) for (const k of strategyIndices(acct, 'gap'))
       gapPrefetch(acct, adapterFor(acct), underlyingFor(k)).catch(e => console.error('[autotrade] gap prefetch', k, e.message));
   }, Math.max(0, open - G.prefetchMs - now));
+  // Indices set to decide at the pre-open: decided at GAP_PRE.decideAt, the order sent at 09:15:00 (gapPreopen).
+  setTimeout(() => {
+    for (const acct of gapAccounts()) for (const k of strategyIndices(acct, 'gap'))
+      if (gapConfig(acct, k).decide === 'preopen')
+        gapPreopen(acct, adapterFor(acct), underlyingFor(k), { pause: sleep, instruments: optionMeta }).catch(e => console.error('[autotrade] gap pre-open', k, e.message));
+  }, Math.max(0, Date.parse(`${day}T${GAP_PRE.decideAt}+05:30`) - now));
   if (G.firstTick) setTimeout(() => {
     for (const acct of gapAccounts()) for (const k of strategyIndices(acct, 'gap'))
       gapFirstTick(acct, adapterFor(acct), underlyingFor(k), { pause: sleep, instruments: optionMeta }).catch(e => console.error('[autotrade] gap first tick', k, e.message));

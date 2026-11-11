@@ -219,7 +219,8 @@ test('Gap open 09:15 settings per index: defaults keep the live behaviour; saved
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg })).status, 200);
   const saved = gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
   // A ₹ capital is used as it is: no compounding, all of it.
-  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, compound: false, fundsPct: 100, capitalMode: 'amount', capitalPct: 80, autoExit: true, noEntryLock: true, capitalSince: undefined });
+  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, compound: false, fundsPct: 100, capitalMode: 'amount', capitalPct: 80, autoExit: true, noEntryLock: true, decide: 'premium', lots: 0, capitalSince: undefined });
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, decide: 'later' } })).status, 400, 'decide: premium or preopen');
   assert.ok(saved.capitalSince > 0, 'its capital counts trades from now');
   const live = (await (await fetch(`${base}/api/algo/live`, { headers: H })).json()).account;
   assert.equal(live.grid.gap.SENSEX.capitalNow, 50000);
