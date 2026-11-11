@@ -1,5 +1,5 @@
 // Gap open 09:15 decided at the index pre-open (Gap settings decide = 'preopen'): the index's pre-open price vs its previous
-// close picks CE / PE before the open; the buy goes at 09:15:00 as a limit at the estimated premium + 15% (fixed lots), and
+// close picks CE / PE before the open; the market buy goes at 09:15:00 (fixed lots), and
 // the stop is STOP % below the fill. No pre-open move → the usual first-tick check decides (fallback).
 process.env.DB_PATH = ':memory:';
 process.env.MONITOR = '0';
@@ -68,7 +68,7 @@ test('index unchanged at the pre-open → no decision (the first-tick check deci
   assert.ok(!dhan.calls.some(c => c[0] === 'order'));
 });
 
-test('pre-open up → CE at 09:15:00: limit at the estimate + 15%, fixed 2 lots, stop 20% below the fill', async (t) => {
+test('pre-open up → CE at 09:15:00: market order, fixed 2 lots, stop 20% below the fill', async (t) => {
   flatBook();
   const dhan = fakeDhan({ idx: 23070 });
   const r = await gapPreopen(acct, dhan, underlyingFor('NIFTY'), { instruments }, { clock: () => ms('09:14:30') });
@@ -76,16 +76,16 @@ test('pre-open up → CE at 09:15:00: limit at the estimate + 15%, fixed 2 lots,
   assert.equal(r.entered, true, JSON.stringify(r));
   const [buy, sl] = dhan.calls.filter(c => c[0] === 'order').map(c => c[1]);
   // One strike deeper than usual (ATM 23050 here → 23000 CE). Estimate (sticky moneyness): 23000 CE after +70 ≈ yesterday's
-  // 23000 CE still (the chain's nearest; 150); limit 150 × 1.15 = 172.50.
+  // 23000 CE still (the chain's nearest; 150): the market order's reference price.
   assert.equal(GAP_PRE.extraSteps, 1);
-  assert.deepEqual([buy.side, buy.type, buy.price, buy.qty, buy.securityId], ['BUY', 'LIMIT', 172.5, 130, 'G0']);
+  assert.deepEqual([buy.side, buy.type, buy.price, buy.refPrice, buy.qty, buy.securityId], ['BUY', 'MARKET', undefined, 150, 130, 'G0']);
   // Stop: 20% of 150.60 × 130 = ₹3,915.60 ÷ 130 = 30.12 below the fill → 120.48, rounded up to the tick 120.50.
   assert.deepEqual([sl.type, sl.triggerPrice, sl.qty], ['STOP_LOSS', 120.5, 130]);
   const row = stmt('SELECT * FROM auto_trades WHERE user_id = ?').get(uid);
   assert.deepEqual([row.status, row.direction, row.signal_key, row.lots, row.entry_price], ['open', 'CE', `${D}:gap`, 2, 150.6]);
   const setup = JSON.parse(row.detail).setup;
   assert.deepEqual([setup.preopen, setup.ltp, setup.indexPrevClose, setup.gapPct], [true, 23070, 23000, 0.3]);
-  assert.equal(GAP_PRE.firstPad, 0.15);
+  assert.equal(GAP_PRE.firstPad, null, 'the 09:15:00 order is a market order');
   // Decided once: a second call that day does nothing.
   assert.equal(await gapPreopen(acct, fakeDhan(), underlyingFor('NIFTY'), { instruments }, { clock: () => ms('09:14:40') }), null);
 });

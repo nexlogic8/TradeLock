@@ -151,7 +151,9 @@ export const GAP_LIVE = { strike: 2, strikeTickWaitMs: 400, liquid: true, market
 // cancelled and market orders follow, as for the usual entry.
 // EXTRA_STEPS: strikes deeper than the usual GAP_LIVE.strike (ITM2 + 1 = ITM3 from the pre-open ATM: CE one strike lower,
 // PE one higher).
-export const GAP_PRE = { decideAt: '09:14:30', fireMs: 20, delta: 0.6, firstPad: 0.15, extraSteps: 1 };
+// FIRST_PAD null (the user's choice, 12 Nov): the 09:15:00 order is a MARKET order, as the usual entry (re-sent every
+// second until filled or 09:15:30).
+export const GAP_PRE = { decideAt: '09:14:30', fireMs: 20, delta: 0.6, firstPad: null, extraSteps: 1 };
 const FEED_FROM = 9 * 60 + 13, FEED_TO = 15 * 60 + 31;   // IST minutes: subscribed from just before the open to the close
 const TICK_FRESH_MS = 3_000;
 /** A 5-minute index candle from the feed's five 1-minute candles (each complete), or null. */
@@ -1086,8 +1088,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     ...(qty > freeze ? { slice: true } : {}) };
   // Pre-open: the first order (09:15:00) is a limit at the estimate + FIRST_PAD; the market re-sends follow if not filled.
   // Within the funds: Dhan blocks the limit × qty, so a limit above what the funds cover is lowered to that.
-  const firstLimit = pre && mkt ? Math.floor(Math.min(quoteAt * (1 + GAP_PRE.firstPad), funds * 0.98 / qty) / meta.tickSize + 1e-9) * meta.tickSize : null;
-  const how = pre && mkt ? `buy of ${qty} sent at 09:15:00: limit ${round2(firstLimit)} (premium estimated ${quoteAt} from ${q.from || 'its'} previous ${q.prevPx || '—'}, + ${Math.round(GAP_PRE.firstPad * 100)}% within the funds), then market orders every ${ch.everyMs / 1000} s if not filled`
+  const firstLimit = pre && mkt && GAP_PRE.firstPad > 0 ? Math.floor(Math.min(quoteAt * (1 + GAP_PRE.firstPad), funds * 0.98 / qty) / meta.tickSize + 1e-9) * meta.tickSize : null;
+  const how = pre && mkt && !firstLimit ? `market buy of ${qty} sent at 09:15:00 (decided at the index pre-open; premium estimated ${quoteAt} from ${q.from || 'its'} previous ${q.prevPx || '—'}; sent again every ${ch.everyMs / 1000} s if not filled)`
+    : pre && mkt ? `buy of ${qty} sent at 09:15:00: limit ${round2(firstLimit)} (premium estimated ${quoteAt} from ${q.from || 'its'} previous ${q.prevPx || '—'}, + ${Math.round(GAP_PRE.firstPad * 100)}% within the funds), then market orders every ${ch.everyMs / 1000} s if not filled`
     : mkt ? `market buy of ${qty} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())}; sent again every ${ch.everyMs / 1000} s if not filled)`
     : lim ? `limit buy at ${order.price} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())} + ${Math.round(buf * 100)}%, raised up to ${ceiling} if not filled)`
     : G.market ? `market buy (premium ${limit} at ${clockMs(setup.checkedAt || now)})` : `limit buy at ${limit} (premium ${quoteAt} at ${clockMs(setup.checkedAt || now)} + ${Math.round(G.padPct * 100)}%)`;
