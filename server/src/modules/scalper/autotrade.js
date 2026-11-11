@@ -1011,11 +1011,15 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // Decided at the pre-open (GAP_PRE): nothing has traded yet. The estimated premium = the contract's previous close +
   // DELTA × the index's move (at least its intrinsic value at the pre-open price); the market order pays the market.
   const pre = !!gap.preopen;
+  // Sticky moneyness first: yesterday's price of the strike that was as far in the money then as this one is now
+  // (strike − the index move; 11 Nov: 82000 CE after +1,142 → 80900 CE's 670.55, the open traded about 550–650, where
+  // "previous + 0.6 × move" gave 946); then that formula; never below the intrinsic value.
   const preEstimate = () => {
-    const prevPx = Number(gap.prep?.prevLast?.get(String(c.securityId))) || c.ltp || 0;
-    const intrinsic = Math.max(0, direction === 'CE' ? setup.ltp - c.strike : c.strike - setup.ltp);
-    const est = Math.max(prevPx + GAP_PRE.delta * Math.abs(setup.ltp - setup.indexPrevClose), intrinsic);
-    return est > 0 ? { ltp: roundTick(est, AUTO.optionTick), ask: null, estimate: true, prevPx } : null;
+    const prevOf = cc => (cc ? Number(gap.prep?.prevLast?.get(String(cc.securityId))) || cc.ltp || 0 : 0);
+    const prevPx = prevOf(c), intrinsic = Math.max(0, direction === 'CE' ? setup.ltp - c.strike : c.strike - setup.ltp);
+    const same = atmContract({ ...chain, last_price: c.strike - (setup.ltp - setup.indexPrevClose) }, direction), samePx = prevOf(same);
+    const est = Math.max(samePx > 0 ? samePx : prevPx + GAP_PRE.delta * Math.abs(setup.ltp - setup.indexPrevClose), intrinsic);
+    return est > 0 ? { ltp: roundTick(est, AUTO.optionTick), ask: null, estimate: true, prevPx: samePx > 0 ? samePx : prevPx, from: samePx > 0 ? `${same.strike} ${direction}` : `${c.strike} ${direction}` } : null;
   };
   let q = pre ? preEstimate() : await priced(c, GAP_LIVE.strikeTickWaitMs, GAP_LIVE.liquid), moved = null;
   // LIQUID: no offer and no trade yet today → the next strike toward the ATM that has one (the ATM always has a trade:
@@ -1077,8 +1081,9 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
     : mkt || G.market ? { type: 'MARKET', refPrice: quoteAt, marketBand: G.marketBand } : { type: 'LIMIT', price: limit }), securityId: c.securityId, exchangeSegment: seg, productType: 'INTRADAY',
     ...(qty > freeze ? { slice: true } : {}) };
   // Pre-open: the first order (09:15:00) is a limit at the estimate + FIRST_PAD; the market re-sends follow if not filled.
-  const firstLimit = pre && mkt ? roundTick(quoteAt * (1 + GAP_PRE.firstPad), meta.tickSize) : null;
-  const how = pre && mkt ? `buy of ${qty} sent at 09:15:00: limit ${firstLimit} (premium estimated ${quoteAt} from its previous ${q.prevPx || '—'} + ${Math.round(GAP_PRE.firstPad * 100)}%), then market orders every ${ch.everyMs / 1000} s if not filled`
+  // Within the funds: Dhan blocks the limit × qty, so a limit above what the funds cover is lowered to that.
+  const firstLimit = pre && mkt ? Math.floor(Math.min(quoteAt * (1 + GAP_PRE.firstPad), funds * 0.98 / qty) / meta.tickSize + 1e-9) * meta.tickSize : null;
+  const how = pre && mkt ? `buy of ${qty} sent at 09:15:00: limit ${round2(firstLimit)} (premium estimated ${quoteAt} from ${q.from || 'its'} previous ${q.prevPx || '—'}, + ${Math.round(GAP_PRE.firstPad * 100)}% within the funds), then market orders every ${ch.everyMs / 1000} s if not filled`
     : mkt ? `market buy of ${qty} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())}; sent again every ${ch.everyMs / 1000} s if not filled)`
     : lim ? `limit buy at ${order.price} (${byAsk ? "best offer" : "last trade"} ${quoteAt} at ${clockMs(Date.now())} + ${Math.round(buf * 100)}%, raised up to ${ceiling} if not filled)`
     : G.market ? `market buy (premium ${limit} at ${clockMs(setup.checkedAt || now)})` : `limit buy at ${limit} (premium ${quoteAt} at ${clockMs(setup.checkedAt || now)} + ${Math.round(G.padPct * 100)}%)`;
@@ -1152,7 +1157,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   try {
     let placed;
     for (let attempt = 0; ; attempt++) {
-      try { placed = await adapter.placeOrder(firstLimit && attempt === 0 ? { ...order, type: 'LIMIT', price: firstLimit } : order); }
+      try { placed = await adapter.placeOrder(firstLimit && attempt === 0 ? { ...order, type: 'LIMIT', price: round2(firstLimit) } : order); }
       catch (e) {   // the order may still have gone through
         const h = await held();
         if (!h) throw e;

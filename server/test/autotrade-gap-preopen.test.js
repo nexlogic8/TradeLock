@@ -75,8 +75,8 @@ test('pre-open up → CE at 09:15:00: limit at the estimate + 15%, fixed 2 lots,
   if (r?.skipped && /Subscription|subscription|market|trading day|sync/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
   assert.equal(r.entered, true, JSON.stringify(r));
   const [buy, sl] = dhan.calls.filter(c => c[0] === 'order').map(c => c[1]);
-  // Estimate: previous last trade 125 + 0.6 × (23070 − 23000) = 167; limit 167 × 1.15 = 192.05.
-  assert.deepEqual([buy.side, buy.type, buy.price, buy.qty, buy.securityId], ['BUY', 'LIMIT', 192.05, 130, 'G1']);
+  // Estimate (sticky moneyness): 23050 CE after +70 ≈ yesterday's 23000 CE (150, its chain price); limit 150 × 1.15 = 172.50.
+  assert.deepEqual([buy.side, buy.type, buy.price, buy.qty, buy.securityId], ['BUY', 'LIMIT', 172.5, 130, 'G1']);
   // Stop: 20% of 150.60 × 130 = ₹3,915.60 ÷ 130 = 30.12 below the fill → 120.48, rounded up to the tick 120.50.
   assert.deepEqual([sl.type, sl.triggerPrice, sl.qty], ['STOP_LOSS', 120.5, 130]);
   const row = stmt('SELECT * FROM auto_trades WHERE user_id = ?').get(uid);
