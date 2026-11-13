@@ -150,7 +150,7 @@ export default {
               <li><code>GET /profile</code> · token expiry and active segments</li>
               <li><code>GET /ip/getIP</code> · whether ${ownBroker(a)} accepts orders from this server (static IP)</li>
               <li><code>GET /killswitch</code> · kill switch status, checked every 10 s</li>
-              <li><code>POST /killswitch</code> · lock the account when a rule is hit (activated twice, so it stays on until the next trading day)</li>
+              <li><code>POST /killswitch</code> · lock the account when a rule is hit or you press the kill switch (DEACTIVATE when you switch it off)</li>
               <li><code>POST /orders</code>, <code>DELETE /orders</code> · orders you place here, exits and the kill switch</li>
             </ul></div>` : ''}
         </div>`}

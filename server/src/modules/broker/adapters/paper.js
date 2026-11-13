@@ -142,6 +142,7 @@ export function createPaperAdapter({ userId, data }) {
     // The day lock (as Dhan's kill switch): no new paper entries until the next trading day.
     async getKillSwitch() { return paperWallet(userId).ks_day === today(); },
     async activateKillSwitch() { stmt('UPDATE paper_wallet SET ks_day = ? WHERE user_id = ?').run(today(), userId); return { message: 'Paper kill switch on: paper trading is locked for the rest of the day.' }; },
+    async deactivateKillSwitch() { stmt('UPDATE paper_wallet SET ks_day = NULL WHERE user_id = ?').run(userId); return { message: 'Paper kill switch off.' }; },
     async snapshot() {
       for (const o of stmt(`SELECT * FROM paper_orders WHERE user_id = ? AND day = ? AND status = 'pending'`).all(userId, today())) await match(o);
       const pos = positionsOf(userId), open = stmt(`SELECT * FROM paper_orders WHERE user_id = ? AND day = ? AND status = 'pending'`).all(userId, today());

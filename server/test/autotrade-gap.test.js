@@ -11,7 +11,7 @@ const { createHandler } = await import('../src/lib/app.js');
 const { buildRouter } = await import('../src/modules/index.js');
 const assert = (await import('node:assert/strict')).default;
 const { stmt } = await import('../src/db/index.js');
-const { setBook } = await import('../src/modules/broker/book.js');
+const { setBook, setKillStatus } = await import('../src/modules/broker/book.js');
 const { patchDay } = await import('../src/modules/risk/service.js');
 const { upsertAccount } = await import('../src/modules/broker/registry.js');
 const { saveRules, getRules } = await import('../src/modules/rules/service.js');
@@ -357,6 +357,7 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
   const run = async (dhan, day) => {
     stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
     patchDay(uid, today, { ks_armed: null, ks_active_at: null });
+    setKillStatus(uid, { active: false, checkedAt: Date.now() });
     flatBook();
     const r = await scanForEntry(acct, { now: at(day, '09:15:02'), adapter: dhan, pause: noPause, instruments });
     await new Promise(res => setTimeout(res, 30));   // the lock is not awaited by the scan
@@ -393,6 +394,7 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     acct = { ...acct, orb_on: 0, gap_lock: 1 };
     saveRules(uid, rules, undefined, null, 'algo');
     patchDay(uid, today, { ks_armed: null, ks_active_at: null });
+    setKillStatus(uid, { active: false, checkedAt: Date.now() });   // the fake broker's switch, recorded in memory
   }
 });
 

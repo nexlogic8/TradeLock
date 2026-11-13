@@ -3,7 +3,7 @@ import { bad, notFound, conflict } from '../../lib/errors.js';
 import { emit } from '../../lib/bus.js';
 import { ist } from '../../lib/time.js';
 import { accountFor, adapterFor } from '../broker/registry.js';
-import { getBook, setBook } from '../broker/book.js';
+import { getBook, setBook, setKillStatus, markDirty } from '../broker/book.js';
 import { dayState, patchDay } from '../risk/service.js';
 import { notify } from '../notifications/service.js';
 import { audit } from '../audit/service.js';
@@ -108,11 +108,16 @@ async function execute(rec, acct) {
 export async function tryKillSwitch(userId, acct, reason, adapter = acct && adapterFor(acct)) {
   const day = ist().day;
   const s = dayState(userId, day);
-  if (s.ks_active_at) return { status: 'active', text: 'Kill switch is already active today.' };
-  if (!adapter?.activateKillSwitch) return { status: 'failed', text: 'This broker does not offer a kill switch through its API. Lock trading in the broker app.' };
+  if (!adapter?.activateKillSwitch) {
+    if (s.ks_active_at) return { status: 'active', text: 'Kill switch is already active today.' };
+    return { status: 'failed', text: 'This broker does not offer a kill switch through its API. Lock trading in the broker app.' };
+  }
   try {
-    if (adapter.getKillSwitch && (await adapter.getKillSwitch()) === true) {
-      patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
+    // The broker's own reading decides: a lock TradeLock recorded while the broker's switch is OFF is switched on again.
+    const brokerOn = adapter.getKillSwitch ? await adapter.getKillSwitch() : null;
+    if (brokerOn === true || brokerOn === false) setKillStatus(userId, { active: brokerOn, checkedAt: Date.now() });
+    if (brokerOn === true || (s.ks_active_at && brokerOn !== false)) {
+      if (!s.ks_active_at) patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
       return { status: 'active', text: `${adapter.label} kill switch is already ON.` };
     }
     const snap = await adapter.snapshot();
@@ -123,10 +128,11 @@ export async function tryKillSwitch(userId, acct, reason, adapter = acct && adap
     }
     for (const o of snap.orders) await adapter.cancelOrder(o.id).catch(() => {});
     const { message } = await adapter.activateKillSwitch();
+    setKillStatus(userId, { active: true, checkedAt: Date.now() });
     patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
     audit(userId, 'killswitch.activated', { reason });
     notify(userId, { kind: 'risk', level: 'critical', title: `${adapter.label} kill switch activated`,
-      body: `Trading is locked on your ${adapter.label} account for the rest of the day${reason?.startsWith('rule:') ? `, after your ${RULE_NAMES[reason.slice(5)]} was reached`
+      body: `All orders are blocked on your ${adapter.label} account (also from the ${adapter.label} app) until you switch it off or the next trading day${reason?.startsWith('rule:') ? `, after your ${RULE_NAMES[reason.slice(5)]} was reached`
         : reason === 'gap:no-entry' ? ', as there was no Gap 09:15 entry today' : ''}.` });
     return { status: 'active', text: message || `${adapter.label} kill switch activated. Trading is locked for the rest of the day.` };
   } catch (e) {
@@ -136,6 +142,26 @@ export async function tryKillSwitch(userId, acct, reason, adapter = acct && adap
       body: `${e.message}. TradeLock will retry; to be safe, turn on the kill switch in your broker app now.` });
     return { status: 'failed', text: `${e.message}. Turn on the kill switch in your broker app.` };
   }
+}
+
+/**
+ * Switch the broker's kill switch OFF (the user's choice, 13 Nov 2026: every kill switch can be switched off the
+ * same day). Clears today's lock and the pause that came with it, so trading is open again in TradeLock too.
+ */
+export async function releaseKillSwitch(userId) {
+  const acct = accountFor(userId);
+  const adapter = acct && adapterFor(acct);
+  if (!adapter?.deactivateKillSwitch) throw bad('NOT_SUPPORTED', 'This broker cannot switch its kill switch off through its API. Use the broker app.');
+  let message;
+  try { ({ message } = await adapter.deactivateKillSwitch()); }
+  catch (e) { throw bad('KILL_SWITCH', `${adapter.label} did not switch the kill switch off: ${e.message}`); }
+  setKillStatus(userId, { active: false, checkedAt: Date.now() });
+  const day = ist().day, s = dayState(userId, day);
+  patchDay(userId, day, { ks_armed: null, ks_active_at: null, ...(s.paused ? { paused: 0, pause_reason: null } : {}) });
+  markDirty(userId);
+  audit(userId, 'killswitch.deactivated', { was: s.ks_armed, pause: s.pause_reason });
+  notify(userId, { kind: 'risk', level: 'warn', title: `${adapter.label} kill switch off`, body: 'You switched the kill switch off. Trading is open again.' });
+  return { active: false, text: message };
 }
 
 async function exitOne(adapter, p) {

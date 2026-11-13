@@ -32,7 +32,7 @@ const RULES = [
 
 const ENFORCE = [
   ['power', 'Automatic square-off', 'When a rule is hit, pending orders are cancelled and open positions are closed at market on your Dhan account.'],
-  ['lock', 'Dhan kill switch, locked for the day', 'TradeLock switches on Dhan\'s own kill switch twice, so it cannot be turned off again until the next trading day, not even from the Dhan app.'],
+  ['lock', 'Dhan kill switch', 'TradeLock switches on Dhan\'s own kill switch, so every order is blocked, even from the Dhan app, until you switch it off or the next trading day.'],
   ['shield', 'One-tap manual kill switch', 'Feeling it slip? One tap closes everything and locks your Dhan account for the rest of the day.'],
   ['sliders', 'Rules that apply instantly', 'Change any rule at any time, even mid-session, and it applies at once. A limit already hit today stays hit until the next trading day.'],
 ];
@@ -49,14 +49,14 @@ const SEE = [
 const FLOW = [
   ['Rule crossed', 'Your P&L, trade count or the clock crosses a limit you set.'],
   ['Positions closed', 'Pending orders are cancelled and open positions are squared off at market.'],
-  ['Dhan account locked', 'The Dhan kill switch is switched on and locked until the next trading day.'],
+  ['Dhan account locked', 'The Dhan kill switch is switched on: every order is blocked, even from the Dhan app.'],
   ['You are notified', 'You get an alert with what happened and why. Tomorrow starts fresh.'],
 ];
 
 const FAQ = [
   ['Does TradeLock trade for me?', 'No. TradeLock never opens trades or gives tips. It only watches your account and, when one of your own rules is hit, closes positions and locks your Dhan account for the day.'],
   ['Which brokers are supported?', 'Dhan today. Zerodha, Upstox, Angel One and StoxKart are coming soon.'],
-  ['Can I switch the kill switch off the same day?', 'No, by design. Once it is on, your Dhan account stays locked until the next trading day. That is what stops the "one more trade" that turns a bad day into a disaster.'],
+  ['Can I switch the kill switch off the same day?', 'Yes. Switch it off on the Overview page and trading opens again. Otherwise it stays on until the next trading day.'],
   ['What does TradeLock need from my Dhan account?', 'Your Dhan client ID and an access token from web.dhan.co. For automatic square-off, add TradeLock\'s server IP as a static IP in Dhan (we show you how). We never ask for your Dhan password, PIN or TOTP.'],
   ['What happens when my Dhan token expires?', 'TradeLock renews it automatically twice a day while it is still valid. If it ever expires, you get an alert to reconnect with a fresh token.'],
   ['Is there a free trial? How do I pay?', 'Every new trader gets a free trial (one per person). After that it is a simple monthly payment by UPI, card or netbanking. No auto-debit, cancel any time by simply not renewing.'],

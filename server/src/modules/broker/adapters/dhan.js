@@ -327,27 +327,22 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
       return null;
     },
 
-    // Hard lock. Dhan lets a kill switch be switched off the same day, unless it was activated TWICE that
-    // day. So: ACTIVATE (unless already on), DEACTIVATE, ACTIVATE again, then read it back. A refused
-    // DEACTIVATE while the switch reads ON means the account is already locked for the day.
-    // Dhan only accepts the kill switch with no open positions and no pending orders.
+    // Switched on ONCE (13 Nov 2026, the user's choice), so it can be switched off again the same day from
+    // TradeLock (deactivateKillSwitch). Dhan only accepts it with no open positions and no pending orders.
     async activateKillSwitch() {
-      const set = status => call('POST', `/killswitch?killSwitchStatus=${status}`);
-      if ((await this.getKillSwitch()) !== true) { await set('ACTIVATE'); await sleep(300); }
-      try {
-        await set('DEACTIVATE');
-      } catch (e) {
-        if ((await this.getKillSwitch()) === true) return { message: 'Dhan kill switch is ON and locked for the rest of the day.' };
-        throw e;
-      }
-      await sleep(300); // unlocked from here to the second ACTIVATE: keep it short
-      let last = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try { await set('ACTIVATE'); last = null; break; } catch (e) { last = e; await sleep(500); }
-      }
-      if (last) throw new BrokerError(`Dhan kill switch is OFF: the second activation failed (${last.message})`, 'KILL_SWITCH');
-      if ((await this.getKillSwitch()) !== true) throw new BrokerError('Dhan kill switch did not read back as ON after the second activation', 'KILL_SWITCH');
-      return { message: 'Dhan kill switch activated twice: ON and locked until the next trading day.' };
+      if ((await this.getKillSwitch()) === true) return { message: 'Dhan kill switch is already ON.' };
+      await call('POST', '/killswitch?killSwitchStatus=ACTIVATE');
+      await sleep(300);
+      if ((await this.getKillSwitch()) !== true) throw new BrokerError('Dhan kill switch did not read back as ON', 'KILL_SWITCH');
+      return { message: 'Dhan kill switch is ON: all orders are blocked until you switch it off or the next trading day.' };
+    },
+
+    async deactivateKillSwitch() {
+      if ((await this.getKillSwitch()) === false) return { message: 'Dhan kill switch is already OFF.' };
+      await call('POST', '/killswitch?killSwitchStatus=DEACTIVATE');
+      await sleep(300);
+      if ((await this.getKillSwitch()) !== false) throw new BrokerError('Dhan kill switch did not read back as OFF (Dhan may keep it on for the day)', 'KILL_SWITCH');
+      return { message: 'Dhan kill switch is OFF: trading is open again.' };
     },
 
     /**

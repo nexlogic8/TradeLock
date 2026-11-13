@@ -84,7 +84,7 @@ function tradeThroughStoxkart(dhan, creds) {
   return { ...dhan, label: 'StoxKart', tradingBroker: 'stoxkart', capabilities: sx.capabilities,
     verify: sx.verify, snapshot: sx.snapshot, placeOrder: sx.placeOrder, orderStatus: sx.orderStatus, cancelOrder: sx.cancelOrder,
     modifyStopLoss: sx.modifyStopLoss, modifyOrder: undefined, exitPosition: p => sx.exitPosition(p),
-    tradeHistory: sx.tradeHistory, getKillSwitch: undefined, activateKillSwitch: undefined, permissions: undefined };
+    tradeHistory: sx.tradeHistory, getKillSwitch: undefined, activateKillSwitch: undefined, deactivateKillSwitch: undefined, permissions: undefined };
 }
 
 // Bumped whenever an account is connected, disconnected or its agent is started/stopped, so the

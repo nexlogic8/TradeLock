@@ -52,7 +52,7 @@ test('capital = free + used − realized, falling back to the opening balance', 
   assert.equal(capitalFromFunds(null), null);
 });
 
-test('Dhan hard lock: activate, deactivate, activate, read back ON', async () => {
+test('Dhan kill switch: switched on once (can be switched off the same day), then off', async () => {
   const calls = [];
   let state = 'INACTIVE';
   const transport = async (method, url) => {
@@ -61,27 +61,25 @@ test('Dhan hard lock: activate, deactivate, activate, read back ON', async () =>
     if (method === 'POST') state = u.searchParams.get('killSwitchStatus') === 'ACTIVATE' ? 'ACTIVE' : 'INACTIVE';
     return { status: 200, text: JSON.stringify(method === 'GET' ? { killSwitchStatus: state } : { killSwitchStatus: 'ok' }) };
   };
-  {
-    const dhan = createDhanAdapter({ clientId: 'C1', accessToken: 'x'.repeat(30), transport });
-    const { message } = await dhan.activateKillSwitch();
-    assert.match(message, /locked until the next trading day/);
-    assert.deepEqual(calls.map(c => c.replace('/v2', '')), [
-      'GET /killswitch',
-      'POST /killswitch?killSwitchStatus=ACTIVATE',
-      'POST /killswitch?killSwitchStatus=DEACTIVATE',
-      'POST /killswitch?killSwitchStatus=ACTIVATE',
-      'GET /killswitch',
-    ]);
-    assert.equal(await dhan.getKillSwitch(), true, 'live API answers ACTIVE');
-  }
+  const dhan = createDhanAdapter({ clientId: 'C1', accessToken: 'x'.repeat(30), transport });
+  assert.match((await dhan.activateKillSwitch()).message, /ON/);
+  assert.deepEqual(calls.map(c => c.replace('/v2', '')).filter(c => c.includes('/killswitch')), ['GET /killswitch', 'POST /killswitch?killSwitchStatus=ACTIVATE', 'GET /killswitch']);
+  assert.equal(await dhan.getKillSwitch(), true, 'live API answers ACTIVE');
+  calls.length = 0;
+  assert.match((await dhan.deactivateKillSwitch()).message, /OFF/);
+  assert.deepEqual(calls.map(c => c.replace('/v2', '')).filter(c => c.includes('/killswitch')), ['GET /killswitch', 'POST /killswitch?killSwitchStatus=DEACTIVATE', 'GET /killswitch']);
+  assert.equal(await dhan.getKillSwitch(), false);
 });
 
-test('Dhan: a refused deactivate while ON means already locked for the day', async () => {
-  const transport = async (method, url) => (method === 'POST' && url.includes('DEACTIVATE')
+test('Dhan kill switch already ON: not switched again; a switch-off Dhan refuses is reported', async () => {
+  const calls = [];
+  const transport = async (method, url) => { calls.push(method); return method === 'POST'
     ? { status: 400, text: JSON.stringify({ errorMessage: 'Kill switch cannot be deactivated' }) }
-    : { status: 200, text: JSON.stringify({ killSwitchStatus: 'ACTIVE' }) });
+    : { status: 200, text: JSON.stringify({ killSwitchStatus: 'ACTIVE' }) }; };
   const dhan = createDhanAdapter({ clientId: 'C1', accessToken: 'x'.repeat(30), transport });
-  assert.match((await dhan.activateKillSwitch()).message, /locked for the rest of the day/);
+  assert.match((await dhan.activateKillSwitch()).message, /already ON/);
+  assert.deepEqual(calls, ['GET']);
+  await assert.rejects(dhan.deactivateKillSwitch());
 });
 
 test('Dhan snapshot fetches trades only when the order book changed, funds only when asked', async () => {

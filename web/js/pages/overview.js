@@ -5,18 +5,18 @@ import { icon } from '../ui/icons.js';
 import { pill, meter, empty, statusOf, toneClass } from '../ui/parts.js';
 import { lineChart, ring, niceScale } from '../ui/charts.js';
 import { toast, toastError } from '../ui/toast.js';
-import { mountKillSwitch } from '../ui/killswitch.js';
+import { mountKillSwitch, ksOn } from '../ui/killswitch.js';
 import { otherSl } from './overview-sl.js';
 
 const OPEN = 555, CLOSE = 930; // 09:15 – 15:30 IST
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const toMin = s => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
 
-const locked = d => !!d.killSwitch.activeAt || d.killSwitch.broker?.active === true;
+const locked = d => ksOn(d.killSwitch);
 
 /** What the protection badge means right now, in words a trader understands. */
 function protectionPill(d, st) {
-  if (locked(d)) return pill('Account locked today', 'red', { dot: true });
+  if (locked(d)) return pill('Kill switch on', 'red', { dot: true });
   if (st.protecting) return pill('Active', '', { dot: true, pulse: true });
   return pill(st.pill || 'Paused', st.pill === 'Market closed' ? 'grey' : 'amber', { dot: true });
 }
@@ -76,7 +76,7 @@ const RULE_NAMES = { maxLoss: 'daily stop-loss', maxTrades: 'trades-per-day limi
 
 /** What is stopping trading today: the broker's kill switch (whole account locked), or a rule. */
 function lockBanner(d) {
-  const locked = !!(d.killSwitch?.activeAt || d.killSwitch?.broker?.active);
+  const locked = ksOn(d.killSwitch);
   const rule = d.pauseReason?.startsWith('rule:') ? RULE_NAMES[d.pauseReason.slice(5)] : null;
   if (d.paused && rule && !locked) {
     return html`<div class="banner amber mb">${icon('power')}<div class="grow"><b>Trading stopped for today.</b> Your ${rule} was hit. Rules reset on the next trading day.</div></div>`;
@@ -178,7 +178,7 @@ export default {
       </div>
 
       <div class="banner info mt">${icon('info')}<div><b>How protection works.</b> TradeLock checks your rules against your ${d.broker.label} positions on every sync. ${d.broker.capabilities?.accountLock === 'killswitch'
-        ? `When a limit is hit, it closes your positions and turns on the ${d.broker.label} kill switch, so no new trades can be placed in your ${d.broker.label} account until the next trading day.`
+        ? `When a limit is hit, it closes your positions and turns on the ${d.broker.label} kill switch, so no new orders can be placed in your ${d.broker.label} account (also from its app) until you switch it off or the next trading day.`
         : `When a limit is hit, it closes your positions. An account-wide lock is not available for ${d.broker.label}.`}</div></div>`;
   },
 

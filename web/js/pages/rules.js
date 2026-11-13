@@ -6,6 +6,7 @@ import { formError } from '../ui/parts.js';
 import { ruleTip, tipValues } from '../ui/ruletips.js';
 import { toast } from '../ui/toast.js';
 import { store } from '../core/store.js';
+import { ksOn } from '../ui/killswitch.js';
 
 const DEFAULT_PCT = { maxLoss: 5, profitLock: 10, capitalUse: 80 };
 const CUTOFFS = ['14:30', '14:45', '15:00', '15:10', '15:15', '15:20'];
@@ -105,7 +106,7 @@ function setNote(set, now) {
 
 function killLine(d) {
   const ks = d?.killSwitch;
-  if (ks?.activeAt || ks?.broker?.active === true) return html`<span class="neg">Locked today</span> · unlocks next trading day`;
+  if (ksOn(ks)) return html`<span class="neg">On</span> · all orders blocked · switch it off on Overview`;
   if (ks?.armed) return html`<span class="warn">Armed</span> · locks once all positions are closed`;
   return `Also lock the ${d?.broker?.label || 'broker'} app when a limit hits`;
 }

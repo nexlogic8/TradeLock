@@ -138,6 +138,8 @@ export function createMockAdapter() {
       return { message: 'Kill switch activated' };
     },
 
+    async deactivateKillSwitch() { killedDay = null; return { message: 'Kill switch deactivated' }; },
+
     // Dev-only hook used by the "simulate outage" control.
     simulateOutage(seconds) { failUntil = Date.now() + seconds * 1000; },
   };

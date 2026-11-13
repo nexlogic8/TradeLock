@@ -289,8 +289,9 @@ async function refreshKillStatus(uid, adapter, tradingDay, s) {
     if (active === true && tradingDay && t.minutes >= config.market.open) {
       if (!d.ks_active_at) patchDay(uid, t.day, { ks_armed: d.ks_armed || 'broker', ks_active_at: Date.now() });
     }
-    // A lock TradeLock only copied from the broker follows the broker: switched off there, off here.
-    if (active === false && d.ks_armed === 'broker' && d.ks_active_at) {
+    // Every lock follows the broker (kill switches can be switched off the same day since 13 Nov 2026):
+    // switched off there (Dhan app, or never really on), off here.
+    if (active === false && d.ks_active_at) {
       patchDay(uid, t.day, { ks_armed: null, ks_active_at: null });
       markDirty(uid);
     }
