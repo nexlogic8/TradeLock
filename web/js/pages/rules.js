@@ -107,7 +107,7 @@ function killLine(d) {
   const ks = d?.killSwitch;
   if (ks?.activeAt || ks?.broker?.active === true) return html`<span class="neg">Locked today</span> · unlocks next trading day`;
   if (ks?.armed) return html`<span class="warn">Armed</span> · locks once all positions are closed`;
-  return 'Locks NSE / BSE for the day when a limit hits (commodity stays open)';
+  return `Also lock the ${d?.broker?.label || 'broker'} app when a limit hits`;
 }
 
 /**
@@ -133,7 +133,7 @@ export function rulesPanel(f, { set, now, capital, dash, error = null, pending =
         html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-optionSl" data-value="optionSl" inputmode="decimal" value="${f.optionSl.value}" aria-label="Option stop-loss room percent"></div>`, tv)}
       ${row('cutoff', 'Cutoff time', LINES.cutoff(), f.cutoff,
         html`<select class="input num" id="v-cutoff" data-cutoff aria-label="Cutoff time">${[...new Set([...CUTOFFS, f.cutoff.value])].sort().map(t => html`<option value="${t}" ${f.cutoff.value === t ? 'selected' : ''}>${label12(t)}</option>`)}</select>`, tv)}
-      ${row('killSwitch', 'Kill switch (NSE / BSE)', killLine(dash), f.killSwitch, '', tv)}
+      ${row('killSwitch', `${broker} kill switch`, killLine(dash), f.killSwitch, '', tv)}
     </div>
     <div class="mt-s" id="rules-error">${formError(error)}</div>`;
 }

@@ -65,8 +65,7 @@ async function execute(rec, acct) {
         patchDay(rec.userId, day, { paused: 1, pause_reason: reason });
         set(i, 'done', 'Orders placed in TradeLock are blocked. Exits are still allowed.');
       } else if (r.action === 'cancel') {
-        // Rule-driven (the kill switch's flatten): the locked segments only, so commodity (MCX) orders stay.
-        const orders = getBook(rec.userId).orders.filter(o => rec.source === 'manual' || lockedSegment(o));
+        const orders = getBook(rec.userId).orders;
         if (!orders.length) { set(i, 'done', 'No open orders to cancel.'); continue; }
         set(i, 'pending', `Cancelling ${orders.length} order(s)…`);
         const lines = await Promise.all(orders.map(o => adapter.cancelOrder(o.id)
@@ -79,7 +78,7 @@ async function execute(rec, acct) {
         const res = await tryKillSwitch(rec.userId, acct, rec.source);
         set(i, res.status === 'failed' ? 'failed' : 'done', res.text);
       } else if (r.action === 'exit') {
-        const positions = getBook(rec.userId).positions.filter(p => p.qty !== 0 && (rec.source === 'manual' || lockedSegment(p)));
+        const positions = getBook(rec.userId).positions.filter(p => p.qty !== 0);
         if (!positions.length) { set(i, 'done', 'No open positions.'); continue; }
         set(i, 'pending', `Exit orders sent for ${positions.length} position(s). Waiting for broker confirmation…`);
         const lines = await Promise.all(positions.map(p => exitOne(adapter, p)));
@@ -102,29 +101,15 @@ async function execute(rec, acct) {
 }
 
 /**
- * What the kill switch locks. 'indian' (the user's choice, 13 Nov 2026): only the Indian equity / F&O market (NSE, BSE);
- * commodity (MCX) stays open. Dhan's own kill switch locks the whole account and its API has no segment option, so
- * TradeLock holds this lock itself: Indian orders are cancelled, and any Indian position opened while it is on (also
- * from the broker's app) is closed at market on the next sync (enforceMarketLock). 'broker': the broker's account-wide
- * kill switch, as before. A mutable object so tests can choose.
- */
-export const KILL_SCOPE = { mode: 'indian' };
-/** Commodity segments (MCX / NCDEX) are outside the Indian-market lock. Unknown segment → Indian (locked). */
-export const isCommodity = seg => /MCX|NCDEX|COMM/i.test(String(seg || ''));
-export const lockedSegment = x => KILL_SCOPE.mode !== 'indian' || !isCommodity(x?.exchangeSegment);
-
-/**
- * Activate the kill switch (KILL_SCOPE), or arm it until the account is flat in the locked segments.
- * Brokers (Dhan) refuse their kill switch while positions or pending orders exist.
+ * Activate the broker's account-wide kill switch, or arm it until the account is flat.
+ * Brokers (Dhan) refuse the kill switch while positions or pending orders exist.
  * @returns {{ status: 'active'|'armed'|'failed', text: string }}
  */
 export async function tryKillSwitch(userId, acct, reason, adapter = acct && adapterFor(acct)) {
   const day = ist().day;
   const s = dayState(userId, day);
-  const market = KILL_SCOPE.mode === 'indian';
   if (s.ks_active_at) return { status: 'active', text: 'Kill switch is already active today.' };
-  if (!market && !adapter?.activateKillSwitch) return { status: 'failed', text: 'This broker does not offer a kill switch through its API. Lock trading in the broker app.' };
-  if (market && !adapter?.snapshot) return { status: 'failed', text: 'No broker connection to lock the Indian market with.' };
+  if (!adapter?.activateKillSwitch) return { status: 'failed', text: 'This broker does not offer a kill switch through its API. Lock trading in the broker app.' };
   try {
     if (adapter.getKillSwitch && (await adapter.getKillSwitch()) === true) {
       patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
@@ -132,19 +117,11 @@ export async function tryKillSwitch(userId, acct, reason, adapter = acct && adap
     }
     const snap = await adapter.snapshot();
     setBook(userId, { positions: snap.positions, orders: snap.orders, funds: snap.funds ?? null, at: Date.now() });
-    if (snap.positions.some(p => p.qty !== 0 && lockedSegment(p))) {
+    if (snap.positions.some(p => p.qty !== 0)) {
       if (!s.ks_armed) patchDay(userId, day, { ks_armed: reason });
-      return { status: 'armed', text: `Armed. The kill switch activates as soon as all ${market ? 'NSE / BSE ' : ''}positions are closed.` };
+      return { status: 'armed', text: 'Armed. The kill switch activates as soon as all positions are closed.' };
     }
-    for (const o of snap.orders || []) if (lockedSegment(o)) await adapter.cancelOrder(o.id).catch(() => {});
-    if (market) {
-      patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
-      audit(userId, 'killswitch.market_lock', { reason });
-      notify(userId, { kind: 'risk', level: 'critical', title: 'Kill switch on: Indian market locked',
-        body: `NSE / BSE trading is locked for the rest of the day${reason?.startsWith('rule:') ? `, after your ${RULE_NAMES[reason.slice(5)]} was reached`
-          : reason === 'gap:no-entry' ? ', as there was no Gap 09:15 entry today' : ''}. Any NSE / BSE position opened today, also from the ${adapter.label} app, is closed at market within seconds. Commodity (MCX) stays open.` });
-      return { status: 'active', text: 'Indian market (NSE / BSE) locked for the rest of the day; commodity (MCX) stays open.' };
-    }
+    for (const o of snap.orders) await adapter.cancelOrder(o.id).catch(() => {});
     const { message } = await adapter.activateKillSwitch();
     patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
     audit(userId, 'killswitch.activated', { reason });
@@ -159,36 +136,6 @@ export async function tryKillSwitch(userId, acct, reason, adapter = acct && adap
       body: `${e.message}. TradeLock will retry; to be safe, turn on the kill switch in your broker app now.` });
     return { status: 'failed', text: `${e.message}. Turn on the kill switch in your broker app.` };
   }
-}
-
-/**
- * The Indian-market lock (KILL_SCOPE 'indian'), on each sync while it is on today: NSE / BSE orders are cancelled and
- * NSE / BSE positions closed at market (once per position every RETRY_MS); commodity (MCX) is left alone.
- * Not for a lock the broker holds itself (ks_armed 'broker': the broker blocks everything already).
- */
-const lockExits = new Map();   // `${userId}:${securityId}` -> last exit attempt
-const LOCK_RETRY_MS = 15_000;
-export async function enforceMarketLock(userId, adapter, snap, s) {
-  if (KILL_SCOPE.mode !== 'indian' || !s?.ks_active_at || s.ks_armed === 'broker' || !adapter) return [];
-  const done = [];
-  for (const o of snap.orders || []) if (lockedSegment(o)) {
-    const k = `${userId}:order:${o.id}`;
-    if (Date.now() - (lockExits.get(k) || 0) < LOCK_RETRY_MS) continue;
-    lockExits.set(k, Date.now());
-    await adapter.cancelOrder(o.id).then(() => done.push(`${o.symbol} order cancelled`)).catch(() => {});
-  }
-  for (const p of snap.positions || []) if (p.qty !== 0 && lockedSegment(p) && adapter.exitPosition) {
-    const k = `${userId}:${p.securityId}`;
-    if (Date.now() - (lockExits.get(k) || 0) < LOCK_RETRY_MS) continue;
-    lockExits.set(k, Date.now());
-    try { await adapter.exitPosition(p); done.push(`${p.symbol} closed at market`); }
-    catch (e) { notify(userId, { kind: 'risk', level: 'critical', title: `Could not close ${p.symbol}`, body: `The Indian market is locked today, but closing it failed: ${e.message}. Close it in the ${adapter.label} app now.` }); }
-  }
-  if (done.length) {
-    audit(userId, 'killswitch.market_lock_enforced', { actions: done });
-    notify(userId, { kind: 'risk', level: 'critical', title: 'Indian market is locked today', body: `${done.join(' · ')}. NSE / BSE trades are not allowed after the kill switch; commodity (MCX) stays open.` });
-  }
-  return done;
 }
 
 async function exitOne(adapter, p) {

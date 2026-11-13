@@ -92,8 +92,7 @@ before(async () => {
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);
 });
 after(() => server.close());
-// The Indian-market lock is TradeLock's own now (also on a fake broker): a skipped entry in one test must not lock the next.
-const flatBook = () => { patchDay(uid, new Date(Date.now() + 19800e3).toISOString().slice(0, 10), { ks_armed: null, ks_active_at: null }); setBook(uid, { positions: [], orders: [], funds: { available: 200000, used: 0 }, at: Date.now() }); };
+const flatBook = () => setBook(uid, { positions: [], orders: [], funds: { available: 200000, used: 0 }, at: Date.now() });
 
 test('gap switch defaults to off; when on (no first ticks), 09:15:02 market-buys 80% of the funds of the nearest expiry, stop from the daily stop-loss', async (t) => {
   const fresh = stmt('SELECT gap_on FROM broker_accounts WHERE user_id != ? LIMIT 1').get(uid);
@@ -368,32 +367,28 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     const dhan = withKill('2026-10-14'), r = await run(dhan, '2026-10-14');
     if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
     assert.ok(!dhan.calls.some(c => c[0] === 'order'), 'no trade');
-    // The Indian-market lock (KILL_SCOPE 'indian'): TradeLock holds it; Dhan's account-wide switch is not used.
-    assert.ok(!dhan.calls.some(c => c[0] === 'killswitch'), 'Dhan kill switch left off (commodity stays open)');
+    assert.ok(dhan.calls.some(c => c[0] === 'killswitch'), `kill switch activated (${JSON.stringify(r)})`);
     const s = stmt('SELECT ks_armed, ks_active_at FROM day_state WHERE user_id = ? AND day = ?').get(uid, today);
     assert.equal(s.ks_armed, 'gap:no-entry');
-    assert.ok(s.ks_active_at > 0, `locked (${JSON.stringify(r)})`);
-    assert.match(stmt("SELECT body FROM notifications WHERE user_id = ? AND title LIKE '%Indian market locked%' ORDER BY id DESC").get(uid).body, /no Gap 09:15 entry today.*Commodity \(MCX\) stays open/s);
+    assert.ok(s.ks_active_at > 0);
+    assert.match(stmt("SELECT body FROM notifications WHERE user_id = ? AND title LIKE '%kill switch activated%' ORDER BY id DESC").get(uid).body, /no Gap 09:15 entry today/);
 
     saveRules(uid, { ...rules, killSwitch: { on: false } }, undefined, null, 'algo');
     const off = withKill('2026-10-13');
     const r2 = await run(off, '2026-10-13');
     assert.ok(off.calls.some(c => c[0] === 'quotes') && !off.calls.some(c => c[0] === 'order'), `decided, no trade (${JSON.stringify(r2)})`);
     assert.ok(!off.calls.some(c => c[0] === 'killswitch'), 'kill switch rule off: no lock');
-    assert.equal(stmt("SELECT ks_active_at FROM day_state WHERE user_id = ? AND day = ?").get(uid, today).ks_active_at, null, "rule off: not locked");
     saveRules(uid, rules, undefined, null, 'algo');
 
     const orb = withKill('2026-10-12');
     acct = { ...acct, orb_on: 1 };
     await run(orb, '2026-10-12');
     assert.ok(!orb.calls.some(c => c[0] === 'killswitch'), 'ORB still to trade today: no lock');
-    assert.equal(stmt("SELECT ks_active_at FROM day_state WHERE user_id = ? AND day = ?").get(uid, today).ks_active_at, null, "ORB on: not locked");
 
     const off2 = withKill('2026-10-09');
     acct = { ...acct, orb_on: 0, gap_lock: 0 };
     await run(off2, '2026-10-09');
     assert.ok(off2.calls.some(c => c[0] === 'quotes') && !off2.calls.some(c => c[0] === 'killswitch'), '"Kill switch if no Gap entry" off: no lock');
-    assert.equal(stmt("SELECT ks_active_at FROM day_state WHERE user_id = ? AND day = ?").get(uid, today).ks_active_at, null, "no-entry lock off: not locked");
   } finally {
     acct = { ...acct, orb_on: 0, gap_lock: 1 };
     saveRules(uid, rules, undefined, null, 'algo');

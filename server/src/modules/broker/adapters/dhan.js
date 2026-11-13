@@ -206,7 +206,6 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
           })),
         orders: ord ? ord.filter(o => OPEN_ORDER.has(o.orderStatus)).map(o => ({
           id: o.orderId, symbol: o.tradingSymbol, side: o.transactionType, qty: o.quantity, price: o.price, type: o.orderType, status: 'PENDING',
-          exchangeSegment: o.exchangeSegment, securityId: o.securityId != null ? String(o.securityId) : undefined,
         })) : undefined,
         trades: trd === null ? null : (trd || []).map(t => ({
           id: `dhan:${t.exchangeTradeId || t.orderId}`,

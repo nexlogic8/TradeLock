@@ -178,7 +178,7 @@ export default {
       </div>
 
       <div class="banner info mt">${icon('info')}<div><b>How protection works.</b> TradeLock checks your rules against your ${d.broker.label} positions on every sync. ${d.broker.capabilities?.accountLock === 'killswitch'
-        ? `When a limit is hit, it closes your NSE / BSE positions and locks the Indian market for the rest of the day: any NSE / BSE position opened afterwards, also from the ${d.broker.label} app, is closed at market within seconds. Commodity (MCX) stays open.`
+        ? `When a limit is hit, it closes your positions and turns on the ${d.broker.label} kill switch, so no new trades can be placed in your ${d.broker.label} account until the next trading day.`
         : `When a limit is hit, it closes your positions. An account-wide lock is not available for ${d.broker.label}.`}</div></div>`;
   },
 
