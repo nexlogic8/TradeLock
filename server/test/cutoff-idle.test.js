@@ -35,16 +35,16 @@ for (const scenario of ['idle', 'closed trade', 'carried position', 'pending ord
     const state = dayState(uid);
     assert.equal(state.paused, 1, 'cutoff still blocks new TradeLock entries');
     assert.equal(state.pause_reason, 'rule:cutoff');
+    // The Indian-market lock: TradeLock holds it, the broker's account-wide switch is never used (activations 0).
+    assert.equal(activations, 0, 'broker kill switch never switched on');
     if (scenario === 'idle') {
-      assert.equal(activations, 0, 'no broker activation on an unused account');
       assert.equal(state.ks_armed, null);
       assert.equal(state.ks_active_at, null);
     } else if (scenario === 'carried position') {
-      assert.equal(activations, 0, 'open position is left alone until flat');
-      assert.equal(state.ks_armed, 'rule:cutoff');
+      assert.equal(state.ks_armed, 'rule:cutoff', 'open position is left alone until flat');
+      assert.equal(state.ks_active_at, null);
     } else {
-      assert.equal(activations, 1, 'trading activity retains cutoff protection');
-      assert.ok(state.ks_active_at);
+      assert.ok(state.ks_active_at, 'trading activity retains cutoff protection (market locked)');
     }
   });
 }

@@ -20,7 +20,7 @@ import { setBook, getBook, getKillStatus, setKillStatus, getPermissions, setPerm
 import { notify } from '../notifications/service.js';
 import { getRules } from '../rules/service.js';
 import { upsertFills, fillsForDay, logRiskEvent } from '../trades/service.js';
-import { runEmergency, tryKillSwitch } from '../emergency/service.js';
+import { runEmergency, tryKillSwitch, enforceMarketLock, lockedSegment } from '../emergency/service.js';
 import { evaluate, countEntries, closedTrades } from './engine.js';
 import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds } from './service.js';
 
@@ -164,6 +164,8 @@ export async function syncAccount(acct, { force = false } = {}) {
     if (live && acct.agent_on !== 0) {
       if (await checkRules(uid, t, s, m)) s = dayState(uid, t.day);
       maybeActivateArmed(uid, acct, snap, s);
+      // Indian-market lock on: an NSE / BSE position or order (e.g. placed in the broker's app) is closed / cancelled.
+      if (s?.ks_active_at) await enforceMarketLock(uid, adapter, snap, s).catch(e => console.error('[monitor] market lock', e.message));
     }
   } catch (err) {
     if (live) {
@@ -337,7 +339,7 @@ async function checkRules(uid, t, s, m) {
 
 // An armed kill switch fires on the first sync where the account is flat.
 function maybeActivateArmed(uid, acct, snap, s = dayState(uid)) {
-  if (!s.ks_armed || s.ks_active_at || snap.positions.some(p => p.qty !== 0) || killBusy.has(uid)) return;
+  if (!s.ks_armed || s.ks_active_at || snap.positions.some(p => p.qty !== 0 && lockedSegment(p)) || killBusy.has(uid)) return;
   if (Date.now() - (killLastTry.get(uid) || 0) < KILL_RETRY_MS) return;
   killBusy.add(uid);
   killLastTry.set(uid, Date.now());
