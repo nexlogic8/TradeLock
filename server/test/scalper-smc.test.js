@@ -48,3 +48,21 @@ test('SMC: no look-ahead: a swing is used only once confirmed by the bars after 
   // Before bar 4 the swing is not confirmed yet, so even a higher close would not count.
   assert.equal(marketStructure(bars, 0, 3, 2).events.length, 0);
 });
+
+test('ICT: resting BSL / SSL, an equal high, a sweep, the dealing range and the OTE zone', async () => {
+  const { ictLevels } = await import('../../web/js/pages/scalper-chart-smc.js');
+  // Highs: swing 110 at bar 3, an equal 110.05 at bar 9, then a wick to 111 closing back below (sweep) at bar 13.
+  const hl = [[100, 96], [104, 99], [107, 102], [110, 105], [106, 101], [103, 97], [101, 95], [104, 98], [107, 101], [110.05, 104], [106, 100], [103, 98], [104, 99], [111, 103]];
+  const bars = hl.map(([h, l], i) => ({ open:l + 1, high:h, low:l, close: i === 13 ? 108 : h - 1 }));
+  const { liquidity, range, ote } = ictLevels(bars, 0, bars.length - 1, 2);
+  const highs = liquidity.filter(l => l.side === 'high');
+  assert.deepEqual(highs.map(l => l.price), [110, 110.05]);
+  assert.equal(highs[1].equal, true, 'within 10% of the average range: an equal high');
+  assert.deepEqual([highs[1].taken, highs[1].sweep], [13, true], 'wick above, close back below: a sweep');
+  const low = liquidity.find(l => l.side === 'low' && l.price === 95);
+  assert.ok(low && low.taken == null, 'the 95 low is still resting sell-side liquidity');
+  assert.deepEqual([range.high, range.low, range.eq], [110.05, 98, 104.025]);
+  // Last leg: low 98 (bar 11) is after the high 110.05 (bar 9): a down leg, so the OTE is 62–79% back up.
+  assert.equal(ote.dir, 'down');
+  assert.ok(Math.abs(ote.bottom - (98 + 0.62 * 12.05)) < 1e-9 && Math.abs(ote.top - (98 + 0.79 * 12.05)) < 1e-9);
+});
