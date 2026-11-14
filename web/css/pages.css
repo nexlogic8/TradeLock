@@ -2040,3 +2040,21 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
   body[data-page="scalper"] .scalper-toolbar .sc-layout button svg { width:15px; height:15px; }
   body[data-page="scalper"] .scalper-toolbar .sc-fullscreen { height:28px; }
 }
+
+/* Split layout header orders at 70% height (46 → 32 px): label and amount on one line; lots with − / + by hand. */
+@media (min-width:1001px) {
+  body.sc-split .sc-hdr-order { gap:5px; align-items:center; }
+  body.sc-split .sc-hdr-order .btn { height:32px; min-height:32px; min-width:84px; padding:0 12px; flex-direction:row; align-items:center; gap:6px; border-radius:8px; font-size:12px; }
+  body.sc-split .sc-hdr-order .btn small { font-size:11px; }
+  body.sc-split .sc-hdr-lots { height:32px; min-width:0; padding:0 2px; border-radius:8px; font-size:12px; flex-direction:row; gap:2px; }
+}
+.sc-hdr-lots { display:inline-flex; align-items:center; gap:2px; }
+.sc-hdr-lots b { min-width:46px; text-align:center; font-weight:700; cursor:default; }
+.sc-hdr-lots b.manual, .sc-lots small.manual { color:var(--amber); cursor:pointer; }
+.sc-hdr-lots button, .sc-lot-step button { width:22px; height:22px; padding:0; border:1px solid var(--line-2); border-radius:6px; background:var(--field); color:var(--fg); font-size:14px; font-weight:700; line-height:1; cursor:pointer; }
+.sc-hdr-lots button:hover, .sc-lot-step button:hover { border-color:var(--mint-soft); color:var(--mint); }
+/* Order tickets: [−] lots [+] */
+.sc-lot-step { display:flex; align-items:stretch; gap:3px; width:100%; height:100%; }
+.sc-lot-step button { width:24px; height:auto; flex:none; }
+.sc-lot-step .sc-lots-input { flex:1; min-width:0; }
+.sc-ticket .sc-lots small[data-lot-auto] { pointer-events:auto; }

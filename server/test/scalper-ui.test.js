@@ -38,9 +38,11 @@ test('Power Scalper renders the three-chart workspace, chain and one-tap order t
   assert.match(oneMinute,/EMA45 wick-touch hammer \+ 5m opening-range breakout arrows · next candle confirms/);
   assert.match(view,/NIFTY 50 · LIVE/); assert.match(view,/data-order-side="BUY"/); assert.match(view,/data-order-side="SELL"/);
   // Index selector, full screen and the chain / positions / both toggle.
-  assert.match(view,/data-underlying="NIFTY" aria-pressed="true">NIFTY 50</);
-  assert.match(view,/data-underlying="BANKNIFTY" aria-pressed="false">BANK NIFTY</);
-  assert.match(view,/data-underlying="SENSEX" aria-pressed="false">SENSEX</);
+  assert.match(view,/data-underlying="NIFTY" aria-pressed="true" class="">NIFTY 50</);
+  assert.match(view,/data-underlying="BANKNIFTY" aria-pressed="false" class="">BANK NIFTY</);
+  assert.match(view,/data-underlying="SENSEX" aria-pressed="false" class="">SENSEX</);
+  // The market switch: NIFTY pressed; MCX carries its class (amber) and opens Crude Oil Mini first.
+  assert.match(view,/data-underlying="CRUDEOILM" aria-pressed="false" title="[^"]*" class="sc-mcx">MCX</);
   assert.match(view,/id="sc-fullscreen"[^>]*>.*<span class="sc-fs-text"><span class="sc-fs-long">Full screen<span class="sc-fs-trade"> · trade<\/span><\/span><span class="sc-fs-short">Trade<\/span><\/span><\/button>/);
   assert.match(view,/class="panel scalper-chain side-chain/);
   assert.match(view,/data-side-panel="positions" aria-pressed="false">Positions</);
@@ -193,7 +195,7 @@ test('order buttons show the full-quantity amount (Sell left, Buy right) without
   assert.doesNotMatch(view,/scm-link/);
 });
 
-test('desktop layout switch: Classic / Split icons, right strip, Sell · lots · Buy in the option chart headers', () => {
+test('desktop layout switch: Classic / Split icons, right strip, Sell · lots · Buy in the option chart headers', async () => {
   const call={securityId:'501',exchangeSegment:'NSE_FNO',symbol:'NIFTY 2026-11-03 22700 CE',strike:22700,option:'CE',expiry:'2026-11-03',ltp:100};
   const put={securityId:'502',exchangeSegment:'NSE_FNO',symbol:'NIFTY 2026-11-03 22700 PE',strike:22700,option:'PE',expiry:'2026-11-03',ltp:40};
   const data={expiry:'2026-11-03',expiries:['2026-11-03'],asOf:Date.now(),lotSize:65,underlying:{ltp:22700,candles:[]},strikes:[{strike:22700,ce:call,pe:put}],selectedCharts:{ce:[],pe:[]},broker:{connected:true}};
@@ -206,8 +208,13 @@ test('desktop layout switch: Classic / Split icons, right strip, Sell · lots ·
   assert.match(view,/<nav class="sc-rail"[^>]*><button type="button" data-rail="chain" aria-pressed="true" title="Option chain"><svg[\s\S]*data-rail="positions" aria-pressed="false"[\s\S]*data-rail="both"/);
   assert.doesNotMatch(view,/sc-split-tools/,'the old Option chain / Positions text buttons are gone');
   // Buy shows the full amount for the auto lots (2 lots × 65 × ₹100); Sell shows the margin once loaded.
-  assert.match(view,/data-order-side="SELL" data-option="CE" data-hdr-btn="ce" >Sell <small data-hdr-funds="ce-sell">[^<]*<\/small><\/button><span class="sc-hdr-lots" data-hdr-lots="ce">2 lots<\/span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="CE" data-hdr-btn="ce" >Buy <small data-hdr-funds="ce-buy">₹13,000<\/small>/);
-  assert.match(view,/data-hdr-lots="pe">6 lots</);
+  assert.match(view,/data-order-side="SELL" data-option="CE" data-hdr-btn="ce" >Sell <small data-hdr-funds="ce-sell">[^<]*<\/small><\/button><span class="sc-hdr-lots"[^>]*><button type="button" data-lot-step="-1" data-lot-side="ce"[^>]*>−<\/button><b data-hdr-lots="ce"[^>]*>2 lots<\/b><button type="button" data-lot-step="1" data-lot-side="ce"[^>]*>\+<\/button><\/span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="CE" data-hdr-btn="ce" >Buy <small data-hdr-funds="ce-buy">₹13,000<\/small>/);
+  // Lots by hand (− / +): 5 manual lots replace the auto 2; 0 is back to auto.
+  const { chosenSize } = await import('../../web/js/pages/scalper.js');
+  const risk = { optionSlPct:20, budget:{ available:1000, perTrade:1000, trades:1 } }, item = { ltp:100 };
+  assert.deepEqual([chosenSize(item, 65, risk, 5).lots, chosenSize(item, 65, risk, 5).manual, chosenSize(item, 65, risk, 5).capital], [5, true, 32500]);
+  assert.equal(chosenSize(item, 65, risk, 0).manual, undefined);
+  assert.match(view,/data-hdr-lots="pe"[^>]*>6 lots</);
   const busy=String(page.view({data,ui:{ceId:'501',peId:'502',interval:'5',layout:'split',signalRisk:{budget}},el:{},state:{dash:{positions:[{symbol:'X',qty:65}],orders:[]}}}));
   assert.match(busy,/data-option="CE" data-hdr-btn="ce" disabled>Sell/,'one trade at a time applies to the header buttons too');
 });

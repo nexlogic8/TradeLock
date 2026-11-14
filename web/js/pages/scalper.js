@@ -78,7 +78,7 @@ const isMcxKey = key => MCX_LIST.some(([k]) => k === key);
 const lastOf = mcx => { try { const v = localStorage.getItem(mcx ? 'tradelock.scalper.lastMcx' : 'tradelock.scalper.lastIndex'); return (mcx ? MCX_LIST : INDICES).some(([k]) => k === v) ? v : (mcx ? 'CRUDEOILM' : 'NIFTY'); } catch { return mcx ? 'CRUDEOILM' : 'NIFTY'; } };
 const underlyingsFor = current => (isMcxKey(current) ? MCX_LIST : INDICES);
 const marketSwitch = current => html`<div class="seg sc-market" role="group" aria-label="Market">${[[false, 'NIFTY', 'Indices: NIFTY 50, BANK NIFTY, SENSEX'], [true, 'MCX', 'MCX commodity options: Crude Oil Mini and Gold Mini (09:00 to 23:30 / 23:55)']].map(([mcx, label, hint]) =>
-  html`<button type="button" data-underlying="${isMcxKey(current) === mcx ? current : lastOf(mcx)}" aria-pressed="${String(isMcxKey(current) === mcx)}" title="${hint}"${mcx ? ' class="sc-mcx"' : ''}>${label}</button>`)}</div>`;
+  html`<button type="button" data-underlying="${isMcxKey(current) === mcx ? current : lastOf(mcx)}" aria-pressed="${String(isMcxKey(current) === mcx)}" title="${hint}" class="${mcx ? 'sc-mcx' : ''}">${label}</button>`)}</div>`;
 // Phones show one pane at a time: a chart or the option chain.
 export const MOBILE_PANES = [['spot', 'Index'], ['ce', 'CE'], ['pe', 'PE'], ['chain', 'Chain']];
 export const LAYOUTS = [['classic', 'Classic', 'layoutClassic', 'Classic: 3 charts, option chain and order tickets'], ['split', 'Split', 'layoutSplit', 'Split: index chart left, Call over Put right, one-tap orders on each chart']];
@@ -237,7 +237,7 @@ export default {
       <section class="panel scalper-toolbar">
         <div class="scalper-symbol"><span class="scalper-logo">${icon('chart')}</span><b>Power Scalper</b><span class="pill sm ice">Dhan</span></div>
         ${marketSwitch(current)}
-        <div class="seg sc-underlyings" role="group" aria-label="Index">${underlyingsFor(current).map(([key, label]) => html`<button type="button" data-underlying="${key}" aria-pressed="${String(current === key)}"${isMcxKey(key) ? ' class="sc-mcx"' : ''}>${label}</button>`)}</div>
+        <div class="seg sc-underlyings" role="group" aria-label="Index">${underlyingsFor(current).map(([key, label]) => html`<button type="button" data-underlying="${key}" aria-pressed="${String(current === key)}" class="${isMcxKey(key) ? 'sc-mcx' : ''}">${label}</button>`)}</div>
         <label class="scalper-control"><small>Expiry</small><select class="input" id="sc-expiry">${d.expiries.map(x => html`<option value="${x}" ${x === d.expiry ? 'selected' : ''}>${x}</option>`)}</select></label>
         <label class="scalper-control"><small>Chart interval</small><select class="input" id="sc-interval">${INTERVALS.map(([v,l]) => html`<option value="${v}" ${v === ctx.ui.interval ? 'selected' : ''}>${l}</option>`)}</select></label>
         <div class="scalper-control sc-span"><small>Session</small><div class="seg" role="group" aria-label="Chart history">${SPANS.map(([k, l, hint]) => html`<button type="button" data-span="${k}" aria-pressed="${String(chartSpan === k)}" title="${hint}">${l}</button>`)}</div></div>
@@ -293,9 +293,9 @@ export default {
       <div class="scm-scrim" data-close-sheet></div>
       <section class="scalper-tickets mside-${ctx.ui.mSide || 'ce'}">
         <div class="scm-ordertype"><span class="on">Market order</span><span>Lots auto-sized from your risk rules</span></div>
-        ${ticket('CALL', 'CE', ce, d.lotSize, ctx.ui.margins?.ce, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui))}
+        ${ticket('CALL', 'CE', ce, d.lotSize, ctx.ui.margins?.ce, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), ctx.ui.manualLots?.ce || 0)}
         <div class="panel sc-position-summary"><span class="eyebrow">${indexName}</span><b data-spot>${money(d.underlying.ltp)}</b><div class="sc-range"><span>${money(d.underlying.candles.at(-1)?.low)}</span><i><em></em></i><span>${money(d.underlying.candles.at(-1)?.high)}</span></div><button class="btn btn-ghost btn-sm" data-side-panel="positions">Show positions</button><small>All orders go through TradeLock risk rules and Dhan.</small></div>
-        ${ticket('PUT', 'PE', pe, d.lotSize, ctx.ui.margins?.pe, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui))}
+        ${ticket('PUT', 'PE', pe, d.lotSize, ctx.ui.margins?.pe, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), ctx.ui.manualLots?.pe || 0)}
       </section>
       <p class="scalper-disclaimer">Live prices may be delayed or unavailable during market closures. Check the contract and quantity before placing an order. TradeLock risk rules can block any order. Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts</a>.</p>`;
   },
@@ -580,7 +580,7 @@ export default {
     const refreshMargins = async (sides = ['ce','pe']) => {
       if (signal.aborted || document.hidden) return;
       await Promise.all(sides.map(async side => {
-        const item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`])), lots = autoSize(item, ctx.data.lotSize, ui.signalRisk).lots;
+        const item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`])), lots = sizeOf(ctx, side, item).lots;
         if (!(item?.ltp > 0) || !lots) return;
         const token = ++marginSeq[side];
         try {
@@ -601,6 +601,22 @@ export default {
     setTimeout(refreshMargins, 1500);   // after the first ticks have filled in live prices
     signal.addEventListener('abort', () => { clearInterval(marginTimer); Object.values(marginDebounce).forEach(clearTimeout); }, { once:true });
 
+    // Lots by hand: − / + start from the lots shown (auto or manual), 1 to 500 lots; the server's risk gate still checks
+    // every order. Tapping the lots label / number goes back to auto sizing from the risk rules.
+    on(el, 'click', '[data-lot-step]', (_, button) => {
+      const side = button.dataset.lotSide, item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`]));
+      const now = sizeOf(ctx, side, item).lots || 0, step = Number(button.dataset.lotStep);
+      ui.manualLots = { ...ui.manualLots, [side]: Math.min(500, Math.max(1, now + step)) };
+      updateTickets(ctx); refreshMarginsSoon([side]);
+    }, signal);
+    on(el, 'click', '[data-lot-auto]', (_, label) => {
+      const side = label.dataset.lotAuto;
+      if (!ui.manualLots?.[side]) return;
+      ui.manualLots = { ...ui.manualLots, [side]: 0 };
+      updateTickets(ctx); refreshMarginsSoon([side]);
+      toast(`${side.toUpperCase()} lots back to auto (from your risk rules).`, 'ok');
+    }, signal);
+
     on(el, 'click', '[data-order-side]', (_, button) => {
       // Just after the full-screen view (or a sheet) appears, a tap is still the one that opened it: the Sell / Buy
       // buttons sit where the Scalper tab was, so a quick second tap must not become an order.
@@ -608,7 +624,7 @@ export default {
       const side = button.dataset.orderSide, option = button.dataset.option, key = option.toLowerCase();
       // Order exactly the contract shown on this ticket (not whichever strike was clicked last).
       const contract = strikeIndex(ctx.data).byId.get(String(ui[`${key}Id`]));
-      const lotSize = ctx.data.lotSize, size = autoSize(contract, lotSize, ui.signalRisk);
+      const lotSize = ctx.data.lotSize, size = sizeOf(ctx, key, contract);
       if (!contract || !lotSize) return;
       const busy = runningTrade(ctx.state, ui);
       if (busy) { toast(busy, 'warn'); return; }
@@ -638,7 +654,7 @@ export default {
       ui.switching = true; expirySeq++;
       ui.underlying = key; savePref('tradelock.scalper.underlying', key);
       savePref(isMcxKey(key) ? 'tradelock.scalper.lastMcx' : 'tradelock.scalper.lastIndex', key);
-      Object.assign(ui, { margins:{}, autoLots:{}, chainKey:null, chainScroll:null, lastTickAtById:{}, lastCandleRefreshAtById:{} });
+      Object.assign(ui, { margins:{}, autoLots:{}, manualLots:{}, chainKey:null, chainScroll:null, lastTickAtById:{}, lastCandleRefreshAtById:{} });
       showError('');
       $('.scalper-workspace', el)?.classList.add('is-switching');
       try {
@@ -908,9 +924,9 @@ function errorBanner(message) {
 }
 // Split layout: Sell / lots / Buy in the option chart header (same one-tap order as the tickets).
 function headerOrder(ctx, item, side) {
-  const size = autoSize(item, ctx.data.lotSize, ctx.ui.signalRisk), busy = runningTrade(ctx.state, ctx.ui);
+  const size = sizeOf(ctx, side, item), busy = runningTrade(ctx.state, ctx.ui);
   const t = ticketText(item, size, ctx.data.lotSize, ctx.ui.margins?.[side]);
-  return { lots:size.lots, buy:t.buy, sell:t.sell, disabled:!(item && ctx.data.lotSize && size.lots > 0) || !!busy, reason:busy || size.reason || '' };
+  return { lots:size.lots, manual:!!size.manual, buy:t.buy, sell:t.sell, disabled:!(item && ctx.data.lotSize && size.lots > 0) || !!busy, reason:busy || size.reason || '' };
 }
 function chartPanel(name, instrument, key, _candles, spot, interval = '5', order = null, indicators = {}) {
   const seg = instrument?.exchangeSegment || '', exchange = seg.startsWith('BSE') ? 'BSE' : seg.startsWith('MCX') ? 'MCX' : 'NSE';
@@ -918,7 +934,7 @@ function chartPanel(name, instrument, key, _candles, spot, interval = '5', order
   const { fast, slow } = emaPeriods(interval);
   const subtitle = key === 'spot' && !isAdmin() ? `EMA ${fast} / EMA ${slow}` : key === 'spot' ? (showsHammerMarkers(interval) ? 'EMA45 wick-touch hammer + 5m opening-range breakout arrows · next candle confirms' : ['5'].includes(String(interval)) ? `EMA ${fast} / EMA ${slow} · 5m opening-range breakout arrows · hammer signals on 1-minute` : `EMA ${fast} / EMA ${slow} · breakout and hammer arrows show on the 1- and 5-minute charts`) : instrument?.symbol || name;
   const live = key === 'spot' ? html`<span class="sc-hdr-index"><strong data-spot>${money(instrument?.ltp || 0)}</strong><em class="${(instrument?.ltp || 0) >= (_candles?.at?.(-1)?.open || instrument?.ltp || 0) ? 'pos' : 'neg'}">Live index</em></span>` : '';
-  return html`<section class="panel sc-chart-panel" data-chart-panel="${key}"><header><span><b>${heading}${live}</b><small>${subtitle}</small></span><span class="sc-chart-ltp" data-ltp="${key}">${money(instrument?.ltp || 0)}</span>${order ? html`<span class="sc-hdr-order" title="${order.reason}"><button type="button" class="btn btn-sm sc-hdr-sell" data-order-side="SELL" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Sell <small data-hdr-funds="${key}-sell">${order.sell}</small></button><span class="sc-hdr-lots" data-hdr-lots="${key}">${order.lots} lot${order.lots === 1 ? '' : 's'}</span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Buy <small data-hdr-funds="${key}-buy">${order.buy}</small></button></span>` : ''}</header><div class="sc-chart-meta"><button type="button" class="sc-ind sc-ind-add" data-studies="${key}" title="Add or change indicators" aria-haspopup="dialog">ƒx Indicators</button><span class="sc-legend" data-legend="${key}"></span><span>Spot <b>${money(spot)}</b></span><span>${key === 'spot' ? 'PCR' : 'OI'} <b class="oi-value">--</b></span><span class="sc-chart-count" data-candle-count></span></div><div class="sc-studies-pop" data-studies-pop="${key}" role="dialog" aria-label="Indicators" hidden></div><div class="sc-chart-host" data-chart="${key}" role="img" aria-label="${name} live candlestick chart"></div><div class="sc-chart-controls" aria-label="Chart zoom controls"><span>TIME</span><button type="button" data-chart-control="x-out" aria-label="Zoom time out" title="Zoom out on time axis">-</button><button type="button" data-chart-control="x-in" aria-label="Zoom time in" title="Zoom in on time axis">+</button><span>PRICE</span><button type="button" data-chart-control="y-out" aria-label="Zoom price out" title="Zoom out on price axis">-</button><button type="button" data-chart-control="y-in" aria-label="Zoom price in" title="Zoom in on price axis">+</button><button type="button" data-chart-control="reset" aria-label="Reset chart zoom" title="Back to the selected session (1D / 5D)">Reset</button></div></section>`;
+  return html`<section class="panel sc-chart-panel" data-chart-panel="${key}"><header><span><b>${heading}${live}</b><small>${subtitle}</small></span><span class="sc-chart-ltp" data-ltp="${key}">${money(instrument?.ltp || 0)}</span>${order ? html`<span class="sc-hdr-order" title="${order.reason}"><button type="button" class="btn btn-sm sc-hdr-sell" data-order-side="SELL" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Sell <small data-hdr-funds="${key}-sell">${order.sell}</small></button><span class="sc-hdr-lots" title="− / + to set lots by hand · tap the number to go back to auto"><button type="button" data-lot-step="-1" data-lot-side="${key}" aria-label="One lot less">−</button><b data-hdr-lots="${key}" data-lot-auto="${key}" data-lots-mode="${key}" class="${order.manual ? 'manual' : ''}">${order.lots} lot${order.lots === 1 ? '' : 's'}</b><button type="button" data-lot-step="1" data-lot-side="${key}" aria-label="One lot more">+</button></span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Buy <small data-hdr-funds="${key}-buy">${order.buy}</small></button></span>` : ''}</header><div class="sc-chart-meta"><button type="button" class="sc-ind sc-ind-add" data-studies="${key}" title="Add or change indicators" aria-haspopup="dialog">ƒx Indicators</button><span class="sc-legend" data-legend="${key}"></span><span>Spot <b>${money(spot)}</b></span><span>${key === 'spot' ? 'PCR' : 'OI'} <b class="oi-value">--</b></span><span class="sc-chart-count" data-candle-count></span></div><div class="sc-studies-pop" data-studies-pop="${key}" role="dialog" aria-label="Indicators" hidden></div><div class="sc-chart-host" data-chart="${key}" role="img" aria-label="${name} live candlestick chart"></div><div class="sc-chart-controls" aria-label="Chart zoom controls"><span>TIME</span><button type="button" data-chart-control="x-out" aria-label="Zoom time out" title="Zoom out on time axis">-</button><button type="button" data-chart-control="x-in" aria-label="Zoom time in" title="Zoom in on time axis">+</button><span>PRICE</span><button type="button" data-chart-control="y-out" aria-label="Zoom price out" title="Zoom out on price axis">-</button><button type="button" data-chart-control="y-in" aria-label="Zoom price in" title="Zoom in on price axis">+</button><button type="button" data-chart-control="reset" aria-label="Reset chart zoom" title="Back to the selected session (1D / 5D)">Reset</button></div></section>`;
 }
 // Order tickets: [Sell] [lots] [Buy]. Lots are sized automatically from the risk rules, never typed:
 // SL = Option SL room % (Risk rules) below the live premium, and the loss at that SL may not exceed the per-trade budget
@@ -942,11 +958,26 @@ export function autoSize(item, lotSize, risk) {
   if (!lots) return { ...base, lots:0, reason:`One lot risks ${rupees(riskPerLot)} at a ${slPct}% SL, more than the ${rupees(allowed)} per-trade budget.` };
   return { ...base, lots, risk:round2(lots * riskPerLot), capital:round2(lots * lotSize * item.ltp) };
 }
-function ticket(name, option, item, lotSize, margin, risk, busy = '') {
-  const side = option.toLowerCase(), size = autoSize(item, lotSize, risk), t = ticketText(item, size, lotSize, margin);
+/**
+ * Lots for a ticket: the auto size from the risk rules, or the lots set by hand with − / + (manual > 0). Manual lots
+ * are still checked by the server's risk gate (capital per trade, daily loss limit, kill switch...).
+ */
+export function chosenSize(item, lotSize, risk, manual = 0) {
+  const auto = autoSize(item, lotSize, risk);
+  if (!(manual > 0)) return auto;
+  if (!lotSize) return { lots:0, reason:'Loading lot size…' };
+  if (!(item?.ltp > 0)) return { lots:0, manual:true, reason:'Waiting for a live price.' };
+  const slPct = auto.slPct ?? (risk && 'optionSlPct' in risk ? risk.optionSlPct : DEFAULT_SL_PCT) ?? null;
+  const sl = slPct != null ? round2(item.ltp * (1 - slPct / 100)) : null;
+  return { lots:manual, manual:true, reason:'', sl, slPct, risk: sl != null ? round2(manual * (item.ltp - sl) * lotSize) : null,
+    capital: round2(manual * lotSize * item.ltp), auto: auto.lots };
+}
+const sizeOf = (ctx, side, item) => chosenSize(item, ctx.data.lotSize, ctx.ui.signalRisk, ctx.ui.manualLots?.[side] || 0);
+function ticket(name, option, item, lotSize, margin, risk, busy = '', manual = 0) {
+  const side = option.toLowerCase(), size = chosenSize(item, lotSize, risk, manual), t = ticketText(item, size, lotSize, margin);
   const ready = item && lotSize && size.lots > 0 && !busy;
   if (busy) t.note = busy;
-  return html`<section class="panel sc-ticket ${busy ? 'busy' : ''}" data-ticket="${side}"><header><span class="sc-option-tag ${side}">${option}</span><b><span class="tk-full">${item ? `${item.underlying || 'NIFTY'} ${item.expiry} ${item.strike} ${name}` : name}</span><span class="tk-short">${item ? `${item.strike} ${option}` : option}</span></b><span class="sc-last" data-ltp="${side}">${money(item?.ltp)}</span></header><div class="sc-ticket-buttons"><div class="sc-btn-col sell"><button class="btn btn-danger sc-order-btn ${t.sellShort ? 'short' : ''}" data-order-side="SELL" data-option="${option}" ${ready ? '' : 'disabled'}><span>Sell</span><small title="Margin Dhan blocks to sell (write) the full quantity" data-funds="sell">${t.sell}</small></button></div><div class="sc-lots" title="Sized automatically from your risk rules"><small>Lots · auto</small><output class="input sc-lots-input" data-lots="${side}" aria-label="${option} lots, sized automatically">${size.lots}</output></div><div class="sc-btn-col buy"><button class="btn btn-primary sc-order-btn ${t.buyShort ? 'short' : ''}" data-order-side="BUY" data-option="${option}" ${ready ? '' : 'disabled'}><span>Buy</span><small title="Funds needed to buy the full quantity" data-funds="buy">${t.buy}</small></button></div></div><small data-ticket-note>${t.note}</small></section>`;
+  return html`<section class="panel sc-ticket ${busy ? 'busy' : ''}" data-ticket="${side}"><header><span class="sc-option-tag ${side}">${option}</span><b><span class="tk-full">${item ? `${item.underlying || 'NIFTY'} ${item.expiry} ${item.strike} ${name}` : name}</span><span class="tk-short">${item ? `${item.strike} ${option}` : option}</span></b><span class="sc-last" data-ltp="${side}">${money(item?.ltp)}</span></header><div class="sc-ticket-buttons"><div class="sc-btn-col sell"><button class="btn btn-danger sc-order-btn ${t.sellShort ? 'short' : ''}" data-order-side="SELL" data-option="${option}" ${ready ? '' : 'disabled'}><span>Sell</span><small title="Margin Dhan blocks to sell (write) the full quantity" data-funds="sell">${t.sell}</small></button></div><div class="sc-lots" title="− / + to set lots by hand · tap the label to go back to auto (sized from your risk rules)"><small data-lot-auto="${side}" data-lots-mode="${side}">${size.manual ? 'Lots · manual' : 'Lots · auto'}</small><span class="sc-lot-step"><button type="button" data-lot-step="-1" data-lot-side="${side}" aria-label="${option}: one lot less">−</button><output class="input sc-lots-input" data-lots="${side}" aria-label="${option} lots">${size.lots}</output><button type="button" data-lot-step="1" data-lot-side="${side}" aria-label="${option}: one lot more">+</button></span></div><div class="sc-btn-col buy"><button class="btn btn-primary sc-order-btn ${t.buyShort ? 'short' : ''}" data-order-side="BUY" data-option="${option}" ${ready ? '' : 'disabled'}><span>Buy</span><small title="Funds needed to buy the full quantity" data-funds="buy">${t.buy}</small></button></div></div><small data-ticket-note>${t.note}</small></section>`;
 }
 // Button labels: a lakh or more as ₹14.28L so it fits on a phone button.
 export const compactRupees = n => Math.abs(n) >= 1e5 ? `₹${(Math.round(n / 1e3) / 100).toFixed(2)}L` : rupees(n);
@@ -962,8 +993,10 @@ function ticketText(item, size, lotSize, margin) {
   if (item?.ltp > 0) { const buy = qty * item.ltp; t.buy = rupees(buy); t.buyShort = Number.isFinite(available) && buy > available; }
   if (current && Number.isFinite(current.sell)) { t.sell = compactRupees(current.sell); t.sellShort = Number.isFinite(available) && current.sell > available; }
   else if (item) t.sell = '…';
-  t.note = `${lots} lot${lots === 1 ? '' : 's'} × ${lotSize} · SL ₹${size.sl.toFixed(2)} (−${size.slPct}%) · risk ${rupees(size.risk)} of ${rupees(size.allowed)}`
-    + ` (${size.dailyPct ? `${round2(size.dailyPct)}% ÷ ` : ''}${size.trades} trades) · capital ${rupees(size.capital)}`
+  t.note = (size.manual
+    ? `${lots} lot${lots === 1 ? '' : 's'} × ${lotSize} · manual${size.auto ? ` (auto ${size.auto})` : ''}${size.sl != null ? ` · SL ₹${size.sl.toFixed(2)} (−${size.slPct}%) · risk ${rupees(size.risk)}` : ''} · capital ${rupees(size.capital)}`
+    : `${lots} lot${lots === 1 ? '' : 's'} × ${lotSize} · SL ₹${size.sl.toFixed(2)} (−${size.slPct}%) · risk ${rupees(size.risk)} of ${rupees(size.allowed)}`
+      + ` (${size.dailyPct ? `${round2(size.dailyPct)}% ÷ ` : ''}${size.trades} trades) · capital ${rupees(size.capital)}`)
     // Say which order the funds check is about: a buy can be affordable while writing (selling) is not.
     + (Number.isFinite(available) ? ` · available ${rupees(available)}${t.buyShort ? ' · not enough funds to buy' : t.sellShort ? ' · enough to buy; selling (writing) needs more margin' : ''}` : '');
   return t;
@@ -975,7 +1008,9 @@ function updateTickets(ctx) {
     if (!box) continue;
     box.classList.toggle('busy', !!busy);
     const item = strikeIndex(ctx.data).byId.get(String(ctx.ui[`${side}Id`]));
-    const size = autoSize(item, ctx.data.lotSize, risk), t = ticketText(item, size, ctx.data.lotSize, ctx.ui.margins?.[side]);
+    const size = chosenSize(item, ctx.data.lotSize, risk, ctx.ui.manualLots?.[side] || 0), t = ticketText(item, size, ctx.data.lotSize, ctx.ui.margins?.[side]);
+    const mode = ctx.el.querySelectorAll(`[data-lots-mode="${side}"]`);
+    for (const m of mode) { const text = m.tagName === 'SMALL' ? (size.manual ? 'Lots · manual' : 'Lots · auto') : null; if (text && m.textContent !== text) m.textContent = text; m.classList.toggle('manual', !!size.manual); }
     // The premium moves the lot count; refresh Dhan's sell margin only when the count actually changes.
     if ((ctx.ui.autoLots ||= {})[side] !== size.lots) { ctx.ui.autoLots[side] = size.lots; ctx.ui.refreshMarginsSoon?.([side]); }
     const lotsOut = box.querySelector('[data-lots]');
@@ -991,7 +1026,7 @@ function updateTickets(ctx) {
     for (const b of ctx.el.querySelectorAll(`[data-hdr-btn="${side}"]`)) b.disabled = disabled;
     const hdrLots = ctx.el.querySelector(`[data-hdr-lots="${side}"]`);
     for (const [k, v] of [['buy', t.buy], ['sell', t.sell]]) { const f = ctx.el.querySelector(`[data-hdr-funds="${side}-${k}"]`); if (f && f.textContent !== v) f.textContent = v; }
-    if (hdrLots) { hdrLots.textContent = `${size.lots} lot${size.lots === 1 ? '' : 's'}`; hdrLots.parentElement.title = busy || size.reason || ''; }
+    if (hdrLots) { const text = `${size.lots} lot${size.lots === 1 ? '' : 's'}`; if (hdrLots.textContent !== text) hdrLots.textContent = text; const box = hdrLots.closest('.sc-hdr-order'); if (box) box.title = busy || size.reason || ''; }
     const note = box.querySelector('[data-ticket-note]'), text = busy || t.note;
     if (note && note.textContent !== text) note.textContent = text;
   }
