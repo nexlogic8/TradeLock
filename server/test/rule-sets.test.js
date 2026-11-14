@@ -30,12 +30,12 @@ test('each set saves on its own; `active` follows the switch without a save', t 
   upsertAccount(uid, { broker: 'dhan', clientId: 'C901', accessToken: 'test-token-not-real-0123456789' });
   algo(uid, true);
   const base = getRules(uid).active;
-  saveRules(uid, { ...base, maxLoss: { ...base.maxLoss, mode: 'percent', value: 8 } }, '127.0.0.1', null, 'algo');
+  saveRules(uid, { ...base, lossStreak: { ...base.lossStreak, on: true, value: 7 } }, '127.0.0.1', null, 'algo');   // not a whole-account rule
   saveRules(uid, { ...base, maxTrades: { ...base.maxTrades, on: true, value: 5 } }, '127.0.0.1', null, 'manual');
   let r = getRules(uid);
   assert.equal(r.mode, 'algo');
-  assert.deepEqual([r.active.maxLoss.value, r.active.maxTrades.value], [8, base.maxTrades.value], 'Algo rules in force');
-  assert.deepEqual([r.manual.maxLoss.value, r.manual.maxTrades.value], [base.maxLoss.value, 5], 'Manual rules kept apart');
+  assert.deepEqual([r.active.lossStreak.value, r.active.maxTrades.value], [7, base.maxTrades.value], 'Algo rules in force');
+  assert.deepEqual([r.manual.lossStreak.value, r.manual.maxTrades.value], [base.lossStreak.value, 5], 'Manual rules kept apart');
   algo(uid, false);
   r = getRules(uid);
   assert.equal(r.mode, 'manual');
@@ -60,15 +60,21 @@ test('loosening the set not in force mid-session is not a loosening', t => {
   assert.equal(d.loosenedInSession, undefined);
 });
 
-test('the dashboard shows both rule sets\' daily stop-loss, and which one is in force', async () => {
+test('the daily stop-loss covers the whole account: the Algo set takes the Risk rules page\'s, whatever its own copy says', async () => {
   const { getDashboard } = await import('../src/modules/risk/service.js');
   const uid = createUser({ email: 'sl-sets@rules.test', password: null, name: 'Sets' });
+  upsertAccount(uid, { broker: 'dhan', clientId: 'C903', accessToken: 'test-token-not-real-0123456789' });
   const r = getRules(uid);
   saveRules(uid, { ...r.manual, maxLoss: { on: true, mode: 'amount', value: 3000, action: 'exit' } }, undefined, null, 'manual');
   saveRules(uid, { ...r.algo, maxLoss: { on: true, mode: 'amount', value: 9000, action: 'exit' } }, undefined, null, 'algo');
   const sl = getDashboard(uid, null).stopLosses;
   assert.equal(sl.mode, 'manual', 'no Algo Trading on: the Manual set is in force');
-  assert.deepEqual([sl.manual.on, sl.manual.amount, sl.algo.on, sl.algo.amount], [true, 3000, true, 9000]);
+  assert.deepEqual([sl.manual.on, sl.manual.amount, sl.algo.on, sl.algo.amount], [true, 3000, true, 3000]);
+  algo(uid, true);
+  assert.equal(ruleMode(uid), 'algo');
+  const r2 = getRules(uid);
+  assert.equal(r2.active.maxLoss.value, 3000, 'Algo Trading on: the daily stop-loss from the Risk rules page is in force');
+  assert.equal(r2.active.maxTrades, r2.algo.maxTrades, 'the other rules stay the Algo set own');
 });
 
 test('Overview chart: a second stop-loss line only when the other set\'s stop-loss is on and differs', async () => {
@@ -88,7 +94,7 @@ test('Overview chart: both profit targets, each set its own line; the other set\
   saveRules(uid, { ...r.manual, profitLock: { on: true, mode: 'amount', value: 23193, action: 'pause' } }, undefined, null, 'manual');
   saveRules(uid, { ...r.algo, profitLock: { on: false, mode: 'percent', value: 10, action: 'pause' } }, undefined, null, 'algo');
   const pt = getDashboard(uid, null).profitTargets;
-  assert.deepEqual([pt.manual.on, pt.manual.amount, pt.algo.on, pt.algo.amount], [true, 23193, false, null]);
+  assert.deepEqual([pt.manual.on, pt.manual.amount, pt.algo.on, pt.algo.amount], [true, 23193, true, 23193], 'one profit target for the whole account');
   const d = (manual, algo, mode = 'algo') => ({ limits: { profitLock: (mode === 'algo' ? algo : manual).amount }, profitTargets: { mode, manual, algo } });
   assert.deepEqual(otherTarget(d({ on: true, amount: 23193 }, { on: false, amount: null })), { key: 'manual', amount: 23193 }, 'Algo in force, its target off: Manual line still drawn');
   assert.deepEqual(otherTarget(d({ on: true, amount: 23193 }, { on: true, amount: 15000 })), { key: 'manual', amount: 23193 });

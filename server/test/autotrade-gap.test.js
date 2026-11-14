@@ -241,15 +241,16 @@ test('the stop comes from the Risk rules: no daily stop-loss left → no trade',
   const D7 = '2026-10-20', at = x => Date.parse(`${D7}T${x}+05:30`);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   flatBook();
-  const active = getRules(uid).active;
-  saveRules(uid, { ...active, maxLoss: { ...active.maxLoss, on: true, mode: 'percent', value: 0.1 } });   // ₹200 for the day: ₹0.17 a unit
+  // The daily stop-loss covers the whole account: it is set on the Risk rules page (the Manual set), also for Algo Trading.
+  const manual = getRules(uid).manual;
+  saveRules(uid, { ...manual, maxLoss: { ...manual.maxLoss, on: true, mode: 'percent', value: 0.1 } }, undefined, null, 'manual');   // ₹200 for the day: ₹0.17 a unit
   try {
     const dhan = fakeDhan();
     const r = await scanForEntry(acct, { now: at('09:15:02'), adapter: dhan, pause: noPause, instruments });
     if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
     assert.match(String(r.skipped), /too tight a stop/, JSON.stringify(r));
     assert.ok(!dhan.calls.some(c => c[0] === 'order'), 'no order');
-  } finally { saveRules(uid, active); }
+  } finally { saveRules(uid, manual, undefined, null, 'manual'); }
 });
 
 test('Capital per trade (Risk rules) caps the Gap entry below 80% of the funds', async (t) => {

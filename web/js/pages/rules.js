@@ -36,7 +36,8 @@ function row(key, title, line, r, input, tv) {
 function protCard(d, f, set = 'manual') {
   const broker = d?.broker, label = broker?.label || 'broker', running = !!broker && broker.agentOn !== false;
   // Option SL room sizes manual Power Scalper orders only: not a rule of the Algo Trading set.
-  const keys = ['maxLoss', 'capitalUse', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', ...(set === 'algo' ? [] : ['optionSl']), 'cutoff', 'killSwitch'];
+  const keys = set === 'algo' ? ['capitalUse', 'maxTrades', 'lossStreak', 'cutoff', 'killSwitch']   // P&L rules: Risk rules page
+    : ['maxLoss', 'capitalUse', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', 'optionSl', 'cutoff', 'killSwitch'];
   const on = keys.filter(k => f?.[k]?.on).length;
   const locked = running && d?.agentLock;
   const state = !broker ? ['Not connected', 'grey'] : locked ? ['Locked today', 'amber'] : running ? ['Protecting', ''] : ['Stopped', 'ice'];
@@ -80,12 +81,12 @@ const amountText = (r, capital) => {
 
 const shortAmount = (r, c) => { const v = limitOf(r, c); return v == null ? 'your limit' : inr(v); };
 const LINES = {
-  maxLoss: (f, c) => `Exit all at −${shortAmount(f.maxLoss, c)} today`,
+  maxLoss: (f, c) => `Exit all at −${shortAmount(f.maxLoss, c)} today · whole account`,
   capitalUse: (f, c) => `Use at most ${shortAmount(f.capitalUse, c)} in one trade`,
-  profitLock: (f, c) => `Stop for the day at +${shortAmount(f.profitLock, c)}`,
+  profitLock: (f, c) => `Stop for the day at +${shortAmount(f.profitLock, c)} · whole account`,
   maxTrades: () => 'Pause new orders after this many entries',
   lossStreak: () => 'Stop after this many losses in a row',
-  giveback: () => 'Exit if profit falls this % from its peak',
+  giveback: () => 'Exit if profit falls this % from its peak · whole account',
   optionSl: f => `Stop ${f.optionSl.value}% below the option premium`,
   cutoff: () => 'No new entries after this time',
 };
@@ -97,10 +98,13 @@ function setNote(set, now) {
   const live = set === now;
   return html`
     <div class="rule-sets" id="rule-sets">
-      <p class="muted small" id="rule-set-note"><b>${SET_NAMES[set]} rules.</b> ${live
+      ${set === 'manual'
+        ? html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target and Profit give-back cover your whole account</b> (Manual + Algo trades) and are always in force, whether Algo Trading is on or off.</p>`
+        : html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target and Profit give-back</b> are set on the <a href="/rules" data-nav="rules">Risk rules</a> page and cover your whole account (Manual + Algo trades).</p>`}
+      <p class="muted small" id="rule-set-note"><b>${set === 'manual' ? 'The other rules here are for manual trading.' : `${SET_NAMES[set]} rules.`}</b> ${live
         ? html`In force now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
         : html`Not in force now: they apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}. Edits are saved for then.`}
-      ${set === 'manual' ? html` Algo Trading does not use them: each strategy's own settings on the <a href="/algo" data-nav="algo">AI Algo Trading</a> page size its trades and stops.` : ''}</p>
+      ${set === 'manual' ? html` Algo Trading's own rules are on the <a href="/algo" data-nav="algo">AI Algo Trading</a> page.` : ''}</p>
     </div>`;
 }
 
@@ -118,18 +122,19 @@ function killLine(d) {
 export function rulesPanel(f, { set, now, capital, dash, error = null, pending = null }) {
   const broker = dash?.broker?.label || 'broker';
   const tv = tipValues(f, capital, limitOf, broker);   // numbers for the (i) diagrams
+  const acct = set !== 'algo';   // the whole-account P&L rules are edited on the Risk rules page only
   return html`
     ${pending ? html`<div class="banner amber mb" id="rules-pending">${icon('clock')}<div><b>Changes scheduled for ${longDay(pending)}.</b> You loosened a limit during market hours, so the new rules start next session.</div></div>` : ''}
     <div class="panel pad srules" data-rules-set="${set}">
       ${setNote(set, now)}
       <div class="srules-head"><span class="muted small">Starting capital today</span><span class="srules-save" id="save-msg" aria-live="polite"></span><b class="num">${capital > 0 ? inr(capital) : 'not known yet'}</b></div>
-      ${row('maxLoss', 'Daily stop‑loss', LINES.maxLoss(f, capital), f.maxLoss, moneyInput('maxLoss', f.maxLoss), tv)}
+      ${acct ? row('maxLoss', 'Daily stop‑loss', `${LINES.maxLoss(f, capital)}`, f.maxLoss, moneyInput('maxLoss', f.maxLoss), tv) : ''}
       ${row('capitalUse', 'Capital per trade', LINES.capitalUse(f, capital), f.capitalUse, moneyInput('capitalUse', f.capitalUse), tv)}
-      ${row('profitLock', 'Profit target', LINES.profitLock(f, capital), f.profitLock, moneyInput('profitLock', f.profitLock), tv)}
+      ${acct ? row('profitLock', 'Profit target', `${LINES.profitLock(f, capital)}`, f.profitLock, moneyInput('profitLock', f.profitLock), tv) : ''}
       ${row('maxTrades', 'Trades per day', LINES.maxTrades(), f.maxTrades, countInput('maxTrades', f.maxTrades, 'trades'), tv)}
       ${row('lossStreak', 'Losing streak', LINES.lossStreak(), f.lossStreak, countInput('lossStreak', f.lossStreak, 'losses'), tv)}
-      ${row('giveback', 'Profit give-back', LINES.giveback(f, capital), f.giveback,
-        html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-giveback" data-value="giveback" inputmode="numeric" value="${f.giveback.value}" aria-label="Give-back percent"></div>`, tv)}
+      ${acct ? row('giveback', 'Profit give-back', `${LINES.giveback(f, capital)}`, f.giveback,
+        html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-giveback" data-value="giveback" inputmode="numeric" value="${f.giveback.value}" aria-label="Give-back percent"></div>`, tv) : ''}
       ${set === 'algo' ? '' : row('optionSl', 'Option SL room', LINES.optionSl(f, capital), f.optionSl,
         html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-optionSl" data-value="optionSl" inputmode="decimal" value="${f.optionSl.value}" aria-label="Option stop-loss room percent"></div>`, tv)}
       ${row('cutoff', 'Cutoff time', LINES.cutoff(), f.cutoff,

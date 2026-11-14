@@ -50,13 +50,10 @@ const fundsMissing = d => (d.broker.status === 'connected'
   : d.broker.status === 'expired' ? `Reconnect ${d.broker.label} to see it`
   : `${d.broker.label} is not responding`);
 
-/** Manual trading and Algo Trading stop-loss (Risk rules), the one in force now marked. */
+/** The daily stop-loss covers the whole account (Manual + Algo trades), set on Risk rules. */
 function slSets(sl) {
-  const line = (k, name) => {
-    const x = sl[k], amount = !x.on ? 'Off' : x.amount ? inr(x.amount) : `${x.value}%`;
-    return html`<div class="sl-set ${sl.mode === k ? 'now' : ''}"><span>${name}${sl.mode === k ? html` <span class="pill sm">Active</span>` : ''}</span><b class="num">${amount}</b></div>`;
-  };
-  return html`<div class="sl-sets"><a href="/rules" data-nav="rules">${line('manual', 'Manual SL')}${line('algo', 'Algo SL')}</a></div>`;
+  const x = sl.manual, amount = !x.on ? 'Off' : x.amount ? inr(x.amount) : `${x.value}%`;
+  return html`<div class="sl-sets"><a href="/rules" data-nav="rules"><div class="sl-set now"><span>Manual + Algo <span class="pill sm">Whole account</span></span><b class="num">${amount}</b></div></a></div>`;
 }
 
 /** Legend: the Algo and Manual parts of the day's P&L with their latest values (once Algo Trading has traded today). */

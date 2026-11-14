@@ -311,6 +311,7 @@ html.paying body { overflow: hidden; }
 .rule-sets { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 4px 0 14px; border-bottom: 1px solid var(--line); }
 .rule-sets .seg button { height: 36px; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
 .rule-sets p { margin: 0; }
+.rule-sets p.rule-account { flex-basis: 100%; color: var(--fg); padding: 8px 12px; border-radius: 10px; background: var(--mint-soft); border: 1px solid color-mix(in srgb, var(--mint) 35%, transparent); }
 .srules-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--line); }
 .srules-head b { font-size: 17px; }
 .srule { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--line); }

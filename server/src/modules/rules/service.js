@@ -141,6 +141,10 @@ export const ensureRules = userId => {
  * rules already hit, kill switch) stays one per account.
  */
 export const RULE_SETS = ['manual', 'algo'];
+// P&L rules for the whole account (Manual + Algo trades), always: set once on the Risk rules page (the Manual set);
+// the Algo set takes them from there whatever its own copy says.
+export const ACCOUNT_RULES = ['maxLoss', 'profitLock', 'giveback'];
+const withAccountRules = (set, manual) => ({ ...set, ...Object.fromEntries(ACCOUNT_RULES.filter(k => manual[k]).map(k => [k, manual[k]])) });
 const COLUMN = { manual: 'config', algo: 'algo_config' };
 export const ruleMode = userId =>
   stmt('SELECT 1 FROM broker_accounts WHERE user_id = ? AND algo_on = 1 AND agent_on = 1 LIMIT 1').get(userId) ? 'algo' : 'manual';
@@ -161,7 +165,8 @@ function ruleSets(userId) {
     markDirty(userId);
     row = { ...row, config: row.pending };
   }
-  const sets = deepFreeze({ manual: JSON.parse(row.config), algo: JSON.parse(row.algo_config || row.config) });
+  const manual = JSON.parse(row.config);
+  const sets = deepFreeze({ manual, algo: withAccountRules(JSON.parse(row.algo_config || row.config), manual) });
   cache.set(userId, sets);
   return sets;
 }
@@ -185,13 +190,13 @@ function deepFreeze(o) {
 export function saveRules(userId, input, ip, capital = null, set = ruleMode(userId)) {
   set = v.oneOf(set, 'set', RULE_SETS);
   const next = normalizeRules(input);
-  const before = getRules(userId)[set];
-  // Loosening counts only for the set in force: the other one protects nothing today.
-  const loosened = marketOpen() && set === ruleMode(userId) && loosens(before, next, capital);
+  const was = getRules(userId), before = was[set];
   stmt(`UPDATE risk_rules SET ${COLUMN[set]} = ?, pending = NULL, pending_from = NULL, updated_at = ? WHERE user_id = ?`).run(JSON.stringify(next), Date.now(), userId);
   forget(userId);
-  audit(userId, 'rules.updated', { set, before, after: next, loosenedInSession: loosened || undefined }, ip);
   const now = getRules(userId);
+  // Loosening counts only for the rules in force (the P&L rules from the Manual set are in force in both modes).
+  const loosened = marketOpen() && loosens(was.active, now.active, capital);
+  audit(userId, 'rules.updated', { set, before, after: next, loosenedInSession: loosened || undefined }, ip);
   emit(userId, 'rules', now.active);
   return { ...now, deferred: false };
 }
