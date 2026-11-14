@@ -73,9 +73,12 @@ const INDICES = [['NIFTY','NIFTY 50'],['BANKNIFTY','BANK NIFTY'],['SENSEX','SENS
 const MCX_LIST = [['CRUDEOILM','CRUDE OIL MINI'],['GOLDM','GOLD MINI']];
 const ALL_UNDERLYINGS = [...INDICES, ...MCX_LIST];
 const isMcxKey = key => MCX_LIST.some(([k]) => k === key);
-const mcxOn = () => { try { return localStorage.getItem('tradelock.scalper.mcx') === 'on'; } catch { return false; } };
-/** The instruments the page offers now: the indices, plus MCX when its switch is on (or MCX is the one open). */
-const underlyingsFor = current => (mcxOn() || isMcxKey(current) ? ALL_UNDERLYINGS : INDICES);
+// The market switch at the start of the toolbar: NIFTY (the indices) | MCX (the commodities). Each side shows only its
+// own instruments and reopens the one last used on it.
+const lastOf = mcx => { try { const v = localStorage.getItem(mcx ? 'tradelock.scalper.lastMcx' : 'tradelock.scalper.lastIndex'); return (mcx ? MCX_LIST : INDICES).some(([k]) => k === v) ? v : (mcx ? 'CRUDEOILM' : 'NIFTY'); } catch { return mcx ? 'CRUDEOILM' : 'NIFTY'; } };
+const underlyingsFor = current => (isMcxKey(current) ? MCX_LIST : INDICES);
+const marketSwitch = current => html`<div class="seg sc-market" role="group" aria-label="Market">${[[false, 'NIFTY', 'Indices: NIFTY 50, BANK NIFTY, SENSEX'], [true, 'MCX', 'MCX commodity options: Crude Oil Mini and Gold Mini (09:00 to 23:30 / 23:55)']].map(([mcx, label, hint]) =>
+  html`<button type="button" data-underlying="${isMcxKey(current) === mcx ? current : lastOf(mcx)}" aria-pressed="${String(isMcxKey(current) === mcx)}" title="${hint}"${mcx ? ' class="sc-mcx"' : ''}>${label}</button>`)}</div>`;
 // Phones show one pane at a time: a chart or the option chain.
 export const MOBILE_PANES = [['spot', 'Index'], ['ce', 'CE'], ['pe', 'PE'], ['chain', 'Chain']];
 export const LAYOUTS = [['classic', 'Classic', 'layoutClassic', 'Classic: 3 charts, option chain and order tickets'], ['split', 'Split', 'layoutSplit', 'Split: index chart left, Call over Put right, one-tap orders on each chart']];
@@ -194,7 +197,7 @@ export default {
     ctx.ui.error = '';
     // Opens on the interval and index last chosen in this browser (5-minute NIFTY the first time).
     if (!INTERVALS.some(([v]) => v === ctx.ui.interval)) ctx.ui.interval = pref('tradelock.scalper.interval', INTERVALS.map(([v]) => v), '5');
-    ctx.ui.underlying = ctx.ui.underlying || pref('tradelock.scalper.underlying', (mcxOn() ? ALL_UNDERLYINGS : INDICES).map(([k]) => k), 'NIFTY');
+    ctx.ui.underlying = ctx.ui.underlying || pref('tradelock.scalper.underlying', ALL_UNDERLYINGS.map(([k]) => k), 'NIFTY');
     ctx.ui.strategies = ctx.ui.strategies || strategyPrefs();
     ctx.ui.mSide = ctx.ui.mSide === 'pe' ? 'pe' : 'ce';
     ctx.ui.layout = ctx.ui.layout || pref('tradelock.scalper.layout', LAYOUTS.map(([k]) => k), 'classic');
@@ -233,8 +236,8 @@ export default {
       ${scmTop(ctx)}
       <section class="panel scalper-toolbar">
         <div class="scalper-symbol"><span class="scalper-logo">${icon('chart')}</span><b>Power Scalper</b><span class="pill sm ice">Dhan</span></div>
+        ${marketSwitch(current)}
         <div class="seg sc-underlyings" role="group" aria-label="Index">${underlyingsFor(current).map(([key, label]) => html`<button type="button" data-underlying="${key}" aria-pressed="${String(current === key)}"${isMcxKey(key) ? ' class="sc-mcx"' : ''}>${label}</button>`)}</div>
-        <button type="button" class="sc-strategy sc-mcx-switch" role="switch" data-mcx-toggle aria-checked="${String(mcxOn() || isMcxKey(current))}" title="Show MCX commodity options: Crude Oil Mini and Gold Mini (09:00 to 23:30 / 23:55)"><i aria-hidden="true"></i>MCX</button>
         <label class="scalper-control"><small>Expiry</small><select class="input" id="sc-expiry">${d.expiries.map(x => html`<option value="${x}" ${x === d.expiry ? 'selected' : ''}>${x}</option>`)}</select></label>
         <label class="scalper-control"><small>Chart interval</small><select class="input" id="sc-interval">${INTERVALS.map(([v,l]) => html`<option value="${v}" ${v === ctx.ui.interval ? 'selected' : ''}>${l}</option>`)}</select></label>
         <div class="scalper-control sc-span"><small>Session</small><div class="seg" role="group" aria-label="Chart history">${SPANS.map(([k, l, hint]) => html`<button type="button" data-span="${k}" aria-pressed="${String(chartSpan === k)}" title="${hint}">${l}</button>`)}</div></div>
@@ -251,7 +254,7 @@ export default {
       <div class="scalper-workspace mpane-${ctx.ui.mPane || 'spot'} ${ctx.ui.panelOpen === false ? 'panel-closed' : ''}">
         <section class="scalper-chart-grid mside-${ctx.ui.mSide || 'ce'}" aria-label="Live ${indexName} and option charts">
           <div class="scm-bar scm-index">
-            ${scmMenu('index', 'Index', current, underlyingsFor(current).map(([key, label]) => [key, label]))}
+            ${scmMenu('index', 'Index', current, ALL_UNDERLYINGS.map(([key, label]) => [key, label]))}
             <b class="scm-px" data-spot>${money(d.underlying.ltp)}</b>
             ${isAdmin() ? html`<button type="button" class="scm-tool" data-scm-strats aria-haspopup="menu" aria-expanded="false" title="Chart strategies">Strategy<span aria-hidden="true">▾</span></button>` : ''}
             <button type="button" class="scm-tool scm-fx" data-studies="spot" aria-haspopup="dialog" title="Indicators">ƒx</button>
@@ -627,19 +630,14 @@ export default {
         showError('');
       } catch (e) { ui.orderInFlight = 0; updateTickets(ctx); showError(e.message); toastError(e); }
     }
-    // MCX switch: show (or hide) Crude Oil Mini and Gold Mini. Switching it off while on one of them goes back to NIFTY.
-    on(el, 'click', '[data-mcx-toggle]', () => {
-      const next = !(mcxOn() || isMcxKey(ui.underlying));
-      savePref('tradelock.scalper.mcx', next ? 'on' : 'off');
-      if (!next && isMcxKey(ui.underlying)) { $('[data-underlying="NIFTY"]', el)?.click(); return; }
-      ctx.paint();
-    }, signal);
-    // Index switch: reload the chain, charts and live feed for NIFTY / BANKNIFTY / SENSEX (and MCX: CRUDEOILM / GOLDM).
+    // Index switch: reload the chain, charts and live feed for NIFTY / BANKNIFTY / SENSEX, or MCX: CRUDEOILM / GOLDM
+    // (the NIFTY | MCX market switch carries the instrument last used on that side).
     on(el, 'click', '[data-underlying]', async (_, button) => {
       const key = button.dataset.underlying, previous = ui.underlying;
       if (key === previous || ui.switching) return;
       ui.switching = true; expirySeq++;
       ui.underlying = key; savePref('tradelock.scalper.underlying', key);
+      savePref(isMcxKey(key) ? 'tradelock.scalper.lastMcx' : 'tradelock.scalper.lastIndex', key);
       Object.assign(ui, { margins:{}, autoLots:{}, chainKey:null, chainScroll:null, lastTickAtById:{}, lastCandleRefreshAtById:{} });
       showError('');
       $('.scalper-workspace', el)?.classList.add('is-switching');
@@ -722,7 +720,8 @@ export default {
       for (const o of $$(`[data-scm-pick="${key}"]`, el)) o.setAttribute('aria-checked', String(o === b));
       const label = $(`[data-scm-menu-label="${key}"]`, el); if (label) label.textContent = b.dataset.short;
       closeMenus();
-      if (key === 'index') $(`[data-underlying="${value}"]`, el)?.click();
+      // An instrument of the other market has no button showing: send it through that market's switch button.
+      if (key === 'index') { const b = $(`.sc-underlyings [data-underlying="${value}"]`, el) || $(`.sc-market [data-underlying]${isMcxKey(value) ? '.sc-mcx' : ':not(.sc-mcx)'}`, el); if (b) { b.dataset.underlying = value; b.click(); } }
       else if (key === 'span') $(`[data-span="${value}"]`, el)?.click();
       else if (key === 'interval') { const main = $('#sc-interval', el); if (main && main.value !== value) { main.value = value; main.dispatchEvent(new Event('change', { bubbles:true })); } }
     }, signal);
