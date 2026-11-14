@@ -237,14 +237,6 @@ export default {
         </div>
       </section>
 
-      <section class="panel pad algo-manual-card">
-        <div class="algo-strat algo-manual ${a?.manualOn ? 'on' : ''}">
-          <div class="algo-strat-head">
-            <span class="algo-strat-name"><b>Manual trades</b><small>${a?.manualOn ? 'Allowed alongside Algo Trading. A manual position does not stop Algo entries; it uses the day’s loss limit and counts toward the trade cap.' : 'Blocked while Algo Trading is on: manual orders are refused and manual positions closed.'} On or off at any time.</small></span>
-            <button class="switch" type="button" role="switch" aria-checked="${String(!!a?.manualOn)}" aria-label="Allow manual trades while Algo Trading is on" data-manual-toggle ${a ? '' : 'disabled'}></button>
-          </div>
-        </div>
-      </section>
 
 
       ${ctx.ui.algoRules ? html`
@@ -328,17 +320,6 @@ export default {
 
     // Android app: ring the real trade alarm once, to check sound, vibration and the full-screen alert.
     on(el, 'click', '[data-alarm-test-algo]', () => window.TradeLockApp?.testTradeAlarm?.(), signal);
-    on(el, 'click', '[data-manual-toggle]', async (_, b) => {
-      const id = ctx.data.account?.id, next = b.getAttribute('aria-checked') !== 'true';
-      if (!id) return;
-      b.disabled = true;
-      try {
-        const { account } = await post(`/brokers/${id}/strategies`, { manual: next });
-        syncTopbar(account);
-        toast(next ? 'Manual trades allowed alongside Algo Trading.' : 'Manual trades blocked while Algo Trading is on.', 'ok');
-        await refresh();
-      } catch (err) { toastError(err); b.disabled = false; }
-    }, signal);
 
     // Paper | Real: which account Algo Trading trades (only with nothing open; the server checks). Without a broker,
     // Paper sets up a Paper account (prices from TradeLock's market data).
