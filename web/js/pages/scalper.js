@@ -1,5 +1,5 @@
 ﻿import { html, $, on, $$ } from '../core/dom.js';
-import { get, post } from '../core/api.js';
+import { get, post, put } from '../core/api.js';
 import { icon } from '../ui/icons.js';
 import { toast, toastError } from '../ui/toast.js';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, createSeriesMarkers } from '../vendor/lightweight-charts.standalone.production.mjs';
@@ -161,6 +161,17 @@ const indicatorPrefs = (market = currentMarket) => {
   return out;
 };
 const savePref = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private window */ } };
+// Lots set by hand: kept for this instrument and side (0 = auto) and saved for the user, so the page opens with them
+// again on the web and in the app. Quick − / + taps send one save, half a second after the last.
+const lotSaves = {};
+function rememberLots(ui, side) {
+  const key = ui.underlying, lots = ui.manualLots?.[side] || 0;
+  if (!key) return;
+  ui.savedLots = { ...ui.savedLots, [key]: { ...(ui.savedLots?.[key] || {}), [side]: lots } };
+  if (!lots) delete ui.savedLots[key][side];
+  clearTimeout(lotSaves[`${key}|${side}`]);
+  lotSaves[`${key}|${side}`] = setTimeout(() => put('/scalper/lots', { underlying:key, side, lots }).catch(() => { /* kept for this visit */ }), 500);
+}
 // The chosen expiry, remembered per index (NIFTY / BANKNIFTY / SENSEX); '' forgets it.
 const savedExpiryFor = underlying => { try { const v = localStorage.getItem(`tradelock.scalper.expiry.${underlying}`) || ''; return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ''; } catch { return ''; } };
 const saveExpiry = (underlying, expiry) => { try { if (expiry) localStorage.setItem(`tradelock.scalper.expiry.${underlying}`, expiry); else localStorage.removeItem(`tradelock.scalper.expiry.${underlying}`); } catch { /* private window */ } };
@@ -244,6 +255,9 @@ export default {
     if (savedExpiry && data.expiry !== savedExpiry) saveExpiry(ctx.ui.underlying, '');   // it expired: back to the nearest
     data.underlying.candles = [];
     data.selectedCharts = { ...data.selectedCharts, ce: [], pe: [] };
+    // Lots set by hand, remembered per instrument and side for this user (web and app); auto when none saved.
+    if (!ctx.ui.savedLots) { try { ctx.ui.savedLots = (await get('/scalper/lots')).lots || {}; } catch { ctx.ui.savedLots = {}; } }
+    ctx.ui.manualLots = { ...(ctx.ui.savedLots[ctx.ui.underlying] || {}) };
     applySnapshot(ctx.ui, data);
     ctx.ui.chartsPending = true;
     return data;
@@ -631,12 +645,14 @@ export default {
       const side = button.dataset.lotSide, item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`]));
       const now = sizeOf(ctx, side, item).lots || 0, step = Number(button.dataset.lotStep);
       ui.manualLots = { ...ui.manualLots, [side]: Math.min(500, Math.max(1, now + step)) };
+      rememberLots(ui, side);
       updateTickets(ctx); refreshMarginsSoon([side]);
     }, signal);
     on(el, 'click', '[data-lot-auto]', (_, label) => {
       const side = label.dataset.lotAuto;
       if (!ui.manualLots?.[side]) return;
       ui.manualLots = { ...ui.manualLots, [side]: 0 };
+      rememberLots(ui, side);
       updateTickets(ctx); refreshMarginsSoon([side]);
       toast(`${side.toUpperCase()} lots back to auto (from your risk rules).`, 'ok');
     }, signal);
@@ -681,7 +697,7 @@ export default {
       // NIFTY ↔ MCX: the charts take that market's own setup.
       const marketChanged = marketOf(key) !== currentMarket;
       if (marketChanged) { currentMarket = marketOf(key); ui.indicators = indicatorPrefs(); ui.indicatorsMarket = currentMarket; }
-      Object.assign(ui, { margins:{}, autoLots:{}, manualLots:{}, chainKey:null, chainScroll:null, lastTickAtById:{}, lastCandleRefreshAtById:{} });
+      Object.assign(ui, { margins:{}, autoLots:{}, manualLots:{ ...(ui.savedLots?.[key] || {}) }, chainKey:null, chainScroll:null, lastTickAtById:{}, lastCandleRefreshAtById:{} });
       showError('');
       $('.scalper-workspace', el)?.classList.add('is-switching');
       try {
@@ -701,6 +717,7 @@ export default {
         if (marketChanged) ui.applyMarketSetup?.();
       } catch (e) {
         ui.underlying = previous; savePref('tradelock.scalper.underlying', previous); showError(e.message);
+        ui.manualLots = { ...(ui.savedLots?.[previous] || {}) };
         if (marketChanged) { currentMarket = marketOf(previous); ui.indicators = indicatorPrefs(); ui.indicatorsMarket = currentMarket; }
         $('.scalper-workspace', el)?.classList.remove('is-switching');
       } finally { ui.switching = false; }

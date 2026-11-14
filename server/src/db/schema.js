@@ -840,4 +840,13 @@ export const MIGRATIONS = [
   `ALTER TABLE broker_accounts ADD COLUMN algo_grid TEXT;`,
   // Intraday P&L split: the Algo Trading part of each point (manual = pnl − algo; null = recorded before the split).
   `ALTER TABLE pnl_points ADD COLUMN algo REAL;`,
+  // Power Scalper: lots set by hand, remembered per user, instrument (NIFTY, CRUDEOILM...) and side (ce / pe).
+  `CREATE TABLE scalper_lots (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    underlying TEXT NOT NULL,
+    side       TEXT NOT NULL CHECK (side IN ('ce', 'pe')),
+    lots       INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, underlying, side)
+  ) WITHOUT ROWID;`,
 ];

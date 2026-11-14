@@ -34,7 +34,7 @@ test('SENSEX chain loads from Dhan index 51 with BSE contracts and the BSE lot s
   let source=readFileSync(file,'utf8').replace("import { accountFor, adapterFor } from '../broker/registry.js';",'const {accountFor,adapterFor}=globalThis.__underlyingRouteTest;');
   source=`// underlying route test\n${source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`)}`;
   const {scalperRoutes}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   try {
     const data=await routes.get('/api/scalper')({user:{id:4242},query:{underlying:'SENSEX',interval:'5'}});
     assert.deepEqual(calls.filter(c=>c[0]!=='candles').map(c=>c.slice(0,2)),[['expiries',51],['chain',51]]);
@@ -65,7 +65,7 @@ test('a Dhan 5xx outage serves the last good chain (marked stale) instead of fai
   let source=readFileSync(file,'utf8').replace("import { accountFor, adapterFor } from '../broker/registry.js';",'const {accountFor,adapterFor}=globalThis.__underlyingRouteTest;');
   source=`// stale chain test\n${source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`)}`;
   const {scalperRoutes}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   try {
     const ok=await routes.get('/api/scalper')({user:{id:5151},query:{charts:'0',expiry:'2026-10-20'}});
     assert.equal(ok.stale,false);
@@ -93,7 +93,7 @@ test('preloaded indices stay valid together; the named index picks NSE or BSE fo
   let source=readFileSync(file,'utf8').replace("import { accountFor, adapterFor } from '../broker/registry.js';",'const {accountFor,adapterFor}=globalThis.__underlyingRouteTest;');
   source=`// preload test\n${source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`)}`;
   const {scalperRoutes}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   try {
     await routes.get('/api/scalper')({user:{id:6161},query:{charts:'0',underlying:'NIFTY'}});
     await routes.get('/api/scalper')({user:{id:6161},query:{charts:'0',underlying:'SENSEX'}});
@@ -122,7 +122,7 @@ test('MCX: CRUDEOILM chain sits on its live near-month future (MCX_COMM); lots a
   let source=readFileSync(file,'utf8').replace("import { accountFor, adapterFor } from '../broker/registry.js';",'const {accountFor,adapterFor}=globalThis.__underlyingRouteTest;');
   source=`// mcx test\n${source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`)}`;
   const {scalperRoutes}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  const routes=new Map(); scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   try {
     const data=await routes.get('/api/scalper')({user:{id:7171},query:{underlying:'CRUDEOILM',interval:'5'}});
     assert.deepEqual(calls.filter(c=>c[0]==='expiries'||c[0]==='chain').map(c=>c.slice(0,3)),[['expiries',573423,'MCX_COMM'],['chain',573423,'MCX_COMM']],'the live future, not the expired one');

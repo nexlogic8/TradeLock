@@ -18,7 +18,7 @@ async function harness(adapter) {
   source=`// orb5 route test ${Math.random()}\n${source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`)}`;
   const {scalperRoutes}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const routes=new Map();
-  scalperRoutes({get:(path,fn)=>routes.set(`GET ${path}`,fn),post:(path,fn)=>routes.set(`POST ${path}`,fn)});
+  scalperRoutes({get:(path,fn)=>routes.set(`GET ${path}`,fn),post:(path,fn)=>routes.set(`POST ${path}`,fn),put:(path,fn)=>routes.set(`PUT ${path}`,fn)});
   return routes;
 }
 // One user per test: the save route allows 6 runs a minute per user.

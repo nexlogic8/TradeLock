@@ -11,7 +11,7 @@ import { endAllSessions } from './session.js';
 // Personal and trading data removed outright.
 const ERASE = [
   'risk_rules', 'day_state', 'pnl_points', 'trades', 'notifications', 'emergency_actions',
-  'broker_fills', 'broker_pnl_days', 'broker_sync', 'password_resets', 'affiliates',
+  'broker_fills', 'broker_pnl_days', 'broker_sync', 'password_resets', 'affiliates', 'scalper_lots',
 ];
 
 export function deleteAccount(userId, { confirm, code } = {}, ip = null) {

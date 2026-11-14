@@ -23,7 +23,7 @@ test('Scalper routes reuse histories and chain, refresh explicitly, and check co
   source = source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`);
   const {scalperRoutes} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const routes = new Map();
-  scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   const page = routes.get('/api/scalper'), chart = routes.get('/api/scalper/candles');
   const ctx = {user:{id:91234},query:{interval:'5'}};
   try {
@@ -71,7 +71,7 @@ ${source}`;
   source = source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`);
   const {scalperRoutes} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const routes = new Map();
-  scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   const page = routes.get('/api/scalper');
   const warn = console.warn; console.warn = () => {};
   try {
@@ -103,7 +103,7 @@ test('Scalper margin route sizes lots into units and returns Dhan buy and sell f
   source = `// margin test\n${source.replace(/from '([^']+)'/g,(_,path)=>`from '${new URL(path,file).href}'`)}`;
   const {scalperRoutes} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const routes = new Map();
-  scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{}});
+  scalperRoutes({get:(path,fn)=>routes.set(path,fn),post:()=>{},put:()=>{}});
   const user = {id:91236};
   try {
     await assert.rejects(routes.get('/api/scalper/margin')({user,query:{securityId:'401',lots:'1',price:'100'}}),/Reload the option chain/);
