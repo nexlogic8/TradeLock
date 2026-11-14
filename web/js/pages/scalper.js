@@ -68,7 +68,14 @@ export function runningTrade(state, ui = {}) {
   if (ui.orderInFlight && Date.now() - ui.orderInFlight < 20_000) return 'Your last order is being confirmed by the broker…';
   return '';
 }
-const UNDERLYINGS = [['NIFTY','NIFTY 50'],['BANKNIFTY','BANK NIFTY'],['SENSEX','SENSEX']];
+const INDICES = [['NIFTY','NIFTY 50'],['BANKNIFTY','BANK NIFTY'],['SENSEX','SENSEX']];
+// MCX commodity options (server: scalper/underlyings.js MCX_UNDERLYINGS), shown when the MCX switch is on.
+const MCX_LIST = [['CRUDEOILM','CRUDE OIL MINI'],['GOLDM','GOLD MINI']];
+const ALL_UNDERLYINGS = [...INDICES, ...MCX_LIST];
+const isMcxKey = key => MCX_LIST.some(([k]) => k === key);
+const mcxOn = () => { try { return localStorage.getItem('tradelock.scalper.mcx') === 'on'; } catch { return false; } };
+/** The instruments the page offers now: the indices, plus MCX when its switch is on (or MCX is the one open). */
+const underlyingsFor = current => (mcxOn() || isMcxKey(current) ? ALL_UNDERLYINGS : INDICES);
 // Phones show one pane at a time: a chart or the option chain.
 export const MOBILE_PANES = [['spot', 'Index'], ['ce', 'CE'], ['pe', 'PE'], ['chain', 'Chain']];
 export const LAYOUTS = [['classic', 'Classic', 'layoutClassic', 'Classic: 3 charts, option chain and order tickets'], ['split', 'Split', 'layoutSplit', 'Split: index chart left, Call over Put right, one-tap orders on each chart']];
@@ -77,6 +84,8 @@ const RAIL = [['chain', 'Option chain', 'optionChain'], ['positions', 'Positions
 const SIDE_PANELS = [['chain','Option chain'],['positions','Positions'],['both','Both']];
 const spotId = d => String(d?.underlying?.securityId || '13');
 const optionSegment = d => d?.optionSegment || 'NSE_FNO';
+// The spot chart's segment: IDX_I for an index, MCX_COMM for the future an MCX chain sits on.
+const spotSegment = d => d?.underlying?.exchangeSegment || 'IDX_I';
 const pref = (key, allowed, fallback) => { try { const v = localStorage.getItem(key); return allowed.includes(v) ? v : fallback; } catch { return fallback; } };
 // Chart strategies: each can be switched on or off; the choice is remembered in this browser.
 export const STRATEGIES = [
@@ -185,7 +194,7 @@ export default {
     ctx.ui.error = '';
     // Opens on the interval and index last chosen in this browser (5-minute NIFTY the first time).
     if (!INTERVALS.some(([v]) => v === ctx.ui.interval)) ctx.ui.interval = pref('tradelock.scalper.interval', INTERVALS.map(([v]) => v), '5');
-    ctx.ui.underlying = ctx.ui.underlying || pref('tradelock.scalper.underlying', UNDERLYINGS.map(([k]) => k), 'NIFTY');
+    ctx.ui.underlying = ctx.ui.underlying || pref('tradelock.scalper.underlying', (mcxOn() ? ALL_UNDERLYINGS : INDICES).map(([k]) => k), 'NIFTY');
     ctx.ui.strategies = ctx.ui.strategies || strategyPrefs();
     ctx.ui.mSide = ctx.ui.mSide === 'pe' ? 'pe' : 'ce';
     ctx.ui.layout = ctx.ui.layout || pref('tradelock.scalper.layout', LAYOUTS.map(([k]) => k), 'classic');
@@ -224,7 +233,8 @@ export default {
       ${scmTop(ctx)}
       <section class="panel scalper-toolbar">
         <div class="scalper-symbol"><span class="scalper-logo">${icon('chart')}</span><b>Power Scalper</b><span class="pill sm ice">Dhan</span></div>
-        <div class="seg sc-underlyings" role="group" aria-label="Index">${UNDERLYINGS.map(([key, label]) => html`<button type="button" data-underlying="${key}" aria-pressed="${String(current === key)}">${label}</button>`)}</div>
+        <div class="seg sc-underlyings" role="group" aria-label="Index">${underlyingsFor(current).map(([key, label]) => html`<button type="button" data-underlying="${key}" aria-pressed="${String(current === key)}"${isMcxKey(key) ? ' class="sc-mcx"' : ''}>${label}</button>`)}</div>
+        <button type="button" class="sc-strategy sc-mcx-switch" role="switch" data-mcx-toggle aria-checked="${String(mcxOn() || isMcxKey(current))}" title="Show MCX commodity options: Crude Oil Mini and Gold Mini (09:00 to 23:30 / 23:55)"><i aria-hidden="true"></i>MCX</button>
         <label class="scalper-control"><small>Expiry</small><select class="input" id="sc-expiry">${d.expiries.map(x => html`<option value="${x}" ${x === d.expiry ? 'selected' : ''}>${x}</option>`)}</select></label>
         <label class="scalper-control"><small>Chart interval</small><select class="input" id="sc-interval">${INTERVALS.map(([v,l]) => html`<option value="${v}" ${v === ctx.ui.interval ? 'selected' : ''}>${l}</option>`)}</select></label>
         <div class="scalper-control sc-span"><small>Session</small><div class="seg" role="group" aria-label="Chart history">${SPANS.map(([k, l, hint]) => html`<button type="button" data-span="${k}" aria-pressed="${String(chartSpan === k)}" title="${hint}">${l}</button>`)}</div></div>
@@ -241,7 +251,7 @@ export default {
       <div class="scalper-workspace mpane-${ctx.ui.mPane || 'spot'} ${ctx.ui.panelOpen === false ? 'panel-closed' : ''}">
         <section class="scalper-chart-grid mside-${ctx.ui.mSide || 'ce'}" aria-label="Live ${indexName} and option charts">
           <div class="scm-bar scm-index">
-            ${scmMenu('index', 'Index', current, UNDERLYINGS.map(([key, label]) => [key, label]))}
+            ${scmMenu('index', 'Index', current, underlyingsFor(current).map(([key, label]) => [key, label]))}
             <b class="scm-px" data-spot>${money(d.underlying.ltp)}</b>
             ${isAdmin() ? html`<button type="button" class="scm-tool" data-scm-strats aria-haspopup="menu" aria-expanded="false" title="Chart strategies">Strategy<span aria-hidden="true">▾</span></button>` : ''}
             <button type="button" class="scm-tool scm-fx" data-studies="spot" aria-haspopup="dialog" title="Indicators">ƒx</button>
@@ -254,7 +264,7 @@ export default {
             <button type="button" class="scm-swap" data-mside-toggle title="Switch between Call and Put" aria-label="Switch between Call and Put">⇅</button>
           </div>
           ${chartPanel('CALL', ce, 'ce', ctx.ui.ceCandles, d.underlying.ltp, ctx.ui.interval, headerOrder(ctx, ce, 'ce'), ctx.ui.indicators)}
-          ${chartPanel(indexName, { symbol:indexName, ltp:d.underlying.ltp, change:0 }, 'spot', d.underlying.candles, d.underlying.ltp, ctx.ui.interval, null, ctx.ui.indicators)}
+          ${chartPanel(indexName, { symbol:indexName, ltp:d.underlying.ltp, change:0, exchangeSegment:spotSegment(d) }, 'spot', d.underlying.candles, d.underlying.ltp, ctx.ui.interval, null, ctx.ui.indicators)}
           ${chartPanel('PUT', pe, 'pe', ctx.ui.peCandles, d.underlying.ltp, ctx.ui.interval, headerOrder(ctx, pe, 'pe'), ctx.ui.indicators)}
         </section>
         <aside class="panel scalper-chain side-${sidePanel} ${ctx.ui.loadingExpiry ? 'is-loading' : ''}" aria-busy="${ctx.ui.loadingExpiry ? 'true' : 'false'}">
@@ -362,7 +372,7 @@ export default {
     // Preload the other indices (one at a time) and keep them fresh, so switching index is instant.
     const preload = async () => {
       await ui.chartsLoading;   // this index's own charts first: Dhan answers history requests one at a time
-      for (const [key] of UNDERLYINGS) {
+      for (const [key] of underlyingsFor(ui.underlying)) {
         if (signal.aborted) return;
         const snap = snapshots.get(`${key}|${ui.interval}`);
         if (key === ui.underlying || (snap && Date.now() - snap.at < SNAPSHOT_FRESH_MS)) continue;
@@ -423,7 +433,7 @@ export default {
       const around = [...ctx.data.strikes].sort((a,b) => Math.abs(a.strike - atm.strike) - Math.abs(b.strike - atm.strike)).slice(0, 24);
       const index = spotId(ctx.data);
       return [...new Set([index, ui.ceId, ui.peId, ...around.flatMap(x => [x.ce?.securityId, x.pe?.securityId]).filter(Boolean).map(String)])]
-        .map(id => id === index ? { securityId: id, exchangeSegment: 'IDX_I' } : { securityId: id, exchangeSegment: optionSegment(ctx.data) });
+        .map(id => id === index ? { securityId: id, exchangeSegment: spotSegment(ctx.data) } : { securityId: id, exchangeSegment: optionSegment(ctx.data) });
     };
     const connect = () => {
       if (signal.aborted) return;
@@ -456,7 +466,7 @@ export default {
       ui.tickDirty = false; lastTickPaint = Date.now(); updateLiveCharts(ctx); updateLiveLabels(ctx); updateTickets(ctx);
     }, 200);
     const refreshStaleCandles = async () => {
-      const now = Date.now(), market = isMarketSession(now);
+      const now = Date.now(), market = isMarketSession(now, ctx.data?.session);
       if (signal.aborted) return;
       const charts = [['spot',spotId(ctx.data)],['ce',ui.ceId],['pe',ui.peId]];
       const rowsOf = key => key === 'spot' ? ctx.data.underlying.candles : ui[`${key}Candles`];
@@ -600,7 +610,8 @@ export default {
       const busy = runningTrade(ctx.state, ui);
       if (busy) { toast(busy, 'warn'); return; }
       if (!size.lots) { showError(size.reason); return; }
-      sendOrder({ side, contract:{ ...contract }, lots:size.lots, qty:size.lots * lotSize, ltp:contract.ltp });
+      // Units sent to Dhan: lots × lot size (MCX: Dhan counts lots, qtyPerLot 1).
+      sendOrder({ side, contract:{ ...contract }, lots:size.lots, qty:size.lots * (ctx.data.qtyPerLot ?? lotSize), ltp:contract.ltp });
     }, signal);
     // Market order at the auto-sized lots, sent on the tap. The buttons lock at once (orderInFlight)
     // so a double tap cannot send twice.
@@ -616,7 +627,14 @@ export default {
         showError('');
       } catch (e) { ui.orderInFlight = 0; updateTickets(ctx); showError(e.message); toastError(e); }
     }
-    // Index switch: reload the chain, charts and live feed for NIFTY / BANKNIFTY / SENSEX.
+    // MCX switch: show (or hide) Crude Oil Mini and Gold Mini. Switching it off while on one of them goes back to NIFTY.
+    on(el, 'click', '[data-mcx-toggle]', () => {
+      const next = !(mcxOn() || isMcxKey(ui.underlying));
+      savePref('tradelock.scalper.mcx', next ? 'on' : 'off');
+      if (!next && isMcxKey(ui.underlying)) { $('[data-underlying="NIFTY"]', el)?.click(); return; }
+      ctx.paint();
+    }, signal);
+    // Index switch: reload the chain, charts and live feed for NIFTY / BANKNIFTY / SENSEX (and MCX: CRUDEOILM / GOLDM).
     on(el, 'click', '[data-underlying]', async (_, button) => {
       const key = button.dataset.underlying, previous = ui.underlying;
       if (key === previous || ui.switching) return;
@@ -896,8 +914,8 @@ function headerOrder(ctx, item, side) {
   return { lots:size.lots, buy:t.buy, sell:t.sell, disabled:!(item && ctx.data.lotSize && size.lots > 0) || !!busy, reason:busy || size.reason || '' };
 }
 function chartPanel(name, instrument, key, _candles, spot, interval = '5', order = null, indicators = {}) {
-  const exchange = instrument?.exchangeSegment?.startsWith('BSE') ? 'BSE' : 'NSE';
-  const heading = key === 'spot' ? `${instrument.symbol} · ${interval} · IDX` : instrument ? `${instrument.underlying || 'NIFTY'} ${instrument.expiry} ${instrument.strike} ${instrument.option} · ${interval} · ${exchange}` : `${name} · Select an option`;
+  const seg = instrument?.exchangeSegment || '', exchange = seg.startsWith('BSE') ? 'BSE' : seg.startsWith('MCX') ? 'MCX' : 'NSE';
+  const heading = key === 'spot' ? `${instrument.symbol} · ${interval} · ${seg.startsWith('MCX') ? 'FUT' : 'IDX'}` : instrument ? `${instrument.underlying || 'NIFTY'} ${instrument.expiry} ${instrument.strike} ${instrument.option} · ${interval} · ${exchange}` : `${name} · Select an option`;
   const { fast, slow } = emaPeriods(interval);
   const subtitle = key === 'spot' && !isAdmin() ? `EMA ${fast} / EMA ${slow}` : key === 'spot' ? (showsHammerMarkers(interval) ? 'EMA45 wick-touch hammer + 5m opening-range breakout arrows · next candle confirms' : ['5'].includes(String(interval)) ? `EMA ${fast} / EMA ${slow} · 5m opening-range breakout arrows · hammer signals on 1-minute` : `EMA ${fast} / EMA ${slow} · breakout and hammer arrows show on the 1- and 5-minute charts`) : instrument?.symbol || name;
   const live = key === 'spot' ? html`<span class="sc-hdr-index"><strong data-spot>${money(instrument?.ltp || 0)}</strong><em class="${(instrument?.ltp || 0) >= (_candles?.at?.(-1)?.open || instrument?.ltp || 0) ? 'pos' : 'neg'}">Live index</em></span>` : '';
@@ -1000,20 +1018,21 @@ function applyTick(ctx, tick) {
   const d = ctx.data, id = String(tick.securityId), now = Number(tick.at) || Date.now();
   ctx.ui.lastTickAtById ||= {};
   ctx.ui.lastTickAtById[id] = now;
-  if (tick.exchangeSegment === 'IDX_I' && id === spotId(d)) {
+  if (tick.exchangeSegment === spotSegment(d) && id === spotId(d)) {
     d.underlying.ltp = tick.ltp;
-    if (isMarketSession(now)) updateCandle(d.underlying.candles, tick, now, Number(ctx.ui.interval));
+    if (isMarketSession(now, d.session)) updateCandle(d.underlying.candles, tick, now, Number(ctx.ui.interval));
   }
   const { byId } = strikeIndex(d), item = byId.get(id);
   if (item) { item.ltp = tick.ltp; item.volume = tick.volume ?? item.volume; item.oi = tick.oi ?? item.oi; }
   const ce = byId.get(String(ctx.ui.ceId)), pe = byId.get(String(ctx.ui.peId));
-  if (isMarketSession(now) && ce && String(ce.securityId) === id) updateCandle(ctx.ui.ceCandles, tick, now, Number(ctx.ui.interval));
-  if (isMarketSession(now) && pe && String(pe.securityId) === id) updateCandle(ctx.ui.peCandles, tick, now, Number(ctx.ui.interval));
+  if (isMarketSession(now, d.session) && ce && String(ce.securityId) === id) updateCandle(ctx.ui.ceCandles, tick, now, Number(ctx.ui.interval));
+  if (isMarketSession(now, d.session) && pe && String(pe.securityId) === id) updateCandle(ctx.ui.peCandles, tick, now, Number(ctx.ui.interval));
   ctx.ui.tickDirty = true;
 }
-function isMarketSession(at) {
+// session: { open, close } minutes (MCX 09:00 to 23:55); the indices 09:15 to 15:30.
+function isMarketSession(at, session = null) {
   const local = new Date(at + 330 * 60_000), day = local.getUTCDay(), minutes = local.getUTCHours() * 60 + local.getUTCMinutes();
-  return day > 0 && day < 6 && minutes >= 555 && minutes < 930;
+  return day > 0 && day < 6 && minutes >= (session?.open ?? 555) && minutes < (session?.close ?? 930);
 }
 function chartRows(rows) {
   const out = (rows || []).map(c => ({

@@ -38,8 +38,9 @@ export function checkOrder(order, s) {
   }
   // Capital per trade: a buy's value (its limit price, else the premium it was sized at) within the limit.
   const cap = capitalLimit(rules, s.capital), px = Number(order.price ?? s.price);
-  if (cap != null && order.side === 'BUY' && px > 0 && order.qty * px > cap + 0.01) {
-    return block('CAPITAL_LIMIT', `This order uses ₹${Math.round(order.qty * px).toLocaleString('en-IN')}, more than your ₹${Math.round(cap).toLocaleString('en-IN')} capital per trade. Use fewer lots.`);
+  const value = order.qty * px * (Number(order.multiplier) || 1);   // MCX: qty in lots × rupees per point per lot
+  if (cap != null && order.side === 'BUY' && px > 0 && value > cap + 0.01) {
+    return block('CAPITAL_LIMIT', `This order uses ₹${Math.round(value).toLocaleString('en-IN')}, more than your ₹${Math.round(cap).toLocaleString('en-IN')} capital per trade. Use fewer lots.`);
   }
   // One trade at a time: no new entry while a position is open, an order is pending, or one is being placed.
   // Algo Trading (s.concurrent): each strategy + index holds its own trade, so only an order being placed blocks.

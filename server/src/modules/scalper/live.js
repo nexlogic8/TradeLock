@@ -24,7 +24,7 @@ export function allowScalperContracts(userId, expiry, strikes, underlying = { se
   const ids = new Set(strikes.flatMap(row => [row.ce?.securityId, row.pe?.securityId]).filter(Boolean).map(String));
   // One entry per index, so loading (or preloading) another index keeps this one's contracts valid.
   const byIndex = allowedByUser.get(userId) || new Map();
-  byIndex.set(String(underlying.securityId), { expiry, ids, indexId:underlying.securityId, segment:underlying.optionSegment, at: Date.now() });
+  byIndex.set(String(underlying.securityId), { expiry, ids, indexId:underlying.securityId, segment:underlying.optionSegment, spotSegment:underlying.spotSegment || 'IDX_I', at: Date.now() });
   allowedByUser.set(userId, byIndex);
 }
 
@@ -187,7 +187,8 @@ function acceptMessage(userId, feed, client, text) {
     const segment = item?.exchangeSegment, id = String(item?.securityId || '');
     // Options of the loaded chain (NSE_FNO, or BSE_FNO for SENSEX) and that chain's index.
     if (allowed.some(a => segment === (a.segment || 'NSE_FNO') && a.ids.has(id))) watch.add(`${segment}:${id}`);
-    else if (segment === 'IDX_I' && allowed.some(a => id === a.indexId)) watch.add(`${segment}:${id}`);
+    // The chain's spot: its index (IDX_I), or the MCX future an MCX chain sits on (MCX_COMM).
+    else if (allowed.some(a => segment === (a.spotSegment || 'IDX_I') && id === String(a.indexId))) watch.add(`${segment}:${id}`);
   }
   client.watch = watch;
   const hub = join(feed);

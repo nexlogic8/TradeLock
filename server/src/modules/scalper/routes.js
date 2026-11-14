@@ -10,8 +10,8 @@ import { scalperSignalRisk, scanScalperSignal } from './signals.js';
 import { cachedMarketData } from './cache.js';
 import { activeNiftyExpiries, resolveNiftyExpiry } from './expiry.js';
 import { openingRangeBreakout } from './signal-risk.js';
-import { indexOptionInstruments } from './instruments.js';
-import { UNDERLYINGS, isIndexId, underlyingFor } from './underlyings.js';
+import { indexOptionInstruments, mcxFutures } from './instruments.js';
+import { UNDERLYINGS, MCX_UNDERLYINGS, isIndexId, underlyingFor, scalperUnderlyingFor } from './underlyings.js';
 import { OPTION_BACKTEST, optionTrades } from './option-backtest.js';
 import { ORB5_DEFAULTS, orb5Backtest } from './orb5.js';
 import { ORB5_EXPIRIES, ORB5_OPTION_DEFAULTS, orb5OptionTrades } from './orb5-options.js';
@@ -59,6 +59,18 @@ async function lotSizeFor(securityId, exchange = 'NSE') {
   if (!securityId) return null;
   try { return (await Promise.race([indexOptionInstruments(), wait(250).then(() => null)]))?.get(`${exchange}:${securityId}`)?.lotSize || null; }
   catch { return null; }
+}
+
+/**
+ * Power Scalper's instrument for a key: an index as is, or an MCX commodity with `securityId` set to its near-month
+ * future (not yet expired), whose option chain lists every option expiry (checked live, 14 Nov 2026).
+ */
+async function scalperUnderlying(key) {
+  const u = scalperUnderlyingFor(key);
+  if (!u.mcx) return u;
+  const day = ist().day, fut = (await mcxFutures(u.symbol)).find(f => f.expiry >= day);
+  if (!fut) throw new HttpError(503, 'INSTRUMENTS_UNAVAILABLE', `${u.label}: Dhan's instrument list has no active future yet. Try again in a minute.`);
+  return { ...u, securityId: String(fut.securityId) };
 }
 
 function requireDhan(userId) {
@@ -193,7 +205,7 @@ function dateWindows(startDate, endDate) {
 // Chart history: a month back for the index and for option contracts (weekly contracts are listed weeks before
 // they become the nearest expiry, and Dhan has their candles since). The chart scrolls through it; 1M shows it
 // all. One Dhan request either way (intraday allows 90 days).
-const CHART_DAYS = { INDEX: 31, OPTIDX: 31 };
+const CHART_DAYS = { INDEX: 31, OPTIDX: 31, FUTCOM: 31, OPTFUT: 31 };
 function chartHistory(adapter, spec, interval, fresh = false) {
   const now = Date.now(), day = ist(now).day, days = CHART_DAYS[spec.instrument] || 7;
   const key = `candles:${day}:${spec.exchangeSegment}:${spec.securityId}:${interval}:${days}d`;
@@ -611,7 +623,7 @@ async function optionDataAvailability(userId) {
 // Option expiries for one index: cached for the day's key (6 h), shared by the page and the warm-up below.
 function loadExpiries(userId, adapter, u) {
   return orLastGood(`${ownerOf(userId)}:expiries:${u.key}`, () => cachedMarketData(scopeOf(adapter), `expiries:${u.key}:${ist().day}`, 6 * 3_600_000, async () => {
-    const value = await dataCall(() => optionRequest(userId, () => adapter.optionExpiries({ underlyingScrip: Number(u.securityId), underlyingSeg: 'IDX_I' })));
+    const value = await dataCall(() => optionRequest(userId, () => adapter.optionExpiries({ underlyingScrip: Number(u.securityId), underlyingSeg: u.underlyingSeg || 'IDX_I' })));
     if (!value.length) throw new HttpError(502, 'EXPIRY_UNAVAILABLE', `Dhan did not return any active ${u.label} option expiries.`);
     return value;
   }));
@@ -800,7 +812,9 @@ export function scalperRoutes(r) {
     // charts=0 returns only the chain (expiry switch); the page loads the option charts separately
     // so the chain is not held behind Dhan's serialized candle-history requests.
     const withCharts = ctx.query.charts !== '0';
-    const u = underlyingFor(ctx.query.underlying), index = { securityId:u.securityId, exchangeSegment:'IDX_I', instrument:'INDEX' };
+    // An index, or an MCX commodity whose option chain sits on its near-month future (underlyings.js MCX_UNDERLYINGS).
+    const u = await scalperUnderlying(ctx.query.underlying), spotSeg = u.underlyingSeg || 'IDX_I';
+    const index = { securityId:u.securityId, exchangeSegment:spotSeg, instrument:u.spotInstrument || 'INDEX' };
     // Index history does not depend on the expiry/chain. Capture rejection immediately
     // so a failed chain request cannot leave an unhandled parallel history request.
     const spotLoading = withCharts ? chartHistory(adapter, index, interval, fresh)
@@ -810,12 +824,12 @@ export function scalperRoutes(r) {
       : chartHistory(adapter, index, '5', fresh)
         .then(result => ({ result }), error => ({ error }));
     const { value: listedExpiries } = await loadExpiries(ctx.user.id, adapter, u);
-    const clock=ist(),expiries=activeNiftyExpiries(listedExpiries,clock);
+    const clock=ist(),close=u.sessionClose,expiries=activeNiftyExpiries(listedExpiries,clock,close);
     if (!expiries.length) throw new HttpError(502, 'EXPIRY_UNAVAILABLE', `Dhan did not return an upcoming ${u.label} option expiry. Refresh or check the Dhan data connection.`);
-    const expiry=resolveNiftyExpiry(ctx.query.expiry,expiries,clock,u.expiryRule);
+    const expiry=resolveNiftyExpiry(ctx.query.expiry,expiries,clock,u.expiryRule,close);
     if (!expiry) throw bad('INVALID_EXPIRY', `Choose an active upcoming ${u.label} expiry.`);
     const chainSnapshot = await orLastGood(`${ownerOf(ctx.user.id)}:chain:${u.key}:${expiry}`, () => cachedMarketData(scopeOf(adapter), `chain:${u.key}:${ist().day}:${expiry}`, 5_000, async () => {
-      const value = await dataCall(() => optionRequest(ctx.user.id, () => adapter.optionChain({ underlyingScrip: Number(u.securityId), underlyingSeg: 'IDX_I', expiry })));
+      const value = await dataCall(() => optionRequest(ctx.user.id, () => adapter.optionChain({ underlyingScrip: Number(u.securityId), underlyingSeg: spotSeg, expiry })));
       if (!value?.oc || !Object.keys(value.oc).length || !Number(value.last_price)) throw new HttpError(502, 'MARKET_DATA_UNAVAILABLE', `Dhan returned no option contracts for ${expiry}. Refresh or choose another expiry.`);
       return value;
     }, { fresh }));
@@ -831,15 +845,19 @@ export function scalperRoutes(r) {
       pe: contract(sides.pe, Number(strike), 'PE', expiry, u),
     })).filter(x => Number.isFinite(x.strike)).sort((a, b) => a.strike - b.strike);
     const atm = strikes.reduce((best, row) => !best || Math.abs(row.strike - Number(chain.last_price)) < Math.abs(best.strike - Number(chain.last_price)) ? row : best, null);
-    allowScalperContracts(ctx.user.id, expiry, strikes, u);
+    allowScalperContracts(ctx.user.id, expiry, strikes, { ...u, spotSegment:spotSeg });
     if (!allowedByUser.has(ctx.user.id)) allowedByUser.set(ctx.user.id, new Map());
     allowedByUser.get(ctx.user.id).set(u.key, { expiry, underlying:u.key, indexId:u.securityId, segment:u.optionSegment, exchange:u.exchange,
+      spotSegment:spotSeg, spotInstrument:index.instrument, optionInstrument:u.optionInstrument || 'OPTIDX', mcx:!!u.mcx, multiplier:u.multiplier || null,
       ids: new Set(strikes.flatMap(row => [row.ce?.securityId, row.pe?.securityId]).filter(Boolean).map(String)), at: now });
-    const lotSize = await lotSizeFor(atm?.ce?.securityId || atm?.pe?.securityId, u.exchange);
-    const market = { underlyingKey:u.key, optionSegment:u.optionSegment, underlyings:Object.values(UNDERLYINGS).map(({ key, label }) => ({ key, label })) };
+    // MCX: Dhan counts quantity in lots (qtyPerLot 1); lotSize is then the rupees per point per lot, for sizing and funds.
+    const lotSize = u.mcx ? u.multiplier : await lotSizeFor(atm?.ce?.securityId || atm?.pe?.securityId, u.exchange);
+    const market = { underlyingKey:u.key, optionSegment:u.optionSegment, qtyPerLot: u.mcx ? 1 : lotSize, mcx: !!u.mcx,
+      session: u.mcx ? { open:u.sessionOpen, close:u.sessionClose } : null,
+      underlyings:[...Object.values(UNDERLYINGS), ...Object.values(MCX_UNDERLYINGS)].map(({ key, label, mcx }) => ({ key, label, mcx:!!mcx })) };
     if (!withCharts) {
       return { lotSize, ...market,
-        underlying: { symbol: u.label, key:u.key, securityId: u.securityId, exchangeSegment: 'IDX_I', ltp: Number(chain.last_price), candles: null },
+        underlying: { symbol: u.label, key:u.key, securityId: u.securityId, exchangeSegment: spotSeg, ltp: Number(chain.last_price), candles: null },
         openingRange: null, expiry, expiries, strikes,
         selectedCharts: { atm: atm?.strike ?? null, ce: null, pe: null }, selectedOpeningRanges: {},
         marketOpen: marketOpen(), asOf: chainSnapshot.asOf, stale: !!chainSnapshot.stale, historyWarning: staleWarning,
@@ -848,8 +866,8 @@ export function scalperRoutes(r) {
       };
     }
     const specs = [
-      { securityId: atm?.ce?.securityId || u.securityId, exchangeSegment: atm?.ce ? u.optionSegment : 'IDX_I', instrument: atm?.ce ? 'OPTIDX' : 'INDEX' },
-      { securityId: atm?.pe?.securityId || u.securityId, exchangeSegment: atm?.pe ? u.optionSegment : 'IDX_I', instrument: atm?.pe ? 'OPTIDX' : 'INDEX' },
+      { securityId: atm?.ce?.securityId || u.securityId, exchangeSegment: atm?.ce ? u.optionSegment : spotSeg, instrument: atm?.ce ? u.optionInstrument || 'OPTIDX' : index.instrument },
+      { securityId: atm?.pe?.securityId || u.securityId, exchangeSegment: atm?.pe ? u.optionSegment : spotSeg, instrument: atm?.pe ? u.optionInstrument || 'OPTIDX' : index.instrument },
     ];
     const settled = await Promise.allSettled([
       spotLoading.then(({ result, error }) => { if (error) throw error; return result; }),
@@ -871,7 +889,7 @@ export function scalperRoutes(r) {
       openingRangeBreakout(snapshot?.value || (interval === '5' ? i === 0 ? ce.value : pe.value : [])));
 
     return { ...market,
-      underlying: { symbol: u.label, key:u.key, securityId: u.securityId, exchangeSegment: 'IDX_I', ltp: Number(chain.last_price),
+      underlying: { symbol: u.label, key:u.key, securityId: u.securityId, exchangeSegment: spotSeg, ltp: Number(chain.last_price),
         candles: spot.value },
       openingRange,
       expiry, expiries, strikes,
@@ -896,9 +914,10 @@ export function scalperRoutes(r) {
     if (!allowed) throw bad('INVALID_INSTRUMENT', 'Reload the option chain before checking margin.');
     if (!Number.isSafeInteger(lots) || lots < 1 || lots > 1000) throw bad('INVALID_LOTS', 'Enter a whole number of lots.');
     if (!(price > 0)) throw bad('INVALID_PRICE', 'No live price for this contract yet.');
-    const lotSize = await lotSizeFor(securityId, allowed.exchange || 'NSE');
+    // MCX: Dhan's quantity is in lots; lotSize reported back is the rupees per point per lot.
+    const lotSize = allowed.mcx ? allowed.multiplier : await lotSizeFor(securityId, allowed.exchange || 'NSE');
     if (!lotSize) throw new HttpError(503, 'LOT_SIZE_UNAVAILABLE', 'Lot size is not available yet. Try again in a few seconds.');
-    const qty = lots * lotSize;
+    const qty = allowed.mcx ? lots : lots * lotSize;
     const spec = { securityId, exchangeSegment:allowed.segment || 'NSE_FNO', qty, price, productType:'INTRADAY' };
     const [buy, sell] = await Promise.all(['BUY', 'SELL'].map(side => cachedMarketData(adapter, `margin:${securityId}:${side}:${qty}:${price.toFixed(2)}`, 15_000,
       () => dataCall(() => adapter.marginRequired({ ...spec, side })))));
@@ -911,10 +930,12 @@ export function scalperRoutes(r) {
     const adapter = marketData(ctx.user.id);
     const securityId = String(ctx.query.securityId || '');
     const interval = ['1', '5', '15', '25', '60'].includes(ctx.query.interval) ? ctx.query.interval : '5';
-    const index = isIndexId(securityId);
+    // The spot chart: an index, or the MCX future the loaded chain sits on.
+    const index = isIndexId(securityId) || allowedFor(ctx.user.id, null, ctx.query.underlying)?.indexId === securityId;
     const allowed = allowedFor(ctx.user.id, index ? null : securityId, ctx.query.underlying);
     if (!allowed) throw bad('INVALID_INSTRUMENT', 'Reload the option chain before requesting this chart.');
-    const spec = { securityId, exchangeSegment: index ? 'IDX_I' : allowed.segment || 'NSE_FNO', instrument: index ? 'INDEX' : 'OPTIDX' };
+    const spec = index ? { securityId, exchangeSegment: allowed.spotSegment || 'IDX_I', instrument: allowed.spotInstrument || 'INDEX' }
+      : { securityId, exchangeSegment: allowed.segment || 'NSE_FNO', instrument: allowed.optionInstrument || 'OPTIDX' };
     const [snapshot, rangeSnapshot] = await Promise.all([
       chartHistory(adapter, spec, interval, ctx.query.fresh === '1'),
       interval === '5' ? null : chartHistory(adapter, spec, '5', ctx.query.fresh === '1'),

@@ -49,3 +49,17 @@ test('percentage loss limit uses starting capital', () => {
 test('selling more than the open position is not treated as an exit', () => {
   assert.equal(checkOrder({ ...exit, qty: 150 }, { ...base, entries: 3 }).code, 'TRADE_CAP');
 });
+
+test('MCX capital per trade: qty is in lots, so the value is lots × premium × the multiplier', async () => {
+  const { checkOrder } = await import('../src/modules/risk/gate.js');
+  const { mcxMultiplier } = await import('../src/modules/scalper/underlyings.js');
+  assert.equal(mcxMultiplier('CRUDEOILM 2026-11-17 8300 CE'), 10);
+  assert.equal(mcxMultiplier('GOLDM 2026-11-27 136000 PE'), 10);
+  assert.equal(mcxMultiplier('NIFTY 2026-11-17 25000 CE'), null);
+  const rules = { cutoff:{on:false}, maxTrades:{on:false}, maxLoss:{on:false}, capitalUse:{on:true,value:10000,mode:'amount'} };
+  const base = { rules, positions:[], orders:[], entries:0, pnl:0, minutes:null, capital:100000, price:500, subscriptionActive:true };
+  assert.equal(checkOrder({ symbol:'CRUDEOILM 2026-11-17 8300 CE', side:'BUY', qty:2, multiplier:10 }, base).code, undefined, '2 lots × 500 × 10 = 10,000: allowed');
+  const r = checkOrder({ symbol:'CRUDEOILM 2026-11-17 8300 CE', side:'BUY', qty:3, multiplier:10 }, base);
+  assert.equal(r.code, 'CAPITAL_LIMIT');
+  assert.match(r.reason, /₹15,000/);
+});

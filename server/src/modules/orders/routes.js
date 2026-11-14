@@ -10,6 +10,7 @@ import { getSubscription } from '../billing/service.js';
 import { checkOrder } from '../risk/gate.js';
 import { dayState, patchDay, capitalFor } from '../risk/service.js';
 import { syncAccount } from '../risk/monitor.js';
+import { mcxMultiplier } from '../scalper/underlyings.js';
 import { audit } from '../audit/service.js';
 import { notify } from '../notifications/service.js';
 
@@ -74,6 +75,8 @@ export function ordersRoutes(r) {
       productType: b.productType,
     };
     if (order.type === 'LIMIT') order.price = v.num(b.price, 'Limit price', { min: 0.05, max: 1_000_000 });
+    // MCX: Dhan's quantity is in lots, so a lot's rupee value is premium × the contract multiplier (CRUDEOILM / GOLDM 10).
+    if (/^MCX/.test(String(order.exchangeSegment || ''))) order.multiplier = mcxMultiplier(order.symbol) ?? 1;
     // The live premium the ticket was sized at (market orders): checked against Capital per trade, not sent to the broker.
     const sizedAt = b.ltp != null ? v.num(b.ltp, 'Price', { min: 0.05, max: 1_000_000 }) : null;
 
