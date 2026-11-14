@@ -134,7 +134,7 @@ export function accountSummary(acct) {
     orbOn: acct.orb_on !== 0,
     gapOn: acct.gap_on === 1,
     ema915On: acct.ema915_on === 1,
-    manualOn: acct.manual_on === 1,
+    manualOn: true,   // manual trading is always allowed
     gapLockOn: acct.gap_lock !== 0,
     retestPaperOn: acct.retest_paper_on === 1,
     paperMode: acct.paper_mode === 1,

@@ -61,9 +61,7 @@ export const INTERVALS = [['1','1 min'],['5','5 min'],['15','15 min'],['25','25 
  */
 export function runningTrade(state, ui = {}) {
   const d = state?.dash, open = (d?.positions || []).find(p => Number(p.qty) !== 0);
-  // Algo Trading on: only automatic entries (the server refuses manual ones too), unless manual trades are allowed
-  // on the AI Algo Trading page. Exits stay in Positions.
-  if (d?.broker?.algoOn && !d.broker.manualOn) return 'Algo Trading is on: manual entries are off. Close a trade from Positions → Exit.';
+  // Manual trading is always allowed, also while Algo Trading is on; one trade at a time.
   if (open) return `A trade is running (${open.symbol}). Exit it from Positions before taking the next one.`;
   if ((d?.orders || []).length) return 'An order is pending at the broker. Cancel it or let it fill before the next trade.';
   if (ui.orderInFlight && Date.now() - ui.orderInFlight < 20_000) return 'Your last order is being confirmed by the broker…';

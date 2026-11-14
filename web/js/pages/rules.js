@@ -1,10 +1,10 @@
 import { html, $, on } from '../core/dom.js';
-import { get, put, post } from '../core/api.js';
+import { get, put } from '../core/api.js';
 import { inr, int, longDay } from '../core/format.js';
 import { icon } from '../ui/icons.js';
 import { formError } from '../ui/parts.js';
 import { ruleTip, tipValues } from '../ui/ruletips.js';
-import { toast, toastError } from '../ui/toast.js';
+import { toast } from '../ui/toast.js';
 import { store } from '../core/store.js';
 import { ksOn } from '../ui/killswitch.js';
 
@@ -55,20 +55,6 @@ function protCard(d, f, set = 'manual') {
       ${locked ? html`<button class="btn btn-ghost algo-start prot-locked" type="button" data-prot="locked">${icon('lock')}Locked until next trading day</button>`
         : html`<button class="btn ${running ? 'btn-danger' : 'btn-primary'} algo-start" type="button" data-prot="${running ? 'stop' : 'start'}" ${broker ? '' : 'disabled'}>
         ${icon(running ? 'stop' : 'play')}${running ? 'Stop Protection' : 'Start Protection'}</button>`}
-    </section>`;
-}
-
-/** Manual trades while Algo Trading is on: allowed alongside it, or blocked (orders refused, positions closed). */
-function manualCard(d) {
-  const b = d?.broker, on = !!b?.manualOn;
-  return html`
-    <section class="panel pad algo-manual-card" id="manual-card">
-      <div class="algo-strat algo-manual ${on ? 'on' : ''}">
-        <div class="algo-strat-head">
-          <span class="algo-strat-name"><b>Manual trades</b><small>${on ? 'Allowed alongside Algo Trading. A manual position does not stop Algo entries; it uses the day’s loss limit and counts toward the trade cap.' : 'Blocked while Algo Trading is on: manual orders are refused and manual positions closed.'} On or off at any time.</small></span>
-          <button class="switch" type="button" role="switch" aria-checked="${String(on)}" aria-label="Allow manual trades while Algo Trading is on" data-manual-toggle ${b?.id ? '' : 'disabled'}></button>
-        </div>
-      </div>
     </section>`;
 }
 
@@ -253,7 +239,6 @@ export default {
     const d = ctx.state.dash, r = ctx.ui.rules, capital = d?.capital ?? ctx.data.capital;
     return html`
       ${protCard(d, r.form, 'manual')}
-      ${manualCard(d)}
       ${rulesPanel(r.form, { set: 'manual', now: ruleSetNow(d, ctx.data.mode), capital, dash: d, error: r.error, pending: r.pending })}`;
   },
 
@@ -265,25 +250,9 @@ export default {
     if (card) card.outerHTML = String(protCard(patch.dash, ctx.ui.rules.form, 'manual'));   // only the card: unsaved edits stay
     const sets = $('#rule-sets', ctx.el);
     if (sets) sets.outerHTML = String(setNote('manual', ruleSetNow(patch.dash, ctx.data.mode)));   // Algo switched on / off
-    const manual = $('#manual-card', ctx.el);
-    if (manual) manual.outerHTML = String(manualCard(patch.dash));
   },
 
   mount(ctx) {
-    // Manual trades while Algo Trading is on (allowed / blocked): saved on the broker account, as before on AI Algo Trading.
-    on(ctx.el, 'click', '[data-manual-toggle]', async (_, b) => {
-      const id = ctx.state.dash?.broker?.id, next = b.getAttribute('aria-checked') !== 'true';
-      if (!id) return;
-      b.disabled = true;
-      try {
-        const { account } = await post(`/brokers/${id}/strategies`, { manual: next });
-        const dash = store.get().dash;
-        if (dash && account) store.set({ dash: { ...dash, broker: account } });
-        const card = $('#manual-card', ctx.el);
-        if (card) card.outerHTML = String(manualCard({ ...(dash || {}), broker: account || dash?.broker }));
-        toast(next ? 'Manual trades allowed alongside Algo Trading.' : 'Manual trades blocked while Algo Trading is on.', 'ok');
-      } catch (err) { toastError(err); b.disabled = false; }
-    }, ctx.signal);
     bindRules(ctx, ctx.ui.rules, { capital: () => ctx.state.dash?.capital ?? ctx.data.capital, onSaved: res => { ctx.data = res; } });
     // Start / Stop Protection = the top-bar switch (it flips both at once and confirms with the server).
     on(ctx.el, 'click', '[data-prot]', () => document.getElementById('agent-btn')?.click(), ctx.signal);

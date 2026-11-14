@@ -159,7 +159,7 @@ test('one trade at a time on the tickets, and the chart starts at 5 minutes', as
   assert.match(view,/data-order-side="BUY" data-option="CE" disabled/);
   assert.match(view,/A trade is running \(NIFTY-Oct2026-22950-PE\)\. Exit it from Positions before taking the next one\./);
   assert.equal(runningTrade({dash:{positions:[{symbol:'X',qty:0}],orders:[]}}),'','a closed position does not block');
-  assert.match(runningTrade({dash:{broker:{algoOn:true},positions:[],orders:[]}}),/Algo Trading is on: manual entries are off/,'Algo Trading on: Buy / Sell are disabled');
+  assert.equal(runningTrade({dash:{broker:{algoOn:true},positions:[],orders:[]}}),'','manual trading is always allowed: Buy / Sell stay on with Algo Trading on');
   assert.equal(runningTrade({dash:{broker:{algoOn:true,manualOn:true},positions:[],orders:[]}}),'','manual trades allowed: Buy / Sell stay on');
   assert.match(runningTrade({dash:{positions:[],orders:[{id:'O1'}]}}),/pending/);
   assert.match(runningTrade({dash:{positions:[],orders:[]}},{orderInFlight:Date.now()}),/being confirmed/);

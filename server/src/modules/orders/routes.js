@@ -97,7 +97,7 @@ export function ordersRoutes(r) {
       killSwitchActive: !!s.ks_active_at || getKillStatus(ctx.user.id)?.active === true,
       pauseReason: s.pause_reason,
       subscriptionActive: getSubscription(ctx.user.id).active,
-      algoOnly: !!(acct.algo_on && acct.agent_on && acct.manual_on !== 1),   // manual entries are refused while Algo Trading runs, unless allowed
+      algoOnly: false,   // manual trading is always allowed, also while Algo Trading runs
     });
     if (!verdict.ok) {
       patchDay(ctx.user.id, t.day, { blocked: s.blocked + 1 });

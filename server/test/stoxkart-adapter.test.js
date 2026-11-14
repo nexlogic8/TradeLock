@@ -171,7 +171,7 @@ test('each trading broker keeps its own switches and P&L: StoxKart starts off an
   const count = t => stmt(`SELECT COUNT(*) AS n FROM ${t} WHERE user_id = ?`).get(uid).n;
   assert.equal((await call('POST', '/api/brokers/links/stoxkart/trade-via', { on: true })).status, 200);
   const sk = stmt('SELECT agent_on, algo_on, gap_on, manual_on FROM broker_accounts WHERE user_id = ?').get(uid);
-  assert.deepEqual(sk, { agent_on: 0, algo_on: 0, gap_on: 0, manual_on: 0 }, 'StoxKart starts with everything off');
+  assert.deepEqual(sk, { agent_on: 0, algo_on: 0, gap_on: 0, manual_on: 1 }, 'StoxKart starts with everything off (manual trading is always allowed)');
   assert.equal(stmt(`SELECT COUNT(*) AS n FROM day_state WHERE user_id = ? AND day = '2026-10-23'`).get(uid).n, 0);
   assert.deepEqual([count('trades'), count('broker_pnl_days')], [0, 0], 'none of Dhan\'s P&L shows under StoxKart');
   stmt('UPDATE broker_accounts SET agent_on = 1 WHERE user_id = ?').run(uid);   // turned on for StoxKart

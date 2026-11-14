@@ -1948,8 +1948,7 @@ export function startAutoTrader({ tickMs = AUTO.tickMs } = {}) {
     scheduleGap();
     if (!marketOpen()) return;
     for (const acct of accounts) {
-      const g = `g:${acct.user_id}`;
-      if (!busy.has(g)) { busy.add(g); closeManualEntries(acct).catch(e => console.error('[autotrade] manual guard', e.message)).finally(() => busy.delete(g)); }
+      // Manual trading is always allowed alongside Algo Trading: manual positions are never closed for it.
       scan(acct);
       // CE + PE at a target price: its own entry window (09:20 …), checked on every tick.
       // One pass per index it is switched on for (Algo Trading grid), each with its own settings.
