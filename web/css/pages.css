@@ -2082,3 +2082,11 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input, body.scalper-focus .sc-ti
 body .sc-ticket .sc-lots input.sc-lots-input { width:100%; text-align:center; cursor:text; background:var(--field, var(--panel-2)); color:var(--fg); font-weight:700; font-variant-numeric:tabular-nums; caret-color:var(--mint); }
 body .sc-ticket .sc-lots input.sc-lots-input:hover { border-color:var(--line-2); }
 body .sc-ticket .sc-lots input.sc-lots-input:focus { outline:none; border-color:var(--mint); box-shadow:0 0 0 2px var(--mint-soft); }
+/* Chart-header lots ([−] 2 lots [+]): typed like the ticket box (number pad on phones); "lots" in amber = manual, tap it for auto. */
+.sc-hdr-lots .sc-hdr-lots-input { width:40px; height:22px; padding:0 2px; border:1px solid var(--line-2); border-radius:6px; background:var(--field); color:var(--fg); font:700 12px var(--font-mono); text-align:center; font-variant-numeric:tabular-nums; cursor:text; caret-color:var(--mint); }
+.sc-hdr-lots .sc-hdr-lots-input:focus { outline:none; border-color:var(--mint); box-shadow:0 0 0 2px var(--mint-soft); }
+.sc-hdr-lots .sc-hdr-lots-input.manual { color:var(--amber); }
+.sc-hdr-lots .sc-hdr-lots-unit { padding:0 2px; color:var(--dim); font-size:11px; cursor:default; }
+.sc-hdr-lots .sc-hdr-lots-unit.manual { color:var(--amber); cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
+body.sc-split .sc-hdr-lots .sc-hdr-lots-input { width:46px; height:28px; font-size:14px; }
+@media (max-width:760px) { .sc-hdr-lots .sc-hdr-lots-input { width:44px; height:30px; font-size:15px; } }
