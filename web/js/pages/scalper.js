@@ -8,6 +8,7 @@ import { store } from '../core/store.js';
 import { chartPalette } from './chart-palette.js';
 import { STUDIES, computeStudy, newStudy, defaultStudies, sanitizeStudies } from './chart-studies.js';
 import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } from './scalper-chart-indicators.js';
+import { SmcPrimitive } from './scalper-chart-smc.js';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -131,9 +132,11 @@ const INDICATORS = [
   ['vp', 'Volume profile', 'Volume profile of the candles in view · brighter band = 70% value area · line = point of control'],
   ['oi', 'Open interest', 'Open interest · index chart: option-chain OI per strike (red CE above, green PE below) · option charts: OI line'],
   ['prev', 'Prev day H/L', 'Previous session high and low lines on each chart (index, CE and PE)'],
+  ['smc', 'SMC', 'Smart Money Concepts · BOS (dashed) and CHoCH (solid) where a close breaks the last swing high / low · Bull OB (blue) / Bear OB (orange): the last opposite candle before the break, shown until price closes through it'],
+  ['fvg', 'FVG', 'Fair value gaps · 3-candle imbalances: green = bullish gap, red = bearish gap · bright until price fills it, then faint'],
 ];
 const indicatorPrefs = () => {
-  const out = { ema9:true, ema21:true, volume:true, vp:true, oi:true, prev:true };
+  const out = { ema9:true, ema21:true, volume:true, vp:true, oi:true, prev:true, smc:true, fvg:true };
   try { const saved = JSON.parse(localStorage.getItem('tradelock.scalper.indicators') || '{}'); for (const [key] of INDICATORS) if (typeof saved[key] === 'boolean') out[key] = saved[key]; } catch { /* defaults */ }
   return out;
 };
@@ -1106,7 +1109,7 @@ function setChartData(view, rows, indicators, interval = '1') {
   view.volume.setData(data.map(c => ({ time:c.time, value:c.volume, color:volumeColor(c) })));
   renderStudies(view);
   view.oi.setData(data.filter(c => c.oi > 0).map(c => ({ time:c.time, value:c.oi })));
-  view.profile.setData(data);
+  view.profile.setData(data); view.smc?.setData(data);
   showIndicators(view, indicators);
   view.lastTime = data.at(-1)?.time || 0;
   const count = view.host.closest('.sc-chart-panel')?.querySelector('[data-candle-count]');
@@ -1123,6 +1126,7 @@ function showIndicators(view, indicators) {
   const prev = indicators.prev !== false;
   if (view.showPrev !== prev) { view.showPrev = prev; if (view.candles) setPreviousDayRange(view, view.data); }
   view.profile.setVisible(indicators.vp !== false);
+  view.smc?.setVisible({ smc:indicators.smc !== false, fvg:indicators.fvg !== false });
   view.oi.applyOptions({ visible:indicators.oi !== false });
   view.oiProfile?.setVisible(indicators.oi !== false);
   const label = view.host.closest('.sc-chart-panel')?.querySelector('.oi-value');
@@ -1178,13 +1182,13 @@ function createChartView(host, rows, indicators, key, interval = '1') {
   // Open interest: its own hidden scale in the lower band, over the volume bars.
   const oi = chart.addSeries(LineSeries,{...colors.oi,lineWidth:1,priceScaleId:'oi',priceFormat:{type:'volume'},priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
   chart.priceScale('oi').applyOptions({ visible:false, scaleMargins:{top:.68,bottom:.03} });
-  const profile = new VolumeProfilePrimitive();
-  candles.attachPrimitive(profile);
+  const profile = new VolumeProfilePrimitive(), smc = new SmcPrimitive();
+  candles.attachPrimitive(profile); candles.attachPrimitive(smc);
   // The index has no OI of its own: its chart shows the option chain's OI at each strike instead.
   let oiProfile = null;
   if (key === 'spot') { oiProfile = new OiProfilePrimitive(); candles.attachPrimitive(oiProfile); }
   const empty = document.createElement('div'); empty.className='sc-chart-empty'; empty.textContent='Waiting for Dhan candle history'; host.append(empty);
-  const view = {host,chart,candles,volume,oi,profile,oiProfile,instrumentId:'',key,empty,lastTime:0,openingRangeLines:{},previousDayLines:{},studies:studiesFor(key),studySeries:[],studySig:''};
+  const view = {host,chart,candles,volume,oi,profile,smc,oiProfile,instrumentId:'',key,empty,lastTime:0,openingRangeLines:{},previousDayLines:{},studies:studiesFor(key),studySeries:[],studySig:''};
   view.signalMarkers = createSeriesMarkers(candles, []);
   setChartData(view,rows,indicators,interval);
   if (view.lastTime) fitSpan(view);
@@ -1379,7 +1383,7 @@ function updateLiveCharts(ctx) {
       // Signals appear once their confirmation bar closes, i.e. when a new bar opens.
       if (newBar) markersDue = true;
       view.data = data;
-      view.profile.setData(data);
+      view.profile.setData(data); view.smc?.setData(data);
       view.lastTime = candle.time;
       if (newBar) { const count=panel?.querySelector('[data-candle-count]'); if(count)count.textContent=`${data.length} bars`; }
       view.empty.hidden=true;
