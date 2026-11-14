@@ -2000,3 +2000,26 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
 .paper-wallet-set { display: flex; gap: 8px; align-items: center; margin-top: 10px; position: relative; z-index: 1; }
 .paper-wallet-set .input-wrap { flex: 1; min-width: 0; }
 .paper-wallet-set .input { height: 34px; }
+
+/* Power Scalper toolbar on desktop: one compact row (market switch, instruments, expiry, interval, session, strategies,
+   view tools, live feed), with smaller text so it fits without wrapping. */
+@media (min-width:1001px) {
+  body[data-page="scalper"] .scalper-toolbar { gap:8px; padding:8px 12px; row-gap:6px; align-items:flex-end; }
+  body[data-page="scalper"] .scalper-toolbar .scalper-control { min-width:0; gap:3px; }
+  body[data-page="scalper"] .scalper-toolbar .scalper-control small { font-size:9px; letter-spacing:.06em; }
+  body[data-page="scalper"] .scalper-toolbar .scalper-control .input { height:28px; min-height:28px; padding:0 22px 0 8px; font-size:11px; }
+  body[data-page="scalper"] .scalper-toolbar #sc-expiry { width:112px; }
+  body[data-page="scalper"] .scalper-toolbar #sc-interval { width:84px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-underlyings button, body[data-page="scalper"] .scalper-toolbar .sc-market button,
+  body[data-page="scalper"] .scalper-toolbar .sc-span .seg button { height:26px; padding:0 7px; font-size:10px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-strategy-list { flex-wrap:nowrap; gap:4px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-strategy { height:28px; padding:0 7px; gap:5px; font-size:10.5px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-strategy i { width:20px; height:12px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-strategy i::after { width:8px; height:8px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-strategy[aria-checked="true"] i::after { transform:translateX(8px); }
+  body[data-page="scalper"] .scalper-toolbar .sc-view-tools { gap:4px; margin-left:auto; }
+  body[data-page="scalper"] .scalper-toolbar .sc-fullscreen { height:28px; padding:0 8px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-layout button { height:28px; width:32px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-view-tools + .scalper-feed { margin-left:4px; font-size:10px; height:28px; }
+}
+@media (min-width:1400px) { body[data-page="scalper"] .scalper-toolbar { flex-wrap:nowrap; } }
