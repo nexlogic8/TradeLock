@@ -137,9 +137,26 @@ const INDICATORS = [
   ['fib', 'Fib 0.5 / 0.66', 'Fibonacci retracement of the last swing leg · gold lines at 0.5 and 0.66 (where a pull-back often holds), faint 0 and 1 at the leg ends · each labelled with its price'],
   ['fvg', 'FVG', 'Fair value gaps · 3-candle imbalances: green = bullish gap, red = bearish gap · bright until price fills it, then faint'],
 ];
-const indicatorPrefs = () => {
-  const out = { ema9:true, ema21:true, volume:true, vp:true, oi:true, prev:true, smc:true, fvg:true, ict:true, fib:true };
-  try { const saved = JSON.parse(localStorage.getItem('tradelock.scalper.indicators') || '{}'); for (const [key] of INDICATORS) if (typeof saved[key] === 'boolean') out[key] = saved[key]; } catch { /* defaults */ }
+// Default chart setup per market, for a new user and for "Reset to default". Each market keeps its own changes.
+//   NIFTY: trend EMA 9 / 21 and VWAP; volume profile, OI, previous-day levels, ICT liquidity and FVG entry zones.
+//   MCX:   EMA 9 / 21, VWAP and Supertrend 10 / 3 (crude and gold trend in the evening); volume profile, previous-day
+//          levels, ICT liquidity sweeps and Fib 0.5 / 0.66 pull-backs. (No OI profile: MCX options OI is thin.)
+export const MARKET_DEFAULTS = {
+  nse: { label:'NIFTY', builtin:{ vp:true, oi:true, prev:true, smc:false, ict:true, fib:false, fvg:true },
+    studies: () => [newStudy('ema', { length:9 }), newStudy('ema', { length:21 }), newStudy('vwap')] },
+  mcx: { label:'MCX', builtin:{ vp:true, oi:false, prev:true, smc:false, ict:true, fib:true, fvg:false },
+    studies: () => [newStudy('ema', { length:9 }), newStudy('ema', { length:21 }), newStudy('vwap'), newStudy('supertrend', { length:10, factor:3 })] },
+};
+export const marketOf = underlying => (isMcxKey(underlying) ? 'mcx' : 'nse');
+// The market the page shows now (set on load and on an instrument switch): which saved setup the charts use.
+let currentMarket = 'nse';
+const indicatorKey = market => `tradelock.scalper.indicators.${market}`;
+const indicatorPrefs = (market = currentMarket) => {
+  const out = { ema9:true, ema21:true, volume:true, ...MARKET_DEFAULTS[market].builtin };
+  // NIFTY falls back to the single setup saved before markets had their own, so existing users keep theirs.
+  const read = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
+  const saved = read(indicatorKey(market)) || (market === 'nse' ? read('tradelock.scalper.indicators') : null) || {};
+  for (const [key] of INDICATORS) if (typeof saved[key] === 'boolean') out[key] = saved[key];
   return out;
 };
 const savePref = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private window */ } };
@@ -209,7 +226,8 @@ export default {
     ctx.ui.mPane = ctx.ui.mPane || pref('tradelock.scalper.mPane', MOBILE_PANES.map(([k]) => k), 'spot');
     ctx.ui.sidePanel = ctx.ui.sidePanel || pref('tradelock.scalper.sidePanel', SIDE_PANELS.map(([k]) => k), 'chain');
     ctx.ui.panelOpen ??= pref('tradelock.scalper.panelOpen', ['open', 'closed'], 'open') === 'open';
-    ctx.ui.indicators = ctx.ui.indicators || indicatorPrefs();
+    currentMarket = marketOf(ctx.ui.underlying);
+    if (ctx.ui.indicatorsMarket !== currentMarket) { ctx.ui.indicators = indicatorPrefs(); ctx.ui.indicatorsMarket = currentMarket; }
     // The chain comes first (one quick Dhan call) and the three charts load once the page is up
     // (mount → loadPendingCharts), instead of holding the whole page behind Dhan's one-at-a-time history.
     const appFocus = typeof window !== 'undefined' && window.TradeLockApp && window.innerWidth <= 760;
@@ -659,6 +677,9 @@ export default {
       ui.switching = true; expirySeq++;
       ui.underlying = key; savePref('tradelock.scalper.underlying', key);
       savePref(isMcxKey(key) ? 'tradelock.scalper.lastMcx' : 'tradelock.scalper.lastIndex', key);
+      // NIFTY ↔ MCX: the charts take that market's own setup.
+      const marketChanged = marketOf(key) !== currentMarket;
+      if (marketChanged) { currentMarket = marketOf(key); ui.indicators = indicatorPrefs(); ui.indicatorsMarket = currentMarket; }
       Object.assign(ui, { margins:{}, autoLots:{}, manualLots:{}, chainKey:null, chainScroll:null, lastTickAtById:{}, lastCandleRefreshAtById:{} });
       showError('');
       $('.scalper-workspace', el)?.classList.add('is-switching');
@@ -676,8 +697,10 @@ export default {
         } else { await ctx.reload(); ui.chartsLoading = ui.loadPendingCharts(); }
         if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type:'watch', instruments: watched() }));
         ui.refreshMarginsSoon?.();
+        if (marketChanged) ui.applyMarketSetup?.();
       } catch (e) {
         ui.underlying = previous; savePref('tradelock.scalper.underlying', previous); showError(e.message);
+        if (marketChanged) { currentMarket = marketOf(previous); ui.indicators = indicatorPrefs(); ui.indicatorsMarket = currentMarket; }
         $('.scalper-workspace', el)?.classList.remove('is-switching');
       } finally { ui.switching = false; }
     }, signal);
@@ -814,7 +837,7 @@ export default {
     on(el, 'click', '[data-indicator]', (_, button) => {
       const key = button.dataset.indicator, next = ui.indicators?.[key] === false;
       ui.indicators = { ...ui.indicators, [key]: next };
-      savePref('tradelock.scalper.indicators', JSON.stringify(Object.fromEntries(INDICATORS.map(([k]) => [k, ui.indicators[k] !== false]))));
+      savePref(indicatorKey(currentMarket), JSON.stringify(Object.fromEntries(INDICATORS.map(([k]) => [k, ui.indicators[k] !== false]))));
       el.querySelectorAll(`[data-indicator="${key}"]`).forEach(b => b.setAttribute('aria-pressed', String(next)));
       for (const view of Object.values(ui.chartViews || {})) try { showIndicators(view, ui.indicators); } catch { /* disposed chart */ }
     }, signal);
@@ -828,6 +851,26 @@ export default {
       saveStudies(key, list);
       if (view) { view.studies = list; renderStudies(view, true); }
       paintStudies(key);
+    };
+    // The charts follow the current market's setup (built-in overlays and each chart's indicators).
+    const applyMarketSetup = () => {
+      for (const view of Object.values(ui.chartViews || {})) {
+        try { view.studies = studiesFor(view.key); renderStudies(view, true); showIndicators(view, ui.indicators); } catch { /* disposed chart */ }
+      }
+      for (const pop of $$('[data-studies-pop]', el)) if (!pop.hidden) pop.innerHTML = studiesPanel(ctx, pop.dataset.studiesPop);
+      for (const b of $$('[data-indicator]', el)) b.setAttribute('aria-pressed', String(ui.indicators?.[b.dataset.indicator] !== false));
+    };
+    ui.applyMarketSetup = applyMarketSetup;
+    // Reset: forget this market's saved choices, so all 3 charts and the overlays are back on its default.
+    const resetMarketSetup = () => {
+      try {
+        localStorage.removeItem(indicatorKey(currentMarket));
+        for (const k of ['spot', 'ce', 'pe']) localStorage.removeItem(studyKey(k));
+        if (currentMarket === 'nse') { localStorage.removeItem('tradelock.scalper.indicators'); for (const k of ['spot', 'ce', 'pe']) localStorage.removeItem(`tradelock.scalper.studies.${k}`); }
+      } catch { /* private window */ }
+      ui.indicators = indicatorPrefs();
+      applyMarketSetup();
+      toast(`Charts reset to the ${MARKET_DEFAULTS[currentMarket].label} default.`, 'ok');
     };
     const openStudies = (key, editId = null) => {
       const pop = studiesPop(key); if (!pop) return;
@@ -846,7 +889,7 @@ export default {
       if (t.dataset.studyToggle) return changeStudies(key, list => list.map(st => st.id === t.dataset.studyToggle ? { ...st, visible:!st.visible } : st));
       if (t.dataset.studyRemove) return changeStudies(key, list => list.filter(st => st.id !== t.dataset.studyRemove));
       if (t.dataset.studyEdit) { ui.studyEdit = ui.studyEdit === t.dataset.studyEdit ? null : t.dataset.studyEdit; return paintStudies(key); }
-      if (t.matches('[data-study-reset]')) return changeStudies(key, () => defaultStudies());
+      if (t.matches('[data-study-reset]')) return resetMarketSetup();
       if (t.matches('[data-study-copy]')) {
         const list = ui.chartViews?.[key]?.studies || studiesFor(key);
         for (const other of ['spot', 'ce', 'pe']) if (other !== key) changeStudies(other, () => list.map(st => ({ ...st })));
@@ -1205,10 +1248,12 @@ function createChartView(host, rows, indicators, key, interval = '1') {
   for (const type of ['wheel', 'pointerdown', 'touchstart']) host.addEventListener(type, e => { if (!e.target.closest?.('.sc-chart-empty')) view.autoFit = false; }, { passive:true });
   return view;
 }
-// ---- Indicators (chart-studies.js): per chart, saved in this browser; EMA 9 + EMA 21 by default ----
-const studyKey = key => `tradelock.scalper.studies.${key}`;
-function studiesFor(key) {
-  try { return sanitizeStudies(JSON.parse(localStorage.getItem(studyKey(key)) || 'null')) || defaultStudies(); } catch { return defaultStudies(); }
+// ---- Indicators (chart-studies.js): per market and chart, saved in this browser; the market default (MARKET_DEFAULTS) until changed ----
+const studyKey = (key, market = currentMarket) => `tradelock.scalper.studies.${market}.${key}`;
+function studiesFor(key, market = currentMarket) {
+  const read = k => { try { return sanitizeStudies(JSON.parse(localStorage.getItem(k) || 'null')); } catch { return null; } };
+  // NIFTY falls back to the per-chart lists saved before markets had their own.
+  return read(studyKey(key, market)) || (market === 'nse' ? read(`tradelock.scalper.studies.${key}`) : null) || MARKET_DEFAULTS[market].studies();
 }
 const saveStudies = (key, list) => savePref(studyKey(key), JSON.stringify(list));
 /** Colour of one line: the user's pick, else the theme's EMA colours for the two default EMAs, else the study default. */
@@ -1300,7 +1345,7 @@ function studiesPanel(ctx, key) {
     <div class="sc-study-builtin"><span>Built-in <small>all charts</small></span>${INDICATORS.map(([k, label, hint]) => `<button type="button" class="sc-ind" data-indicator="${k}" aria-pressed="${String(ctx.ui.indicators?.[k] !== false)}" title="${escAttr(hint)}">${label}</button>`).join('')}</div>
     <div class="sc-study-list">${list.length ? list.map(row).join('') : '<p class="sc-study-empty">No indicators on this chart.</p>'}</div>
     <div class="sc-study-add"><span>Add</span>${Object.entries(STUDIES).map(([type, d]) => `<button type="button" data-study-add="${type}" title="${escAttr(d.name)}">${d.label}</button>`).join('')}</div>
-    <footer><button type="button" data-study-copy>Copy to all 3 charts</button><button type="button" data-study-reset>Reset to EMA 9 / 21</button></footer>
+    <footer><button type="button" data-study-copy>Copy to all 3 charts</button><button type="button" data-study-reset title="All 3 charts and the built-in overlays back to the ${MARKET_DEFAULTS[currentMarket].label} default">Reset to ${MARKET_DEFAULTS[currentMarket].label} default</button></footer>
     <p class="sc-study-note">Chart indicators only. Algo Trading always uses its own EMA 9 / 21 rules.</p>`;
 }
 

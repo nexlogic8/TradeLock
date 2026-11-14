@@ -240,3 +240,13 @@ test('EMA 5/9 scalp: an arrow at every 1-minute EMA 5 / EMA 9 crossover, exactly
   assert.deepEqual(emaScalpSignals(rows, { intervalMs: 300_000, now: later }), [], '1-minute chart only');
 });
 
+
+test('chart setup per market: NIFTY and MCX defaults for new users', async () => {
+  const { MARKET_DEFAULTS, marketOf } = await import('../../web/js/pages/scalper.js');
+  assert.deepEqual(['NIFTY', 'SENSEX', 'CRUDEOILM', 'GOLDM'].map(marketOf), ['nse', 'nse', 'mcx', 'mcx']);
+  assert.deepEqual(MARKET_DEFAULTS.nse.studies().map(s => s.type), ['ema', 'ema', 'vwap']);
+  assert.deepEqual(MARKET_DEFAULTS.mcx.studies().map(s => [s.type, s.params.length ?? null]), [['ema', 9], ['ema', 21], ['vwap', null], ['supertrend', 10]]);
+  assert.equal(MARKET_DEFAULTS.nse.builtin.oi, true);
+  assert.equal(MARKET_DEFAULTS.mcx.builtin.oi, false);
+  assert.deepEqual([MARKET_DEFAULTS.nse.builtin.ict, MARKET_DEFAULTS.mcx.builtin.ict, MARKET_DEFAULTS.mcx.builtin.fib], [true, true, true]);
+});
