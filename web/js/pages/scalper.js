@@ -134,10 +134,11 @@ const INDICATORS = [
   ['prev', 'Prev day H/L', 'Previous session high and low lines on each chart (index, CE and PE)'],
   ['smc', 'SMC', 'Smart Money Concepts · BOS (dashed) and CHoCH (solid) where a close breaks the last swing high / low · Bull OB (blue) / Bear OB (orange): the last opposite candle before the break, shown until price closes through it'],
   ['ict', 'ICT', 'ICT concepts · BSL / SSL: resting liquidity above swing highs / below swing lows (EQH / EQL when equal), ✕ sweep where a wick takes it and closes back · Premium / Discount of the dealing range with its 50% EQ line · OTE: the 62–79% retracement of the last swing leg'],
+  ['fib', 'Fib 0.5 / 0.66', 'Fibonacci retracement of the last swing leg · gold lines at 0.5 and 0.66 (where a pull-back often holds), faint 0 and 1 at the leg ends · each labelled with its price'],
   ['fvg', 'FVG', 'Fair value gaps · 3-candle imbalances: green = bullish gap, red = bearish gap · bright until price fills it, then faint'],
 ];
 const indicatorPrefs = () => {
-  const out = { ema9:true, ema21:true, volume:true, vp:true, oi:true, prev:true, smc:true, fvg:true, ict:true };
+  const out = { ema9:true, ema21:true, volume:true, vp:true, oi:true, prev:true, smc:true, fvg:true, ict:true, fib:true };
   try { const saved = JSON.parse(localStorage.getItem('tradelock.scalper.indicators') || '{}'); for (const [key] of INDICATORS) if (typeof saved[key] === 'boolean') out[key] = saved[key]; } catch { /* defaults */ }
   return out;
 };
@@ -1127,7 +1128,7 @@ function showIndicators(view, indicators) {
   const prev = indicators.prev !== false;
   if (view.showPrev !== prev) { view.showPrev = prev; if (view.candles) setPreviousDayRange(view, view.data); }
   view.profile.setVisible(indicators.vp !== false);
-  view.smc?.setVisible({ smc:indicators.smc !== false, fvg:indicators.fvg !== false, ict:indicators.ict !== false });
+  view.smc?.setVisible({ smc:indicators.smc !== false, fvg:indicators.fvg !== false, ict:indicators.ict !== false, fib:indicators.fib !== false });
   view.oi.applyOptions({ visible:indicators.oi !== false });
   view.oiProfile?.setVisible(indicators.oi !== false);
   const label = view.host.closest('.sc-chart-panel')?.querySelector('.oi-value');

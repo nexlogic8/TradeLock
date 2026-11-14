@@ -133,26 +133,42 @@ export function ictLevels(bars, from = 0, to = bars.length - 1, len = SWING_LEN)
   return { liquidity, range, ote };
 }
 
-/** Draws SMC (BOS / CHoCH lines, live order blocks), FVG boxes and ICT levels for the bars in view (plus some history before it). */
+export const FIB_RATIOS = [0.5, 0.66];
+/**
+ * Fibonacci retracement of the last swing leg (the newer of the last confirmed swing high and low is the leg's end):
+ * { dir:'up'|'down', start, end (bar indices), from (0: the leg's end), to (1: its start), levels:[{ ratio, price }] }.
+ * Up leg (low → high): level = high − ratio × size, where a pull-back may hold; down leg: low + ratio × size.
+ */
+export function fibLevels(bars, from = 0, to = bars.length - 1, len = SWING_LEN, ratios = FIB_RATIOS) {
+  const swings = swingPoints(bars, from, to, len);
+  const hi = swings.filter(s => s.side === 'high').at(-1), lo = swings.filter(s => s.side === 'low').at(-1);
+  if (!hi || !lo || !(hi.price > lo.price)) return null;
+  const up = hi.at > lo.at, size = hi.price - lo.price;
+  return { dir: up ? 'up' : 'down', start: up ? lo.at : hi.at, end: up ? hi.at : lo.at,
+    from: up ? hi.price : lo.price, to: up ? lo.price : hi.price,
+    levels: ratios.map(ratio => ({ ratio, price: up ? hi.price - ratio * size : lo.price + ratio * size })) };
+}
+
+/** Draws SMC (BOS / CHoCH lines, live order blocks), FVG boxes, ICT levels and Fibonacci levels for the bars in view (plus some history before it). */
 export class SmcPrimitive {
-  constructor() { this.bars = []; this.show = { smc:true, fvg:true, ict:true }; this.paneView = { zOrder: () => 'bottom', renderer: () => ({ draw: target => this.draw(target) }) }; }
+  constructor() { this.bars = []; this.show = { smc:true, fvg:true, ict:true, fib:true }; this.paneView = { zOrder: () => 'bottom', renderer: () => ({ draw: target => this.draw(target) }) }; }
   attached({ chart, series, requestUpdate }) { this.chart = chart; this.series = series; this.requestUpdate = requestUpdate; }
   detached() { this.chart = this.series = this.requestUpdate = null; }
   setData(bars) { this.bars = bars || []; this.cache = null; this.requestUpdate?.(); }
-  setVisible({ smc, fvg, ict }) { this.show = { smc:!!smc, fvg:!!fvg, ict:!!ict }; this.requestUpdate?.(); }
+  setVisible({ smc, fvg, ict, fib }) { this.show = { smc:!!smc, fvg:!!fvg, ict:!!ict, fib:!!fib }; this.requestUpdate?.(); }
   updateAllViews() {}
   paneViews() { return [this.paneView]; }
   compute(from, to) {
     const key = `${from}:${to}:${this.bars.length}:${this.bars.at(-1)?.close}`;
-    if (this.cache?.key !== key) this.cache = { key, fvg:fairValueGaps(this.bars, from, to), smc:marketStructure(this.bars, from, to), ict:ictLevels(this.bars, from, to) };
+    if (this.cache?.key !== key) this.cache = { key, fvg:fairValueGaps(this.bars, from, to), smc:marketStructure(this.bars, from, to), ict:ictLevels(this.bars, from, to), fib:fibLevels(this.bars, from, to) };
     return this.cache;
   }
   draw(target) {
-    if ((!this.show.smc && !this.show.fvg && !this.show.ict) || !this.series || this.bars.length < 3) return;
+    if ((!this.show.smc && !this.show.fvg && !this.show.ict && !this.show.fib) || !this.series || this.bars.length < 3) return;
     const ts = this.chart.timeScale(), range = ts.getVisibleLogicalRange(), last = this.bars.length - 1;
     const viewFrom = range ? Math.max(0, Math.floor(range.from)) : 0, to = range ? Math.min(last, Math.ceil(range.to)) : last;
     if (viewFrom > to) return;
-    const { fvg, smc, ict } = this.compute(Math.max(0, viewFrom - LOOKBACK), to), pal = chartPalette();
+    const { fvg, smc, ict, fib } = this.compute(Math.max(0, viewFrom - LOOKBACK), to), pal = chartPalette();
     const y = p => this.series.priceToCoordinate(p), x = i => ts.logicalToCoordinate(i);
     target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
       ctx.font = `${Math.round(9 * vr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
@@ -204,6 +220,26 @@ export class SmcPrimitive {
           ctx.beginPath(); ctx.moveTo(Math.round(x0 * hr), yy); ctx.lineTo(Math.round(x1 * hr), yy); ctx.stroke(); ctx.setLineDash([]);
           ctx.fillStyle = `rgb(${rgb})`;
           ctx.fillText(l.side === 'high' ? '✕ BSL sweep' : '✕ SSL sweep', Math.round(x1 * hr) + Math.round(3 * hr), yy + (l.side === 'high' ? -6 : 6) * vr);
+        }
+      }
+      if (this.show.fib && fib) {
+        // From the leg's start to the right edge: 0 and 1 faint, the chosen ratios (0.5, 0.66) solid gold, each labelled with its price.
+        const x0 = x(fib.start);
+        if (x0 != null) {
+          const left = Math.round(Math.max(0, x0) * hr);
+          ctx.lineWidth = Math.max(1, Math.round(hr));
+          const line = (price, label, rgba, dash) => {
+            const py = y(price);
+            if (py == null) return;
+            const yy = Math.round(py * vr) + 0.5;
+            ctx.strokeStyle = rgba; ctx.setLineDash(dash);
+            ctx.beginPath(); ctx.moveTo(left, yy); ctx.lineTo(bitmapSize.width, yy); ctx.stroke(); ctx.setLineDash([]);
+            ctx.fillStyle = rgba;
+            ctx.fillText(`${label} · ${price.toFixed(2)}`, bitmapSize.width - Math.round(300 * hr), yy - 6 * vr);
+          };
+          line(fib.from, 'Fib 0', 'rgba(250, 204, 21, 0.45)', [Math.round(2 * hr), Math.round(4 * hr)]);
+          line(fib.to, 'Fib 1', 'rgba(250, 204, 21, 0.45)', [Math.round(2 * hr), Math.round(4 * hr)]);
+          for (const l of fib.levels) line(l.price, `Fib ${l.ratio}`, 'rgba(250, 204, 21, 0.95)', []);
         }
       }
       if (this.show.fvg) {

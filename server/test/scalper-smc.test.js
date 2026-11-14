@@ -66,3 +66,17 @@ test('ICT: resting BSL / SSL, an equal high, a sweep, the dealing range and the 
   assert.equal(ote.dir, 'down');
   assert.ok(Math.abs(ote.bottom - (98 + 0.62 * 12.05)) < 1e-9 && Math.abs(ote.top - (98 + 0.79 * 12.05)) < 1e-9);
 });
+
+test('Fib 0.5 / 0.66: retracement of the last swing leg, measured back from its end', async () => {
+  const { fibLevels } = await import('../../web/js/pages/scalper-chart-smc.js');
+  // Up leg: swing low 90 (bar 2) then swing high 120 (bar 7).
+  const hl = [[100, 95], [96, 92], [94, 90], [99, 93], [105, 98], [111, 104], [116, 109], [120, 113], [117, 111], [115, 110]];
+  const bars = hl.map(([h, l]) => ({ open:l + 1, high:h, low:l, close:h - 1 }));
+  const up = fibLevels(bars, 0, bars.length - 1, 2);
+  assert.deepEqual([up.dir, up.start, up.end, up.from, up.to], ['up', 2, 7, 120, 90]);
+  assert.deepEqual(up.levels.map(l => [l.ratio, +l.price.toFixed(2)]), [[0.5, 105], [0.66, 100.2]]);
+  // Mirror it: a down leg from 120 to 90 retraces upward.
+  const down = fibLevels(bars.map(b => ({ open:210 - b.open, high:210 - b.low, low:210 - b.high, close:210 - b.close })), 0, bars.length - 1, 2);
+  assert.deepEqual([down.dir, down.from, down.to], ['down', 90, 120]);
+  assert.deepEqual(down.levels.map(l => +l.price.toFixed(2)), [105, 109.8]);
+});
