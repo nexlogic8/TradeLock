@@ -2032,4 +2032,11 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
   body[data-page="scalper"] .scalper-toolbar .sc-underlyings button, body[data-page="scalper"] .scalper-toolbar .sc-market button,
   body[data-page="scalper"] .scalper-toolbar .sc-span .seg button { height:22px; }
   body[data-page="scalper"] .scalper-toolbar .sc-view-tools, body[data-page="scalper"] .scalper-toolbar .scalper-feed { align-self:center; }
+  /* The dropdown arrow: centred in the 28 px box (the base style pins it 20 px down, for 40 px boxes). */
+  body[data-page="scalper"] .scalper-toolbar select.input { background-position:calc(100% - 13px) 50%, calc(100% - 8px) 50%; }
+  /* Layout buttons fit inside their 28 px frame like the other button groups. */
+  body[data-page="scalper"] .scalper-toolbar .sc-layout { height:28px; padding:2px; align-items:center; }
+  body[data-page="scalper"] .scalper-toolbar .sc-layout button { height:22px; width:30px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-layout button svg { width:15px; height:15px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-fullscreen { height:28px; }
 }
