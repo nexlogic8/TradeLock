@@ -158,6 +158,7 @@ table.tbl { width: 100%; border-collapse: collapse; min-width: 620px; }
 .legend .l-mint { background: var(--mint); } .legend .l-amber { background: var(--amber); } .legend .l-red { background: var(--red); }
 .legend i.dashed { width: 14px; height: 0; background: none; border-top: 2px dashed; border-radius: 0; }
 .legend i.l-red.dashed { border-color: var(--red); } .legend i.l-mint.dashed { border-color: var(--mint); }
+.legend .l-sky { background: var(--sky); } .legend i.l-sky.dashed { border-color: var(--sky); background: none; }
 .legend i.dot { width: 7px; height: 7px; border-radius: 50%; }
 
 /* KPI tile tools (eye / refresh) and hidden amounts */

@@ -80,6 +80,22 @@ test('Overview chart: a second stop-loss line only when the other set\'s stop-lo
   assert.deepEqual(otherSl(d({ on: true, amount: 41298 }, { on: true, amount: 57817 }, 'manual')), { key: 'algo', amount: 57817 });
 });
 
+test('Overview chart: both profit targets, each set its own line; the other set\'s target shows even when the active one is off', async () => {
+  const { getDashboard } = await import('../src/modules/risk/service.js');
+  const { otherTarget } = await import('../../web/js/pages/overview-sl.js');
+  const uid = createUser({ email: 'pt-sets@rules.test', password: null, name: 'PT' });
+  const r = getRules(uid);
+  saveRules(uid, { ...r.manual, profitLock: { on: true, mode: 'amount', value: 23193, action: 'pause' } }, undefined, null, 'manual');
+  saveRules(uid, { ...r.algo, profitLock: { on: false, mode: 'percent', value: 10, action: 'pause' } }, undefined, null, 'algo');
+  const pt = getDashboard(uid, null).profitTargets;
+  assert.deepEqual([pt.manual.on, pt.manual.amount, pt.algo.on, pt.algo.amount], [true, 23193, false, null]);
+  const d = (manual, algo, mode = 'algo') => ({ limits: { profitLock: (mode === 'algo' ? algo : manual).amount }, profitTargets: { mode, manual, algo } });
+  assert.deepEqual(otherTarget(d({ on: true, amount: 23193 }, { on: false, amount: null })), { key: 'manual', amount: 23193 }, 'Algo in force, its target off: Manual line still drawn');
+  assert.deepEqual(otherTarget(d({ on: true, amount: 23193 }, { on: true, amount: 15000 })), { key: 'manual', amount: 23193 });
+  assert.equal(otherTarget(d({ on: true, amount: 15000 }, { on: true, amount: 15000 })), null, 'same amount: one line');
+  assert.equal(otherTarget(d({ on: false, amount: null }, { on: true, amount: 15000 })), null);
+});
+
 test('Power Scalper sizes manual orders from the Manual set\'s Option SL room, also while the Algo set is in force', async () => {
   const { scalperSignalRisk } = await import('../src/modules/scalper/signals.js');
   const uid = createUser({ email: 'optsl@rules.test', password: null, name: 'O' });

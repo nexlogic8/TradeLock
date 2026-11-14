@@ -98,6 +98,7 @@ export function agentLockReason(userId, s = dayState(userId)) {
 }
 
 const slOf = (r, capital) => ({ on: !!r?.maxLoss?.on, mode: r?.maxLoss?.mode, value: r?.maxLoss?.value, amount: r?.maxLoss?.on ? limitsFor(r, capital).maxLoss : null });
+const targetOf = (r, capital) => ({ on: !!r?.profitLock?.on, amount: r?.profitLock?.on ? limitsFor(r, capital).profitLock : null });
 
 /** Everything the dashboard needs in one object; also pushed over SSE after each sync. */
 export function getDashboard(userId, acct = accountFor(userId)) {
@@ -129,6 +130,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     limits,
     // Both rule sets' daily stop-loss (Manual trading / Algo Trading), and which one is in force now.
     stopLosses: { mode, manual: slOf(manual, capital), algo: slOf(algo, capital) },
+    // Both sets' profit target, drawn as two lines when both are on.
+    profitTargets: { mode, manual: targetOf(manual, capital), algo: targetOf(algo, capital) },
     killSwitch: {
       enabled: !!rules.killSwitch?.on,
       supported: broker?.capabilities?.accountLock === 'killswitch',
