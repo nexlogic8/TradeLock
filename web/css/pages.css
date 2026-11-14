@@ -2104,3 +2104,12 @@ body.sc-split .sc-hdr-lots .sc-hdr-lots-input { width:46px; height:28px; font-si
 .sc-lotmode-m[aria-checked="true"] i::after { transform:translateX(9px); }
 .sc-lotmode-m[aria-checked="true"] b { color:var(--amber); }
 .sc-lotmode-m b { font-weight:700; }
+/* Manual lots switch on each ticket, just above the lots box: always visible (web, phones and the Android app). */
+body .sc-ticket .sc-lots .sc-lots-mode { display:flex; align-items:center; justify-content:center; gap:5px; width:100%; height:18px; min-height:18px; padding:0; margin:0; border:0; background:none; color:var(--dim); font:700 9px/1 var(--font); letter-spacing:.06em; text-transform:uppercase; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+body .sc-ticket .sc-lots .sc-lots-mode i { position:relative; width:22px; height:12px; border-radius:6px; background:var(--switch-off); flex:none; transition:background .15s; }
+body .sc-ticket .sc-lots .sc-lots-mode i::after { content:''; position:absolute; top:2px; left:2px; width:8px; height:8px; border-radius:50%; background:#fff; transition:transform .15s; }
+body .sc-ticket .sc-lots .sc-lots-mode[aria-checked="true"] { color:var(--amber); }
+body .sc-ticket .sc-lots .sc-lots-mode[aria-checked="true"] i { background:var(--amber); }
+body .sc-ticket .sc-lots .sc-lots-mode[aria-checked="true"] i::after { transform:translateX(10px); }
+body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--mint); outline-offset:2px; border-radius:4px; }
+@media (max-width:760px) { body .sc-ticket .sc-lots .sc-lots-mode { height:20px; min-height:20px; font-size:9.5px; } body .sc-ticket .sc-lots .sc-lots-mode i { width:24px; height:13px; } body .sc-ticket .sc-lots .sc-lots-mode i::after { width:9px; height:9px; } }

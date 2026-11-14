@@ -217,6 +217,7 @@ test('desktop layout switch: Classic / Split icons, right strip, Sell · lots ·
   assert.match(view,/data-hdr-lots="pe" type="text" inputmode="numeric"[^>]*value="6"/,'the header lots can be typed too');
   // Manual lots switch: off (default) = auto lots, boxes read-only and − / + off, no "lots" word beside the box.
   assert.match(view,/class="sc-strategy sc-lotmode" role="switch" data-lot-mode-toggle aria-checked="false"/);
+  assert.match(view,/class="sc-lots-mode " role="switch" data-lot-mode-toggle aria-checked="false"[^>]*><i aria-hidden="true"><\/i><span data-lots-mode="ce">Auto<\/span>/, 'the switch also sits on each ticket above the lots box (phones and the app)');
   assert.match(view,/data-hdr-lots="ce"[^>]*readonly/);
   assert.match(view,/data-lots="ce" type="text"[^>]*readonly/);
   assert.match(view,/data-lot-step="1" data-lot-side="ce"[^>]*disabled/);
