@@ -124,7 +124,7 @@ function strategyChecks(ui) {
 function lotModeSwitch(ui, compact = false) {
   const on = !!ui.manualMode, hint = 'Manual lots: on = type the lots or use − / + (remembered per instrument); off = auto from your risk rules';
   return compact
-    ? html`<button type="button" class="scm-tool sc-lotmode-m" role="switch" data-lot-mode-toggle aria-checked="${String(on)}" title="${hint}"><i aria-hidden="true"></i>Lots <b data-lot-mode-text>${on ? 'Manual' : 'Auto'}</b></button>`
+    ? html`<button type="button" class="sc-lotmode-m" role="switch" data-lot-mode-toggle aria-checked="${String(on)}" aria-label="Manual lots" title="${hint}"><span class="lm-auto">Auto</span><i aria-hidden="true"></i><span class="lm-manual">Manual</span></button>`
     : html`<button type="button" class="sc-strategy sc-lotmode" role="switch" data-lot-mode-toggle aria-checked="${String(on)}" title="${hint}"><i aria-hidden="true"></i>Manual lots</button>`;
 }
 function strategySwitches(ui) {
@@ -342,7 +342,7 @@ export default {
 
       <div class="scm-scrim" data-close-sheet></div>
       <section class="scalper-tickets mside-${ctx.ui.mSide || 'ce'}">
-        <div class="scm-ordertype"><span class="on">Market order</span><span>Lots auto-sized from your risk rules</span></div>
+        <div class="scm-ordertype">${lotModeSwitch(ctx.ui, true)}</div>
         ${ticket('CALL', 'CE', ce, d.lotSize, ctx.ui.margins?.ce, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), manualOf(ctx.ui, 'ce'))}
         <div class="panel sc-position-summary"><span class="eyebrow">${indexName}</span><b data-spot>${money(d.underlying.ltp)}</b><div class="sc-range"><span>${money(d.underlying.candles.at(-1)?.low)}</span><i><em></em></i><span>${money(d.underlying.candles.at(-1)?.high)}</span></div><button class="btn btn-ghost btn-sm" data-side-panel="positions">Show positions</button><small>All orders go through TradeLock risk rules and Dhan.</small></div>
         ${ticket('PUT', 'PE', pe, d.lotSize, ctx.ui.margins?.pe, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), manualOf(ctx.ui, 'pe'))}
@@ -690,6 +690,7 @@ export default {
     on(el, 'click', '[data-lot-mode-toggle]', () => {
       ui.manualMode = !ui.manualMode;
       for (const b of $$('[data-lot-mode-toggle]', el)) { b.setAttribute('aria-checked', String(ui.manualMode)); const t = b.querySelector('[data-lot-mode-text]'); if (t) t.textContent = ui.manualMode ? 'Manual' : 'Auto'; }
+      for (const n of $) n.textContent = ui.manualMode ? 'Manual lots: type them or use − / +' : 'Lots auto-sized from your risk rules';
       put('/scalper/lots/mode', { manual: ui.manualMode }).catch(() => { /* kept for this visit */ });
       updateTickets(ctx); refreshMarginsSoon();
       toast(ui.manualLots && ui.manualMode ? 'Manual lots: type or use − / +.' : 'Auto lots: sized from your risk rules.', 'ok');
