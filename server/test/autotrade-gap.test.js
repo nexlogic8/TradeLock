@@ -344,7 +344,7 @@ test('previous close = the previous session\'s last traded price (not NSE\'s off
   assert.match(n.body, /previous close = last trade/);
 });
 
-test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch rule on; not when it is off or another strategy is on)', async (t) => {
+test('no Gap 09:15 entry → the account stays open: no kill switch, even with the kill switch rule on', async (t) => {
   const at = (day, x) => Date.parse(`${day}T${x}+05:30`), today = new Date(Date.now() + 19800e3).toISOString().slice(0, 10);
   const withKill = day => {
     const dhan = fakeDhan(), base = dhan.intradayCandles, last = { G1: 145, P1: 112 };   // neither premium gapped up: no trade
@@ -364,36 +364,18 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     await new Promise(res => setTimeout(res, 30));   // the lock is not awaited by the scan
     return r;
   };
-  // The kill switch covers the whole account: it is set on the Risk rules page (the Manual set), also for Algo Trading.
+  // The "If no Gap entry today: kill switch" option was removed: a day without a Gap entry never locks the account.
   const rules = getRules(uid).manual;
+  saveRules(uid, { ...rules, killSwitch: { on: true } }, undefined, null, 'manual');
   try {
     const dhan = withKill('2026-10-14'), r = await run(dhan, '2026-10-14');
     if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
-    assert.ok(!dhan.calls.some(c => c[0] === 'order'), 'no trade');
-    assert.ok(dhan.calls.some(c => c[0] === 'killswitch'), `kill switch activated (${JSON.stringify(r)})`);
+    assert.ok(dhan.calls.some(c => c[0] === 'quotes') && !dhan.calls.some(c => c[0] === 'order'), `decided, no trade (${JSON.stringify(r)})`);
+    assert.ok(!dhan.calls.some(c => c[0] === 'killswitch'), 'no kill switch on a day without a Gap entry');
     const s = stmt('SELECT ks_armed, ks_active_at FROM day_state WHERE user_id = ? AND day = ?').get(uid, today);
-    assert.equal(s.ks_armed, 'gap:no-entry');
-    assert.ok(s.ks_active_at > 0);
-    assert.match(stmt("SELECT body FROM notifications WHERE user_id = ? AND title LIKE '%kill switch activated%' ORDER BY id DESC").get(uid).body, /no Gap 09:15 entry today/);
-
-    saveRules(uid, { ...rules, killSwitch: { on: false } }, undefined, null, 'manual');
-    const off = withKill('2026-10-13');
-    const r2 = await run(off, '2026-10-13');
-    assert.ok(off.calls.some(c => c[0] === 'quotes') && !off.calls.some(c => c[0] === 'order'), `decided, no trade (${JSON.stringify(r2)})`);
-    assert.ok(!off.calls.some(c => c[0] === 'killswitch'), 'kill switch rule off: no lock');
-    saveRules(uid, rules, undefined, null, 'manual');
-
-    const orb = withKill('2026-10-12');
-    acct = { ...acct, orb_on: 1 };
-    await run(orb, '2026-10-12');
-    assert.ok(!orb.calls.some(c => c[0] === 'killswitch'), 'ORB still to trade today: no lock');
-
-    const off2 = withKill('2026-10-09');
-    acct = { ...acct, orb_on: 0, gap_lock: 0 };
-    await run(off2, '2026-10-09');
-    assert.ok(off2.calls.some(c => c[0] === 'quotes') && !off2.calls.some(c => c[0] === 'killswitch'), '"Kill switch if no Gap entry" off: no lock');
+    assert.ok(!s?.ks_armed && !s?.ks_active_at, 'nothing armed');
   } finally {
-    acct = { ...acct, orb_on: 0, gap_lock: 1 };
+    acct = { ...acct, orb_on: 0 };
     saveRules(uid, rules, undefined, null, 'manual');
     patchDay(uid, today, { ks_armed: null, ks_active_at: null });
     setKillStatus(uid, { active: false, checkedAt: Date.now() });   // the fake broker's switch, recorded in memory

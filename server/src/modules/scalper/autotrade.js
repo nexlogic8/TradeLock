@@ -69,7 +69,6 @@ import { underlyingFor } from './underlyings.js';
 import { normalizeScalperCandles } from './routes.js';
 import { algoUnwatch, algoWatch, liveBar, liveMinute, liveTick, onMinuteClose } from './live.js';
 import { isAdminUser, withAllowedStrategies } from '../../lib/access.js';
-import { tryKillSwitch } from '../emergency/service.js';
 import { optionCharges } from './orb5-options.js';
 import { NSE_HOLIDAYS } from '../../lib/market-calendar.js';
 import { indexView, slotCfg, strategyIndices, STRANGLE_INDEX_TARGETS } from './algo-grid.js';
@@ -566,7 +565,6 @@ function gapNoTrade(acct, adapter, u, day, title, body) {
   const plain = !isAdminUser(acct.user_id);   // users: no premiums or gap figures
   notify(acct.user_id, { kind: 'risk', level: 'info', title, body: plain ? `${u.label}: no Gap 09:15 trade today.` : body });
   audit(acct.user_id, 'algo.gap_no_trade', { underlying: u.key, day, title, body });
-  lockAfterNoGapEntry(acct, adapter, u.key);
 }
 
 /**
@@ -834,21 +832,7 @@ async function claimAndEnter(acct, adapter, setup, { now, pause, instruments, ui
     }
     return { error: e.message };
   } finally {
-    if (setup.strategy === 'Gap 09:15' && ['skipped', 'failed'].includes(row(id)?.status)) lockAfterNoGapEntry(acct, adapter, u.key);
   }
-}
-
-/**
- * No Gap 09:15 entry today (no gap, not checked, skipped, not filled or rejected): with "Kill switch if no Gap entry"
- * (gap_lock) and the kill switch rule on, and no
- * other strategy left to trade today, the broker's kill switch locks the account for the rest of the day (armed until
- * flat, if anything is open).
- */
-export function lockAfterNoGapEntry(acct, adapter, U = 'NIFTY') {
-  const a = withAllowedStrategies(acct);
-  // "If no Gap entry" in that index's Gap settings (Algo Trading grid; before them, the gap_lock switch).
-  if (gapConfig(acct, U).noEntryLock === false || a.orb_on || a.cross_on || a.ema915_on || a.strangle_on || !getRules(acct.user_id).active?.killSwitch?.on || !getSubscription(acct.user_id)?.active) return;
-  tryKillSwitch(acct.user_id, acct, 'gap:no-entry', adapter).catch(e => console.error('[autotrade] kill switch', e.message));
 }
 
 async function enter(acct, adapter, id, setup, direction, { now, pause, instruments }) {
