@@ -2023,3 +2023,13 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input { min-height:54px; }
   body[data-page="scalper"] .scalper-toolbar .sc-view-tools + .scalper-feed { margin-left:4px; font-size:10px; height:28px; }
 }
 @media (min-width:1400px) { body[data-page="scalper"] .scalper-toolbar { flex-wrap:nowrap; } }
+/* One level: no small labels above the controls (the values say what they are), every control 28 px and centred. */
+@media (min-width:1001px) {
+  body[data-page="scalper"] .scalper-toolbar { align-items:center; }
+  body[data-page="scalper"] .scalper-toolbar .scalper-control > small { display:none; }
+  body[data-page="scalper"] .scalper-toolbar .scalper-control { justify-content:center; }
+  body[data-page="scalper"] .scalper-toolbar .seg { height:28px; align-items:center; box-sizing:border-box; }
+  body[data-page="scalper"] .scalper-toolbar .sc-underlyings button, body[data-page="scalper"] .scalper-toolbar .sc-market button,
+  body[data-page="scalper"] .scalper-toolbar .sc-span .seg button { height:22px; }
+  body[data-page="scalper"] .scalper-toolbar .sc-view-tools, body[data-page="scalper"] .scalper-toolbar .scalper-feed { align-self:center; }
+}
