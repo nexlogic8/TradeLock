@@ -34,6 +34,7 @@ export function niceScale(min, max, count = 4) {
  * opts: xDomain, yDomain, yTicks, fmtY, xTicks [[value, label]], vlines [{x, color, label}],
  *       hlines [{y, color, label}] (day levels such as the stop-loss),
  *       notes [{text, color, at: 'top' | 'bottom'}] (e.g. "No profit limit" when a level is switched off),
+ *       series [{pts, color}] (extra lines drawn under the main one),
  *       low [x, y, label], endLabel, bare (sparkline mode)
  */
 export function lineChart(svg, pts, o) {
@@ -81,6 +82,14 @@ export function lineChart(svg, pts, o) {
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(' ');
   const base = o.bare ? H : Y(Math.max(y0, Math.min(0, y1)));
   el('path', { d: `${d} L${X(pts.at(-1)[0]).toFixed(1)} ${base} L${X(pts[0][0]).toFixed(1)} ${base} Z`, fill: `url(#${id})` }, svg);
+  // Extra lines under the main one (e.g. the Algo and Manual parts of the day's P&L), each with a dot at its end.
+  for (const s of o.series || []) {
+    if (!s.pts?.length) continue;
+    const sd = s.pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(' ');
+    el('path', { d: sd, fill: 'none', stroke: s.color, 'stroke-width': 1.6, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'stroke-opacity': 0.95 }, svg);
+    const se = s.pts.at(-1);
+    el('circle', { cx: X(se[0]), cy: Y(se[1]), r: 3, fill: s.color }, svg);
+  }
   const path = el('path', { d, fill: 'none', stroke: mint, 'stroke-width': o.bare ? 1.6 : 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
   if (!o.bare) path.style.filter = `drop-shadow(0 0 6px ${token('--mint-glow')})`;
 

@@ -23,6 +23,7 @@
   --ice-soft: rgba(124, 200, 255, .12);
   --amber: #FFBA52;
   --sky: #5AB8FF;
+  --violet: #B48CFF;
   --amber-soft: rgba(255, 186, 82, .12);
   --amber-text: #FFD596;
   --red: #FF5E7B;
@@ -86,6 +87,7 @@
   --ice-soft: rgba(21, 112, 201, .10);
   --amber: #B26B0A;
   --sky: #1F78C8;
+  --violet: #7A4FD6;
   --amber-soft: rgba(214, 140, 30, .12);
   --amber-text: #7E4D08;
   --red: #D1304D;

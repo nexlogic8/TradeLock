@@ -6,7 +6,7 @@ import { pill, meter, empty, statusOf, toneClass } from '../ui/parts.js';
 import { lineChart, ring, niceScale } from '../ui/charts.js';
 import { toast, toastError } from '../ui/toast.js';
 import { mountKillSwitch, ksOn } from '../ui/killswitch.js';
-import { otherSl, otherTarget } from './overview-sl.js';
+import { otherSl, otherTarget, pnlSplit } from './overview-sl.js';
 
 const OPEN = 555, CLOSE = 930; // 09:15 – 15:30 IST
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -59,6 +59,14 @@ function slSets(sl) {
   return html`<div class="sl-sets"><a href="/rules" data-nav="rules">${line('manual', 'Manual SL')}${line('algo', 'Algo SL')}</a></div>`;
 }
 
+/** Legend: the Algo and Manual parts of the day's P&L with their latest values (once Algo Trading has traded today). */
+function splitLegend(points) {
+  const s = pnlSplit((points || []).filter(p => p.minute >= OPEN - 15));
+  if (!s) return '';
+  const cls = s.both ? '' : ' dot';   // no lines drawn yet: just the values
+  return html`<span><i class="l-sky${cls}"></i>Algo ${inr(s.algoNow, { sign: true })}</span><span><i class="l-violet${cls}"></i>Manual ${inr(s.manualNow, { sign: true })}</span>`;
+}
+
 function fundCard(d, key, label, value, foot, refresh = false, accent = 'acc-mint') {
   const hide = isHidden(key);
   return html`
@@ -98,8 +106,8 @@ export default {
     if (!d || d.day !== ctx.data.day) return;
     const minute = istNow().minutes;
     const pts = ctx.data.points;
-    if (pts.at(-1)?.minute === minute) pts.at(-1).pnl = d.pnl;
-    else pts.push({ minute, pnl: d.pnl });
+    if (pts.at(-1)?.minute === minute) Object.assign(pts.at(-1), { pnl: d.pnl, algo: d.algoPnl ?? null });
+    else pts.push({ minute, pnl: d.pnl, algo: d.algoPnl ?? null });
   },
 
   view(ctx) {
@@ -137,7 +145,7 @@ export default {
         <div class="panel pad chart-panel">
           <div class="panel-head">
             <h3 class="panel-title">Intraday P&amp;L</h3>
-            <div class="legend"><span><i class="l-mint"></i>Day P&amp;L</span>${d.limits?.maxLoss ? html`<span><i class="l-red dashed"></i>${otherSl(d) ? (d.stopLosses.mode === 'algo' ? 'Algo SL' : 'Manual SL') : 'Stop-loss'} −${inr(d.limits.maxLoss)}</span>${otherSl(d) ? html`<span><i class="l-amber dashed"></i>${otherSl(d).key === 'algo' ? 'Algo SL' : 'Manual SL'} −${inr(otherSl(d).amount)}</span>` : ''}` : !r.maxLoss.on ? html`<span><i class="l-red dashed"></i>No stop-loss</span>` : ''}${d.limits?.profitLock ? html`<span><i class="l-mint dashed"></i>${otherTarget(d) ? (d.profitTargets.mode === 'algo' ? 'Algo target' : 'Manual target') : 'Target'} ${inr(d.limits.profitLock)}</span>` : !r.profitLock.on && !otherTarget(d) ? html`<span><i class="l-mint dashed"></i>No profit limit</span>` : ''}${otherTarget(d) ? html`<span><i class="l-sky dashed"></i>${otherTarget(d).key === 'algo' ? 'Algo target' : 'Manual target'} ${inr(otherTarget(d).amount)}${d.limits?.profitLock ? '' : ' (not in force)'}</span>` : ''}${r.cutoff.on ? html`<span><i class="l-amber"></i>Cutoff ${fmt12(r.cutoff.value)}</span>` : ''}<span><i class="l-red dot"></i>Day low</span></div>
+            <div class="legend"><span><i class="l-mint"></i>Day P&amp;L</span>${splitLegend(ctx.data.points)}${d.limits?.maxLoss ? html`<span><i class="l-red dashed"></i>${otherSl(d) ? (d.stopLosses.mode === 'algo' ? 'Algo SL' : 'Manual SL') : 'Stop-loss'} −${inr(d.limits.maxLoss)}</span>${otherSl(d) ? html`<span><i class="l-amber dashed"></i>${otherSl(d).key === 'algo' ? 'Algo SL' : 'Manual SL'} −${inr(otherSl(d).amount)}</span>` : ''}` : !r.maxLoss.on ? html`<span><i class="l-red dashed"></i>No stop-loss</span>` : ''}${d.limits?.profitLock ? html`<span><i class="l-mint dashed"></i>${otherTarget(d) ? (d.profitTargets.mode === 'algo' ? 'Algo target' : 'Manual target') : 'Target'} ${inr(d.limits.profitLock)}</span>` : !r.profitLock.on && !otherTarget(d) ? html`<span><i class="l-mint dashed"></i>No profit limit</span>` : ''}${otherTarget(d) ? html`<span><i class="l-mint dashed faint"></i>${otherTarget(d).key === 'algo' ? 'Algo target' : 'Manual target'} ${inr(otherTarget(d).amount)}${d.limits?.profitLock ? '' : ' (not in force)'}</span>` : ''}${r.cutoff.on ? html`<span><i class="l-amber"></i>Cutoff ${fmt12(r.cutoff.value)}</span>` : ''}<span><i class="l-red dot"></i>Day low</span></div>
           </div>
           <svg class="chart" id="intraday" role="img" aria-label="Intraday P&L, now ${inr(d.pnl, { sign: true })}, low ${inr(d.worst)}"></svg>
         </div>
@@ -211,7 +219,7 @@ export default {
       sl != null && { y: sl, color: css('--red'), label: other ? `${names[d.stopLosses.mode]} ${inr(sl)} (active)` : `Stop-loss ${inr(sl)}` },
       other && { y: -other.amount, color: css('--amber'), label: `${names[other.key]} ${inr(-other.amount)}`, dash: '3 5', opacity: 0.75, end: true },
       target && { y: target, color: css('--mint'), label: otherT ? `${tNames[d.profitTargets.mode]} ${inr(target, { sign: true })} (active)` : `Target ${inr(target, { sign: true })}` },
-      otherT && { y: otherT.amount, color: css('--sky'), label: `${tNames[otherT.key]} ${inr(otherT.amount, { sign: true })}${target ? '' : ' (not in force)'}`, dash: '3 5', opacity: 0.85, end: true },
+      otherT && { y: otherT.amount, color: css('--mint'), label: `${tNames[otherT.key]} ${inr(otherT.amount, { sign: true })}${target ? '' : ' (not in force)'}`, dash: '3 5', opacity: 0.45, end: true },
     ].filter(Boolean);
     // A level that is switched off is stated on the chart instead of drawn.
     const notes = [
@@ -219,7 +227,10 @@ export default {
       !d.rules.maxLoss.on && { text: 'No stop-loss ↓', color: css('--red'), at: 'bottom' },
     ].filter(Boolean);
     // Zero always sits in the middle: the scale runs the same distance up and down.
-    const reach = Math.max(1, ...[...ys, d.worst, sl ?? 0, other ? other.amount : 0, target ?? 0, otherT ? otherT.amount : 0].map(Math.abs));
+    // Algo / Manual P&L as two more lines, once both have moved today (otherwise the total line already is the one).
+    const split = pnlSplit(ctx.data.points.filter(p => p.minute >= OPEN - 15));
+    const series = split?.both ? [{ pts: split.manual, color: css('--violet') }, { pts: split.algo, color: css('--sky') }] : [];
+    const reach = Math.max(1, ...[...ys, ...series.flatMap(s => s.pts.map(p => p[1])), d.worst, sl ?? 0, other ? other.amount : 0, target ?? 0, otherT ? otherT.amount : 0].map(Math.abs));
     const sc = niceScale(-reach, reach, 6);
     const x0 = Math.min(OPEN, pts[0][0]), x1 = Math.max(CLOSE, pts.at(-1)[0]);
     const low = pts.reduce((a, p) => (p[1] < a[1] ? p : a), pts[0]);
@@ -227,7 +238,7 @@ export default {
     const step = svg.clientWidth < 520 ? 150 : 75;   // fewer time labels on phones so they don't overlap
     for (let m = OPEN; m <= x1; m += step) xTicks.push([m, hhmm(m)]);
     lineChart(svg, pts, {
-      xDomain: [x0, x1], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, hlines, notes,
+      xDomain: [x0, x1], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, hlines, notes, series,
       vlines: d.rules.cutoff.on ? [{ x: toMin(d.rules.cutoff.value), color: getComputedStyle(document.documentElement).getPropertyValue('--amber').trim(), label: 'Cutoff' }] : [],
       low: low[1] < 0 ? [low[0], low[1], inr(low[1])] : null,
       endLabel: inr(d.pnl, { sign: true }),

@@ -22,7 +22,7 @@ import { getRules } from '../rules/service.js';
 import { upsertFills, fillsForDay, logRiskEvent } from '../trades/service.js';
 import { runEmergency, tryKillSwitch } from '../emergency/service.js';
 import { evaluate, countEntries, closedTrades } from './engine.js';
-import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds } from './service.js';
+import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds, algoSecurityIds, algoPnlOf, setAlgoPnl } from './service.js';
 
 // Outside market hours brokers are polled slowly, read-only, so funds and positions stay visible.
 const OFF_HOURS_SYNC_MS = 5 * 60e3;
@@ -243,11 +243,16 @@ export function applySnapshot(uid, t, snap, m) {
   // The intraday curve starts at the open: points from before it (the previous session's P&L) are dropped, once a day.
   if (preOpen) {
     if (m.clearedDay !== t.day) { m.clearedDay = t.day; stmt('DELETE FROM pnl_points WHERE user_id = ? AND day = ? AND minute < ?').run(uid, t.day, config.market.open); }
+    setAlgoPnl(uid, null);
     return { ...s, ...patch };
   }
-  if (!m.point || m.point.minute !== t.minutes || m.point.pnl !== pnl) {
-    recordPoint(uid, t.day, t.minutes, pnl);
-    m.point = { minute: t.minutes, pnl };
+  // Algo Trading's part of the day (its contracts' positions); the contract list is re-read every 10 s.
+  if (!m.algoIds || m.algoIds.day !== t.day || Date.now() - m.algoIds.at >= 10_000) m.algoIds = { day: t.day, at: Date.now(), ids: algoSecurityIds(uid, t.day) };
+  const algo = algoPnlOf(counted, m.algoIds.ids);
+  setAlgoPnl(uid, algo);
+  if (!m.point || m.point.minute !== t.minutes || m.point.pnl !== pnl || m.point.algo !== algo) {
+    recordPoint(uid, t.day, t.minutes, pnl, algo);
+    m.point = { minute: t.minutes, pnl, algo };
   }
   return { ...s, ...patch };
 }

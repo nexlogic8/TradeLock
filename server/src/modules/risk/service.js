@@ -54,12 +54,31 @@ export function patchDay(userId, day, patch, { defer = false } = {}) {
   if (keys.some(k => k !== 'sync_ok')) markDirty(userId);
 }
 
-export const recordPoint = (userId, day, minute, pnl) => deferWrite(() =>
-  stmt('INSERT INTO pnl_points (user_id, day, minute, pnl) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET pnl = excluded.pnl')
-    .run(userId, day, minute, Math.round(pnl * 100) / 100));
+const cents = v => (v == null ? null : Math.round(v * 100) / 100);
+/** `algo`: the Algo Trading part of `pnl` (the rest is manual trading), null when not known. */
+export const recordPoint = (userId, day, minute, pnl, algo = null) => deferWrite(() =>
+  stmt('INSERT INTO pnl_points (user_id, day, minute, pnl, algo) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET pnl = excluded.pnl, algo = excluded.algo')
+    .run(userId, day, minute, cents(pnl), cents(algo)));
 
 export const intradayPoints = (userId, day = ist().day) =>
-  stmt('SELECT minute, pnl FROM pnl_points WHERE user_id = ? AND day = ? ORDER BY minute').all(userId, day);
+  stmt('SELECT minute, pnl, algo FROM pnl_points WHERE user_id = ? AND day = ? ORDER BY minute').all(userId, day);
+
+// Today's Algo Trading P&L per user, from the last broker sync (the dashboard's live split; not persisted).
+const algoNow = new Map();
+export const setAlgoPnl = (userId, v) => { if (v == null) algoNow.delete(userId); else algoNow.set(userId, cents(v)); };
+
+/** Contracts Algo Trading traded or holds today: their positions' P&L is the Algo part of the day. */
+export function algoSecurityIds(userId, day) {
+  const dayStart = Date.parse(`${day}T00:00:00+05:30`);
+  return new Set(stmt(`SELECT DISTINCT security_id AS id FROM auto_trades WHERE user_id = ? AND security_id IS NOT NULL
+    AND (day = ? OR status IN ('placing', 'open', 'closing') OR closed_at >= ?)`).all(userId, day, dayStart).map(r => String(r.id)));
+}
+
+/** P&L of the positions in `ids`, or null when Algo Trading has no contract today. */
+export function algoPnlOf(positions, ids) {
+  if (!ids.size) return null;
+  return positions.reduce((a, p) => a + (ids.has(String(p.securityId)) ? (p.realized || 0) + (p.unrealized || 0) : 0), 0);
+}
 
 /**
  * Capital from broker funds (GROWCONTROL): money in the account = free + in use, minus today's realized
@@ -118,6 +137,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     time: t.hhmm,
     marketOpen: marketOpen(),
     pnl, realized: s.realized, unrealized: s.unrealized, worst: s.worst, peak: s.peak,
+    // Part of `pnl` from Algo Trading (the rest is manual), null when Algo Trading has not traded today.
+    algoPnl: algoNow.get(userId) ?? null,
     entries: s.entries,
     paused: !!s.paused,
     pauseReason: s.pause_reason,

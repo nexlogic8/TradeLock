@@ -838,4 +838,6 @@ export const MIGRATIONS = [
   `,
   // Algo Trading grid: each strategy on or off per index, with its settings (JSON; null = from the older switches).
   `ALTER TABLE broker_accounts ADD COLUMN algo_grid TEXT;`,
+  // Intraday P&L split: the Algo Trading part of each point (manual = pnl − algo; null = recorded before the split).
+  `ALTER TABLE pnl_points ADD COLUMN algo REAL;`,
 ];
