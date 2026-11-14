@@ -80,3 +80,23 @@ test('Fib 0.5 / 0.66: retracement of the last swing leg, measured back from its 
   assert.deepEqual([down.dir, down.from, down.to], ['down', 90, 120]);
   assert.deepEqual(down.levels.map(l => +l.price.toFixed(2)), [105, 109.8]);
 });
+
+test('Gap BUY signals: CE only on a gap-up day, after a VWAP / EMA trend and a break up; at most 2 a day; 3-minute regroup', async () => {
+  const { gapSignals, gapByDay, regroup } = await import('../../web/js/pages/scalper-chart-smc.js');
+  const day = (d, hh, mm) => Date.parse(`2026-11-${d}T${hh}:${mm}:00+05:30`) / 1000;
+  // Index: 12 Nov closes 100, 13 Nov opens 105 (gap up).
+  const spot = [{ time:day(12, '15', '29'), open:100, high:101, low:99, close:100 }, { time:day(13, '09', '15'), open:105, high:106, low:104, close:105 }];
+  const gaps = gapByDay(spot);
+  assert.equal(gaps.get(Math.floor((day(13, '09', '15') + 19800) / 86400)), 'up');
+  // Premium on 13 Nov (3-minute candles): a steady rise with a pull-back, then a break above the swing high.
+  const path = [100, 101, 102, 103, 104, 106, 108, 110, 109, 108, 107, 108, 109, 110, 111, 112, 113, 112, 111, 110, 111, 112, 113, 114, 116, 118, 120, 119, 118, 117, 118, 119, 121, 123, 125, 127, 126, 125, 124, 126, 128, 130];
+  const bars = path.map((p, i) => ({ time: day(13, '09', '15') + i * 180, open:p - 0.5, high:p + 0.6, low:p - 0.8, close:p, volume:100 }));
+  const ce = gapSignals(bars, 'CE', gaps);
+  assert.ok(ce.length >= 1 && ce.length <= 2, `1-2 BUYs on a gap-up day (got ${ce.length})`);
+  assert.match(ce[0].why, /break up|sweep/);
+  assert.equal(gapSignals(bars, 'PE', gaps).length, 0, 'no PE signal on a gap-up day');
+  // 1-minute candles regroup into 3-minute ones from 09:15; the signal is placed on the last minute of its candle.
+  const ones = Array.from({ length: 6 }, (_, i) => ({ time: day(13, '09', '15') + i * 60, open:1, high:2 + i, low:0.5, close:1 + i, volume:10 }));
+  const three = regroup(ones, 3);
+  assert.deepEqual(three.map(b => [b.time, b.high, b.close, b.volume, b.last]), [[day(13, '09', '15'), 4, 3, 30, day(13, '09', '17')], [day(13, '09', '18'), 7, 6, 30, day(13, '09', '20')]]);
+});

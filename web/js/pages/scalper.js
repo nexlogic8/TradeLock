@@ -8,7 +8,7 @@ import { store } from '../core/store.js';
 import { chartPalette } from './chart-palette.js';
 import { STUDIES, computeStudy, newStudy, defaultStudies, sanitizeStudies } from './chart-studies.js';
 import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } from './scalper-chart-indicators.js';
-import { SmcPrimitive } from './scalper-chart-smc.js';
+import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -132,6 +132,7 @@ const INDICATORS = [
   ['vp', 'Volume profile', 'Volume profile of the candles in view · brighter band = 70% value area · line = point of control'],
   ['oi', 'Open interest', 'Open interest · index chart: option-chain OI per strike (red CE above, green PE below) · option charts: OI line'],
   ['prev', 'Prev day H/L', 'Previous session high and low lines on each chart (index, CE and PE)'],
+  ['sig', 'Gap BUY signals', 'BUY arrows on the CE / PE charts and CE BUY / PE BUY on the index (index options only). CE only on a gap-up day, PE only on a gap-down day; price above VWAP, EMA 9 above EMA 21, then an SMC break up or an ICT sell-side sweep; at most 2 a day; 3-minute candles on the 1-minute chart. Backtest NIFTY ITM1, 25 May – 13 Nov 2026, 1 lot after costs: +₹39,050 over 199 trades (44% won). Not a guarantee: try it on Paper first.'],
   ['smc', 'SMC', 'Smart Money Concepts · BOS (dashed) and CHoCH (solid) where a close breaks the last swing high / low · Bull OB (blue) / Bear OB (orange): the last opposite candle before the break, shown until price closes through it'],
   ['ict', 'ICT', 'ICT concepts · BSL / SSL: resting liquidity above swing highs / below swing lows (EQH / EQL when equal), ✕ sweep where a wick takes it and closes back · Premium / Discount of the dealing range with its 50% EQ line · OTE: the 62–79% retracement of the last swing leg'],
   ['fib', 'Fib 0.5 / 0.66', 'Fibonacci retracement of the last swing leg · gold lines at 0.5 and 0.66 (where a pull-back often holds), faint 0 and 1 at the leg ends · each labelled with its price'],
@@ -142,9 +143,9 @@ const INDICATORS = [
 //   MCX:   EMA 9 / 21, VWAP and Supertrend 10 / 3 (crude and gold trend in the evening); volume profile, previous-day
 //          levels, ICT liquidity sweeps and Fib 0.5 / 0.66 pull-backs. (No OI profile: MCX options OI is thin.)
 export const MARKET_DEFAULTS = {
-  nse: { label:'NIFTY', builtin:{ vp:true, oi:true, prev:true, smc:false, ict:true, fib:false, fvg:true },
+  nse: { label:'NIFTY', builtin:{ sig:true, vp:true, oi:true, prev:true, smc:false, ict:true, fib:false, fvg:true },
     studies: () => [newStudy('ema', { length:9 }), newStudy('ema', { length:21 }), newStudy('vwap')] },
-  mcx: { label:'MCX', builtin:{ vp:true, oi:false, prev:true, smc:false, ict:true, fib:true, fvg:false },
+  mcx: { label:'MCX', builtin:{ sig:false, vp:true, oi:false, prev:true, smc:false, ict:true, fib:true, fvg:false },
     studies: () => [newStudy('ema', { length:9 }), newStudy('ema', { length:21 }), newStudy('vwap'), newStudy('supertrend', { length:10, factor:3 })] },
 };
 export const marketOf = underlying => (isMcxKey(underlying) ? 'mcx' : 'nse');
@@ -840,6 +841,7 @@ export default {
       savePref(indicatorKey(currentMarket), JSON.stringify(Object.fromEntries(INDICATORS.map(([k]) => [k, ui.indicators[k] !== false]))));
       el.querySelectorAll(`[data-indicator="${key}"]`).forEach(b => b.setAttribute('aria-pressed', String(next)));
       for (const view of Object.values(ui.chartViews || {})) try { showIndicators(view, ui.indicators); } catch { /* disposed chart */ }
+      if (key === 'sig') refreshSignalMarkers(ctx);
     }, signal);
     // ---- Indicators panel ----
     const studiesPop = key => $(`[data-studies-pop="${key}"]`, el);
@@ -859,6 +861,7 @@ export default {
       }
       for (const pop of $$('[data-studies-pop]', el)) if (!pop.hidden) pop.innerHTML = studiesPanel(ctx, pop.dataset.studiesPop);
       for (const b of $$('[data-indicator]', el)) b.setAttribute('aria-pressed', String(ui.indicators?.[b.dataset.indicator] !== false));
+      refreshSignalMarkers(ctx);
     };
     ui.applyMarketSetup = applyMarketSetup;
     // Reset: forget this market's saved choices, so all 3 charts and the overlays are back on its default.
@@ -1139,11 +1142,25 @@ function refreshSignalMarkers(ctx) {
   const scalp35 = enabled.ema35 === false ? [] : emaScalpSignals(spot, { intervalMs, f:EMA_SCALP_35 });
   // Premium charts carry the current session's signals only (IST day of the last index candle).
   const last = spot.at(-1)?.time, sessionStart = last ? Math.floor((last + 19_800) / 86_400) * 86_400 - 19_800 : 0;
+  // Gap signals (scalper-chart-smc.js gapSignals): BUY on the CE / PE premium charts, "CE BUY" / "PE BUY" on the index.
+  // Index options only (backtested on NIFTY); on the 1-minute chart they use 3-minute candles, as tested.
+  const gap = { ce:[], pe:[] };
+  if (ctx.ui.indicators?.sig !== false && currentMarket === 'nse' && spot.length) {
+    const gaps = gapByDay(spot), tf = String(interval) === '1' ? GAP_SIGNAL.tf : null;
+    for (const side of ['ce', 'pe']) {
+      const rows = views[side]?.data || [];
+      gap[side] = gapSignals(tf ? regroup(rows, tf) : rows, side.toUpperCase(), gaps);
+    }
+  }
+  const pal = chartPalette();
+  const buyMarker = (s, text, color, up = true) => ({ time:s.time, position: up ? 'belowBar' : 'aboveBar', shape: up ? 'arrowUp' : 'arrowDown', color, text });
   for (const [key, view] of Object.entries(views)) {
     if (!view?.signalMarkers) continue;
     const markers = [...openingRangeMarkers(orb, key), ...emaCrossMarkers(cross, key), ...emaScalpMarkers(scalp, key), ...emaScalpMarkers(scalp35, key, EMA_SCALP_35), ...(key === 'spot' && enabled.hammer !== false && showsHammerMarkers(interval) ? emaRejectionMarkers(spot, { intervalMs }) : [])];
     // Premium charts: place each index-time marker on the option's own candle for that minute.
-    const placed = key === 'spot' ? markers : alignMarkersToBars(markers.filter(m => m.time >= sessionStart), view.data);
+    let placed = key === 'spot' ? markers : alignMarkersToBars(markers.filter(m => m.time >= sessionStart), view.data);
+    if (key === 'spot') placed = [...placed, ...alignMarkersToBars([...gap.ce.map(s => buyMarker(s, 'CE BUY', pal.up, true)), ...gap.pe.map(s => buyMarker(s, 'PE BUY', pal.down, false))], view.data)];
+    else placed = [...placed, ...alignMarkersToBars(gap[key].map(s => buyMarker(s, 'BUY', pal.up, true)), view.data)];
     view.signalMarkers.setMarkers(placed.sort((a, b) => a.time - b.time));
   }
 }

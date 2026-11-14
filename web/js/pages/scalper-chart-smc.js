@@ -248,3 +248,67 @@ export class SmcPrimitive {
     });
   }
 }
+
+// ---- Gap signals: BUY arrows for the CE / PE premium charts (index options) ----
+// Backtested on NIFTY options, 25 May – 13 Nov 2026, 1 lot, ₹60 costs per trade (picked on the first 80 days, checked
+// on the last 40): ITM1, 3-minute: +₹16,028 (135 trades, 43% won) then +₹23,022 (64 trades, 45% won). A modest edge,
+// not a guarantee. Rules:
+//   Bias: the day's gap (index open vs the previous close): CE only on a gap-up day, PE only on a gap-down day.
+//   BUY: close above the session VWAP, EMA 9 above EMA 21, and an SMC break up (BOS / CHoCH) or an ICT sell-side sweep.
+//   The trade is then followed (not drawn) so the next BUY comes only after it closed: 15% stop-loss, a buy-side sweep
+//   (take profit) or the session end. At most 2 a day.
+export const GAP_SIGNAL = Object.freeze({ tf:3, len:3, sl:0.15, maxPerDay:2 });
+const istDayOf = sec => Math.floor((Number(sec) + 19_800) / 86_400);
+const ema = (values, n) => { const k = 2 / (n + 1); let v = null; return values.map(x => (v = v === null ? x : x * k + v * (1 - k))); };
+
+/** The gap of each session from index candles: Map(IST day number → 'up' | 'down' | 'flat'). */
+export function gapByDay(spotBars) {
+  const out = new Map();
+  for (let i = 1; i < (spotBars || []).length; i++) {
+    const d = istDayOf(spotBars[i].time);
+    if (d === istDayOf(spotBars[i - 1].time)) continue;
+    const open = spotBars[i].open, prev = spotBars[i - 1].close;
+    out.set(d, open > prev ? 'up' : open < prev ? 'down' : 'flat');
+  }
+  return out;
+}
+
+/** Candles regrouped to `tf` minutes from the 09:15 open (for the 1-minute chart: the signals use 3-minute candles). */
+export function regroup(bars, tf) {
+  const out = [];
+  for (const c of bars || []) {
+    const day = istDayOf(c.time), open = day * 86_400 - 19_800 + 555 * 60, t = open + Math.floor((c.time - open) / (tf * 60)) * tf * 60, b = out.at(-1);
+    if (!b || b.time !== t) out.push({ time:t, open:c.open, high:c.high, low:c.low, close:c.close, volume:Number(c.volume) || 0, last:c.time });
+    else { b.high = Math.max(b.high, c.high); b.low = Math.min(b.low, c.low); b.close = c.close; b.volume += Number(c.volume) || 0; b.last = c.time; }
+  }
+  return out;
+}
+
+/**
+ * BUY signals on one option's candles: [{ time (the candle that closes the signal), price, why }].
+ * side: 'CE' | 'PE'; gaps: gapByDay(index candles). Only bars up to each signal are used (no repainting).
+ */
+export function gapSignals(bars, side, gaps, o = GAP_SIGNAL) {
+  if (!Array.isArray(bars) || bars.length < 30 || !gaps?.size) return [];
+  const want = side === 'CE' ? 'up' : 'down';
+  const close = bars.map(c => c.close), e9 = ema(close, 9), e21 = ema(close, 21);
+  let day = null, pv = 0, vol = 0;
+  const vwap = bars.map(c => { const d = istDayOf(c.time); if (d !== day) { day = d; pv = 0; vol = 0; } const x = (c.high + c.low + c.close) / 3, v = Number(c.volume) || 0; pv += x * v; vol += v; return vol > 0 ? pv / vol : x; });
+  const last = bars.length - 1, { events } = marketStructure(bars, 0, last, o.len), { liquidity } = ictLevels(bars, 0, last, o.len);
+  const up = new Set(events.filter(e => e.dir === 'up').map(e => e.at));
+  const ssl = new Set(liquidity.filter(l => l.side === 'low' && l.sweep).map(l => l.taken)), bsl = new Set(liquidity.filter(l => l.side === 'high' && l.sweep).map(l => l.taken));
+  const out = [];
+  let hold = null, count = 0, today = null;
+  for (let i = 21; i <= last; i++) {
+    const c = bars[i], d = istDayOf(c.time), endOfDay = i === last ? false : istDayOf(bars[i + 1].time) !== d;
+    if (d !== today) { today = d; count = 0; hold = null; }
+    if (hold != null) {
+      if (c.low <= hold * (1 - o.sl) || bsl.has(i) || endOfDay) hold = null;
+      continue;
+    }
+    if (gaps.get(d) !== want || count >= o.maxPerDay || endOfDay) continue;
+    const why = up.has(i) ? 'break up (SMC)' : ssl.has(i) ? 'sell-side sweep (ICT)' : null;
+    if (why && c.close > vwap[i] && e9[i] > e21[i]) { out.push({ time:c.last ?? c.time, price:c.close, why }); hold = c.close; count++; }
+  }
+  return out;
+}
