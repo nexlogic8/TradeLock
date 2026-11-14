@@ -10,7 +10,8 @@ import { chartPalette } from './chart-palette.js';
 
 export const SWING_LEN = 5;
 const FVG_MIN = 0.25;          // a gap smaller than 25% of the average candle range is noise
-const MAX_FVG = 24, MAX_OB = 3, MAX_EVENTS = 12, LOOKBACK = 400;
+const MAX_FVG = 8, MAX_OB = 2, MAX_EVENTS = 8, LOOKBACK = 400;
+const BOX_BARS = 12, LINE_BARS = 25;   // fixed widths of zones and levels, in candles
 
 const avgRange = (bars, from, to) => {
   let sum = 0, n = 0;
@@ -173,90 +174,70 @@ export class SmcPrimitive {
     target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
       ctx.font = `${Math.round(9 * vr)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
       ctx.textBaseline = 'middle';
+      // Fixed widths keep the chart readable: zones span BOX_BARS candles from where they formed, levels LINE_BARS
+      // (cut short where they were filled, broken or taken), instead of all running to the right edge.
       const box = (startIdx, endIdx, top, bottom, rgb, alpha, label) => {
-        const x0 = x(startIdx), x1 = endIdx == null ? bitmapSize.width / hr : x(endIdx), yt = y(top), yb = y(bottom);
+        const stop = Math.min(endIdx ?? Infinity, startIdx + BOX_BARS);
+        const x0 = x(startIdx), x1 = x(stop), yt = y(top), yb = y(bottom);
         if (x0 == null || x1 == null || yt == null || yb == null || x1 < 0) return;
         const left = Math.round(Math.max(0, x0) * hr), w = Math.max(1, Math.round(x1 * hr) - left), t = Math.round(yt * vr), h = Math.max(1, Math.round((yb - yt) * vr));
         ctx.fillStyle = `rgba(${rgb}, ${alpha})`; ctx.fillRect(left, t, w, h);
-        if (label && endIdx == null) { ctx.fillStyle = `rgba(${rgb}, 0.9)`; ctx.fillText(label, left + Math.round(3 * hr), t + h / 2); }
+        if (label) { ctx.fillStyle = `rgba(${rgb}, 0.9)`; ctx.fillText(label, left + Math.round(3 * hr), t + h / 2); }
       };
+      const hline = (startIdx, endIdx, price, rgba, dash, label, below = false) => {
+        const stop = Math.min(endIdx ?? Infinity, startIdx + LINE_BARS);
+        const x0 = x(startIdx), x1 = x(stop), py = y(price);
+        if (x0 == null || x1 == null || py == null || x1 < 0) return;
+        const yy = Math.round(py * vr) + 0.5, left = Math.round(Math.max(0, x0) * hr);
+        ctx.lineWidth = Math.max(1, Math.round(hr)); ctx.strokeStyle = rgba; ctx.setLineDash(dash);
+        ctx.beginPath(); ctx.moveTo(left, yy); ctx.lineTo(Math.round(x1 * hr), yy); ctx.stroke(); ctx.setLineDash([]);
+        if (label) { ctx.fillStyle = rgba; ctx.fillText(label, left + Math.round(3 * hr), yy + (below ? 6 : -6) * vr); }
+      };
+      const dotted = [Math.round(1 * hr), Math.round(3 * hr)], dashed = [Math.round(2 * hr), Math.round(4 * hr)];
       if (this.show.ict) {
-        // Premium / discount of the dealing range (faint, behind everything) with its 50% line; the OTE box.
+        // Premium / discount: a thin strip on the right edge (red above the 50% EQ, green below), not a shaded chart.
         if (ict.range) {
-          box(ict.range.at, null, ict.range.high, ict.range.eq, pal.downRgb, 0.05, null);
-          box(ict.range.at, null, ict.range.eq, ict.range.low, pal.upRgb, 0.05, null);
-          const ye = y(ict.range.eq), x0 = x(ict.range.at);
-          if (ye != null && x0 != null) {
-            const yy = Math.round(ye * vr) + 0.5;
-            ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)'; ctx.lineWidth = Math.max(1, Math.round(hr)); ctx.setLineDash([Math.round(2 * hr), Math.round(3 * hr)]);
-            ctx.beginPath(); ctx.moveTo(Math.round(Math.max(0, x0) * hr), yy); ctx.lineTo(bitmapSize.width, yy); ctx.stroke(); ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(148, 163, 184, 0.9)';
-            const lx = bitmapSize.width - Math.round(150 * hr);
-            ctx.fillText('EQ', lx, yy - 6 * vr);
-            const yh = y(ict.range.high), yl = y(ict.range.low);
-            if (yh != null) ctx.fillText('Premium', lx, Math.round(yh * vr) + 8 * vr);
-            if (yl != null) ctx.fillText('Discount', lx, Math.round(yl * vr) - 8 * vr);
+          const yh = y(ict.range.high), ye = y(ict.range.eq), yl = y(ict.range.low);
+          if (yh != null && ye != null && yl != null) {
+            const sw = Math.round(6 * hr), sx = bitmapSize.width - sw - Math.round(2 * hr);
+            ctx.fillStyle = `rgba(${pal.downRgb}, 0.45)`; ctx.fillRect(sx, Math.round(yh * vr), sw, Math.max(1, Math.round((ye - yh) * vr)));
+            ctx.fillStyle = `rgba(${pal.upRgb}, 0.45)`; ctx.fillRect(sx, Math.round(ye * vr), sw, Math.max(1, Math.round((yl - ye) * vr)));
+            ctx.fillStyle = 'rgba(148, 163, 184, 0.95)';
+            for (const [text, py] of [['Premium', yh + 8], ['EQ', ye], ['Discount', yl - 8]]) ctx.fillText(text, sx - ctx.measureText(text).width - Math.round(4 * hr), Math.round(py * vr));
           }
         }
-        if (ict.ote) box(ict.ote.at, null, ict.ote.top, ict.ote.bottom, '192, 132, 252', 0.14, ict.ote.dir === 'up' ? 'OTE buy 62–79%' : 'OTE sell 62–79%');
-        // Resting liquidity: dotted lines from the swing to the right edge until taken; sweeps marked where they happened.
-        ctx.lineWidth = Math.max(1, Math.round(hr));
-        const resting = side => ict.liquidity.filter(l => l.side === side && l.taken == null).slice(-4);
+        if (ict.ote) box(ict.ote.at, null, ict.ote.top, ict.ote.bottom, '192, 132, 252', 0.16, ict.ote.dir === 'up' ? 'OTE buy' : 'OTE sell');
+        // Resting liquidity (last 3 each side) and sweeps (last 4) where they happened.
+        const resting = side => ict.liquidity.filter(l => l.side === side && l.taken == null).slice(-3);
         for (const l of [...resting('high'), ...resting('low')]) {
-          const x0 = x(l.at), py = y(l.price);
-          if (x0 == null || py == null) continue;
-          const yy = Math.round(py * vr) + 0.5, rgb = l.side === 'high' ? pal.downRgb : pal.upRgb;
-          ctx.strokeStyle = `rgba(${rgb}, 0.75)`; ctx.setLineDash([Math.round(1 * hr), Math.round(3 * hr)]);
-          ctx.beginPath(); ctx.moveTo(Math.round(Math.max(0, x0) * hr), yy); ctx.lineTo(bitmapSize.width, yy); ctx.stroke(); ctx.setLineDash([]);
-          ctx.fillStyle = `rgba(${rgb}, 0.95)`;
-          const text = l.side === 'high' ? (l.equal ? 'EQH · BSL' : 'BSL') : (l.equal ? 'EQL · SSL' : 'SSL');
-          ctx.fillText(text, Math.round(Math.max(0, x0) * hr) + Math.round(4 * hr), yy + (l.side === 'high' ? -6 : 6) * vr);
+          const rgb = l.side === 'high' ? pal.downRgb : pal.upRgb;
+          hline(l.at, null, l.price, `rgba(${rgb}, 0.8)`, dotted, l.side === 'high' ? (l.equal ? 'EQH' : 'BSL') : (l.equal ? 'EQL' : 'SSL'), l.side === 'low');
         }
-        for (const l of ict.liquidity.filter(l => l.sweep && l.taken >= viewFrom).slice(-6)) {
-          const x0 = x(l.at), x1 = x(l.taken), py = y(l.price);
-          if (x0 == null || x1 == null || py == null) continue;
-          const yy = Math.round(py * vr) + 0.5, rgb = l.side === 'high' ? pal.downRgb : pal.upRgb;
-          ctx.strokeStyle = `rgba(${rgb}, 0.5)`; ctx.setLineDash([Math.round(1 * hr), Math.round(3 * hr)]);
-          ctx.beginPath(); ctx.moveTo(Math.round(x0 * hr), yy); ctx.lineTo(Math.round(x1 * hr), yy); ctx.stroke(); ctx.setLineDash([]);
-          ctx.fillStyle = `rgb(${rgb})`;
-          ctx.fillText(l.side === 'high' ? '✕ BSL sweep' : '✕ SSL sweep', Math.round(x1 * hr) + Math.round(3 * hr), yy + (l.side === 'high' ? -6 : 6) * vr);
+        for (const l of ict.liquidity.filter(l => l.sweep && l.taken >= viewFrom).slice(-4)) {
+          const x1 = x(l.taken), py = y(l.price);
+          if (x1 == null || py == null) continue;
+          ctx.fillStyle = `rgb(${l.side === 'high' ? pal.downRgb : pal.upRgb})`;
+          ctx.fillText('✕ sweep', Math.round(x1 * hr) + Math.round(3 * hr), Math.round(py * vr) + (l.side === 'high' ? -6 : 6) * vr);
         }
       }
       if (this.show.fib && fib) {
-        // From the leg's start to the right edge: 0 and 1 faint, the chosen ratios (0.5, 0.66) solid gold, each labelled with its price.
-        const x0 = x(fib.start);
-        if (x0 != null) {
-          const left = Math.round(Math.max(0, x0) * hr);
-          ctx.lineWidth = Math.max(1, Math.round(hr));
-          const line = (price, label, rgba, dash) => {
-            const py = y(price);
-            if (py == null) return;
-            const yy = Math.round(py * vr) + 0.5;
-            ctx.strokeStyle = rgba; ctx.setLineDash(dash);
-            ctx.beginPath(); ctx.moveTo(left, yy); ctx.lineTo(bitmapSize.width, yy); ctx.stroke(); ctx.setLineDash([]);
-            ctx.fillStyle = rgba;
-            ctx.fillText(`${label} · ${price.toFixed(2)}`, bitmapSize.width - Math.round(300 * hr), yy - 6 * vr);
-          };
-          line(fib.from, 'Fib 0', 'rgba(250, 204, 21, 0.45)', [Math.round(2 * hr), Math.round(4 * hr)]);
-          line(fib.to, 'Fib 1', 'rgba(250, 204, 21, 0.45)', [Math.round(2 * hr), Math.round(4 * hr)]);
-          for (const l of fib.levels) line(l.price, `Fib ${l.ratio}`, 'rgba(250, 204, 21, 0.95)', []);
-        }
+        // From the leg's end, LINE_BARS long: the chosen ratios (0.5, 0.66) solid gold with their price, 0 and 1 faint.
+        hline(fib.end, null, fib.from, 'rgba(250, 204, 21, 0.45)', dashed, 'Fib 0');
+        hline(fib.end, null, fib.to, 'rgba(250, 204, 21, 0.45)', dashed, 'Fib 1');
+        for (const l of fib.levels) hline(fib.end, null, l.price, 'rgba(250, 204, 21, 0.95)', [], `Fib ${l.ratio} · ${l.price.toFixed(2)}`);
       }
       if (this.show.fvg) {
-        // Open gaps run to the right edge; filled ones stop at the fill bar, fainter. Only those reaching the view.
-        for (const g of fvg.filter(g => (g.end ?? last) >= viewFrom).slice(-MAX_FVG)) {
-          box(g.start, g.end, g.top, g.bottom, g.kind === 'bull' ? pal.upRgb : pal.downRgb, g.end == null ? 0.2 : 0.07, 'FVG');
-        }
+        // Open gaps only (the last MAX_FVG reaching the view); a filled gap is gone.
+        for (const g of fvg.filter(g => g.end == null).slice(-MAX_FVG)) box(g.start, null, g.top, g.bottom, g.kind === 'bull' ? pal.upRgb : pal.downRgb, 0.22, 'FVG');
       }
       if (this.show.smc) {
         const live = side => smc.blocks.filter(b => b.dir === side && b.end == null).slice(-MAX_OB);
-        for (const ob of [...live('up'), ...live('down')]) box(ob.start, null, ob.top, ob.bottom, ob.dir === 'up' ? '93, 169, 255' : '245, 185, 66', 0.16, ob.dir === 'up' ? 'Bull OB' : 'Bear OB');
-        ctx.lineWidth = Math.max(1, Math.round(hr));
+        for (const ob of [...live('up'), ...live('down')]) box(ob.start, null, ob.top, ob.bottom, ob.dir === 'up' ? '93, 169, 255' : '245, 185, 66', 0.18, ob.dir === 'up' ? 'Bull OB' : 'Bear OB');
         for (const e of smc.events.filter(e => e.at >= viewFrom).slice(-MAX_EVENTS)) {
           const x0 = x(e.from), x1 = x(e.at), py = y(e.price);
           if (x0 == null || x1 == null || py == null) continue;
           const color = `rgb(${e.dir === 'up' ? pal.upRgb : pal.downRgb})`, yy = Math.round(py * vr) + 0.5;
-          ctx.strokeStyle = color; ctx.setLineDash(e.kind === 'CHoCH' ? [] : [Math.round(4 * hr), Math.round(3 * hr)]);
+          ctx.lineWidth = Math.max(1, Math.round(hr)); ctx.strokeStyle = color; ctx.setLineDash(e.kind === 'CHoCH' ? [] : [Math.round(4 * hr), Math.round(3 * hr)]);
           ctx.beginPath(); ctx.moveTo(Math.round(x0 * hr), yy); ctx.lineTo(Math.round(x1 * hr), yy); ctx.stroke();
           ctx.setLineDash([]);
           ctx.fillStyle = color;
