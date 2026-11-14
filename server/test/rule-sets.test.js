@@ -113,3 +113,16 @@ test('Power Scalper sizes manual orders from the Manual set\'s Option SL room, a
   assert.equal(ruleMode(uid), 'algo');
   assert.equal(scalperSignalRisk(uid).optionSlPct, 25, 'the Manual set\'s 25%, not the Algo set (off)');
 });
+
+test('the kill switch covers the whole account: with Algo Trading on, the Risk rules page setting is in force', () => {
+  const uid = createUser({ email: 'ks-sets@rules.test', password: null, name: 'KS' });
+  upsertAccount(uid, { broker: 'dhan', clientId: 'C904', accessToken: 'test-token-not-real-0123456789' });
+  const r = getRules(uid);
+  saveRules(uid, { ...r.manual, killSwitch: { on: true } }, undefined, null, 'manual');
+  saveRules(uid, { ...r.algo, killSwitch: { on: false } }, undefined, null, 'algo');   // an old Algo copy: ignored
+  algo(uid, true);
+  assert.equal(ruleMode(uid), 'algo');
+  assert.equal(getRules(uid).active.killSwitch.on, true);
+  saveRules(uid, { ...getRules(uid).manual, killSwitch: { on: false } }, undefined, null, 'manual');
+  assert.equal(getRules(uid).active.killSwitch.on, false, 'switched off on Risk rules: off for Algo Trading too');
+});

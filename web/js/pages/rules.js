@@ -36,7 +36,7 @@ function row(key, title, line, r, input, tv) {
 function protCard(d, f, set = 'manual') {
   const broker = d?.broker, label = broker?.label || 'broker', running = !!broker && broker.agentOn !== false;
   // Option SL room sizes manual Power Scalper orders only: not a rule of the Algo Trading set.
-  const keys = set === 'algo' ? ['capitalUse', 'maxTrades', 'lossStreak', 'cutoff', 'killSwitch']   // P&L rules: Risk rules page
+  const keys = set === 'algo' ? ['capitalUse', 'maxTrades', 'lossStreak', 'cutoff']   // P&L rules and kill switch: Risk rules page
     : ['maxLoss', 'capitalUse', 'profitLock', 'maxTrades', 'lossStreak', 'giveback', 'optionSl', 'cutoff', 'killSwitch'];
   const on = keys.filter(k => f?.[k]?.on).length;
   const locked = running && d?.agentLock;
@@ -99,8 +99,8 @@ function setNote(set, now) {
   return html`
     <div class="rule-sets" id="rule-sets">
       ${set === 'manual'
-        ? html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target and Profit give-back cover your whole account</b> (Manual + Algo trades) and are always in force, whether Algo Trading is on or off.</p>`
-        : html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target and Profit give-back</b> are set on the <a href="/rules" data-nav="rules">Risk rules</a> page and cover your whole account (Manual + Algo trades).</p>`}
+        ? html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target, Profit give-back and the kill switch cover your whole account</b> (Manual + Algo trades) and are always in force, whether Algo Trading is on or off.</p>`
+        : html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target, Profit give-back and the kill switch</b> are set on the <a href="/rules" data-nav="rules">Risk rules</a> page and cover your whole account (Manual + Algo trades).</p>`}
       <p class="muted small" id="rule-set-note"><b>${set === 'manual' ? 'The other rules here are for manual trading.' : `${SET_NAMES[set]} rules.`}</b> ${live
         ? html`In force now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
         : html`Not in force now: they apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}. Edits are saved for then.`}
@@ -112,7 +112,7 @@ function killLine(d) {
   const ks = d?.killSwitch;
   if (ksOn(ks)) return html`<span class="neg">On</span> · all orders blocked · switch it off on Overview`;
   if (ks?.armed) return html`<span class="warn">Armed</span> · locks once all positions are closed`;
-  return `Also lock the ${d?.broker?.label || 'broker'} app when a limit hits`;
+  return `Also lock the ${d?.broker?.label || 'broker'} app when a limit hits · whole account`;
 }
 
 /**
@@ -139,7 +139,7 @@ export function rulesPanel(f, { set, now, capital, dash, error = null, pending =
         html`<div class="input-wrap"><span class="affix">%</span><input class="input" id="v-optionSl" data-value="optionSl" inputmode="decimal" value="${f.optionSl.value}" aria-label="Option stop-loss room percent"></div>`, tv)}
       ${row('cutoff', 'Cutoff time', LINES.cutoff(), f.cutoff,
         html`<select class="input num" id="v-cutoff" data-cutoff aria-label="Cutoff time">${[...new Set([...CUTOFFS, f.cutoff.value])].sort().map(t => html`<option value="${t}" ${f.cutoff.value === t ? 'selected' : ''}>${label12(t)}</option>`)}</select>`, tv)}
-      ${row('killSwitch', `${broker} kill switch`, killLine(dash), f.killSwitch, '', tv)}
+      ${acct ? row('killSwitch', `${broker} kill switch`, killLine(dash), f.killSwitch, '', tv) : ''}
     </div>
     <div class="mt-s" id="rules-error">${formError(error)}</div>`;
 }

@@ -364,7 +364,8 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     await new Promise(res => setTimeout(res, 30));   // the lock is not awaited by the scan
     return r;
   };
-  const rules = getRules(uid).algo;
+  // The kill switch covers the whole account: it is set on the Risk rules page (the Manual set), also for Algo Trading.
+  const rules = getRules(uid).manual;
   try {
     const dhan = withKill('2026-10-14'), r = await run(dhan, '2026-10-14');
     if (r.skipped && /Subscription|subscription|market|trading day/i.test(r.skipped)) return t.skip(`gate refused in this environment: ${r.skipped}`);
@@ -375,12 +376,12 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     assert.ok(s.ks_active_at > 0);
     assert.match(stmt("SELECT body FROM notifications WHERE user_id = ? AND title LIKE '%kill switch activated%' ORDER BY id DESC").get(uid).body, /no Gap 09:15 entry today/);
 
-    saveRules(uid, { ...rules, killSwitch: { on: false } }, undefined, null, 'algo');
+    saveRules(uid, { ...rules, killSwitch: { on: false } }, undefined, null, 'manual');
     const off = withKill('2026-10-13');
     const r2 = await run(off, '2026-10-13');
     assert.ok(off.calls.some(c => c[0] === 'quotes') && !off.calls.some(c => c[0] === 'order'), `decided, no trade (${JSON.stringify(r2)})`);
     assert.ok(!off.calls.some(c => c[0] === 'killswitch'), 'kill switch rule off: no lock');
-    saveRules(uid, rules, undefined, null, 'algo');
+    saveRules(uid, rules, undefined, null, 'manual');
 
     const orb = withKill('2026-10-12');
     acct = { ...acct, orb_on: 1 };
@@ -393,7 +394,7 @@ test('no Gap 09:15 entry → the broker kill switch locks the day (kill switch r
     assert.ok(off2.calls.some(c => c[0] === 'quotes') && !off2.calls.some(c => c[0] === 'killswitch'), '"Kill switch if no Gap entry" off: no lock');
   } finally {
     acct = { ...acct, orb_on: 0, gap_lock: 1 };
-    saveRules(uid, rules, undefined, null, 'algo');
+    saveRules(uid, rules, undefined, null, 'manual');
     patchDay(uid, today, { ks_armed: null, ks_active_at: null });
     setKillStatus(uid, { active: false, checkedAt: Date.now() });   // the fake broker's switch, recorded in memory
   }

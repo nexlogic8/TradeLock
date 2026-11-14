@@ -141,9 +141,10 @@ export const ensureRules = userId => {
  * rules already hit, kill switch) stays one per account.
  */
 export const RULE_SETS = ['manual', 'algo'];
-// P&L rules for the whole account (Manual + Algo trades), always: set once on the Risk rules page (the Manual set);
+// P&L rules and the broker kill switch cover the whole account (Manual + Algo trades), always: set once on the Risk
+// rules page (the Manual set);
 // the Algo set takes them from there whatever its own copy says.
-export const ACCOUNT_RULES = ['maxLoss', 'profitLock', 'giveback'];
+export const ACCOUNT_RULES = ['maxLoss', 'profitLock', 'giveback', 'killSwitch'];
 const withAccountRules = (set, manual) => ({ ...set, ...Object.fromEntries(ACCOUNT_RULES.filter(k => manual[k]).map(k => [k, manual[k]])) });
 const COLUMN = { manual: 'config', algo: 'algo_config' };
 export const ruleMode = userId =>
