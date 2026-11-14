@@ -2078,3 +2078,7 @@ body.scalper-focus .sc-ticket .sc-lots .sc-lots-input, body.scalper-focus .sc-ti
   body .sc-ticket > .sc-ticket-buttons, body.scalper-focus .sc-ticket > .sc-ticket-buttons { grid-template-columns:minmax(0, 1fr) 100px minmax(0, 1fr); }
   body .sc-ticket .sc-lot-step button { width:28px; }
 }
+/* Lots box: typed with the keyboard (number pad on phones), as well as − / +. */
+body .sc-ticket .sc-lots input.sc-lots-input { width:100%; text-align:center; cursor:text; background:var(--field, var(--panel-2)); color:var(--fg); font-weight:700; font-variant-numeric:tabular-nums; caret-color:var(--mint); }
+body .sc-ticket .sc-lots input.sc-lots-input:hover { border-color:var(--line-2); }
+body .sc-ticket .sc-lots input.sc-lots-input:focus { outline:none; border-color:var(--mint); box-shadow:0 0 0 2px var(--mint-soft); }

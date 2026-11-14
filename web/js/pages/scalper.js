@@ -648,6 +648,29 @@ export default {
       rememberLots(ui, side);
       updateTickets(ctx); refreshMarginsSoon([side]);
     }, signal);
+    // Lots typed with the keyboard: digits only, applied on Enter or when the box is left (1–500; empty = no change),
+    // and remembered like − / +. Escape puts back the lots shown before.
+    on(el, 'input', '[data-lots]', (_, input) => { const v = input.value.replace(/\D/g, '').slice(0, 3); if (v !== input.value) input.value = v; }, signal);
+    on(el, 'focusin', '[data-lots]', (_, input) => { input.dataset.before = input.value; setTimeout(() => input.select?.(), 0); }, signal);
+    const applyTypedLots = input => {
+      if (input.value === input.dataset.before) return;   // nothing typed (or Escape): leave auto / manual as it was
+      const side = input.dataset.lots, typed = parseInt(input.value, 10);
+      const item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`])), shown = sizeOf(ctx, side, item).lots || 0;
+      if (!(typed > 0)) { input.value = String(shown); return; }
+      const lots = Math.min(500, typed);
+      input.value = String(lots);
+      if (lots === shown && ui.manualLots?.[side]) return;
+      ui.manualLots = { ...ui.manualLots, [side]: lots };
+      rememberLots(ui, side);
+      updateTickets(ctx); refreshMarginsSoon([side]);
+      if (typed > 500) toast('At most 500 lots.', 'warn');
+    };
+    on(el, 'keydown', '[data-lots]', (e, input) => {
+      if (e.key === 'Enter') { e.preventDefault(); applyTypedLots(input); input.dataset.before = input.value; input.blur(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.value = input.dataset.before || input.value; input.blur(); }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); input.value = String(Math.min(500, Math.max(1, (parseInt(input.value, 10) || 0) + (e.key === 'ArrowUp' ? 1 : -1)))); }
+    }, signal);
+    on(el, 'focusout', '[data-lots]', (_, input) => applyTypedLots(input), signal);
     on(el, 'click', '[data-lot-auto]', (_, label) => {
       const side = label.dataset.lotAuto;
       if (!ui.manualLots?.[side]) return;
@@ -1045,7 +1068,7 @@ function ticket(name, option, item, lotSize, margin, risk, busy = '', manual = 0
   const side = option.toLowerCase(), size = chosenSize(item, lotSize, risk, manual), t = ticketText(item, size, lotSize, margin);
   const ready = item && lotSize && size.lots > 0 && !busy;
   if (busy) t.note = busy;
-  return html`<section class="panel sc-ticket ${busy ? 'busy' : ''}" data-ticket="${side}"><header><span class="sc-option-tag ${side}">${option}</span><b><span class="tk-full">${item ? `${item.underlying || 'NIFTY'} ${item.expiry} ${item.strike} ${name}` : name}</span><span class="tk-short">${item ? `${item.strike} ${option}` : option}</span></b><span class="sc-last" data-ltp="${side}">${money(item?.ltp)}</span></header><div class="sc-ticket-buttons"><div class="sc-btn-col sell"><button class="btn btn-danger sc-order-btn ${t.sellShort ? 'short' : ''}" data-order-side="SELL" data-option="${option}" ${ready ? '' : 'disabled'}><span>Sell</span><small title="Margin Dhan blocks to sell (write) the full quantity" data-funds="sell">${t.sell}</small></button></div><div class="sc-lots" title="− / + to set lots by hand · tap the label to go back to auto (sized from your risk rules)"><small data-lot-auto="${side}" data-lots-mode="${side}">${size.manual ? 'Lots · manual' : 'Lots · auto'}</small><span class="sc-lot-step"><button type="button" data-lot-step="-1" data-lot-side="${side}" aria-label="${option}: one lot less">−</button><output class="input sc-lots-input" data-lots="${side}" aria-label="${option} lots">${size.lots}</output><button type="button" data-lot-step="1" data-lot-side="${side}" aria-label="${option}: one lot more">+</button></span></div><div class="sc-btn-col buy"><button class="btn btn-primary sc-order-btn ${t.buyShort ? 'short' : ''}" data-order-side="BUY" data-option="${option}" ${ready ? '' : 'disabled'}><span>Buy</span><small title="Funds needed to buy the full quantity" data-funds="buy">${t.buy}</small></button></div></div><small data-ticket-note>${t.note}</small></section>`;
+  return html`<section class="panel sc-ticket ${busy ? 'busy' : ''}" data-ticket="${side}"><header><span class="sc-option-tag ${side}">${option}</span><b><span class="tk-full">${item ? `${item.underlying || 'NIFTY'} ${item.expiry} ${item.strike} ${name}` : name}</span><span class="tk-short">${item ? `${item.strike} ${option}` : option}</span></b><span class="sc-last" data-ltp="${side}">${money(item?.ltp)}</span></header><div class="sc-ticket-buttons"><div class="sc-btn-col sell"><button class="btn btn-danger sc-order-btn ${t.sellShort ? 'short' : ''}" data-order-side="SELL" data-option="${option}" ${ready ? '' : 'disabled'}><span>Sell</span><small title="Margin Dhan blocks to sell (write) the full quantity" data-funds="sell">${t.sell}</small></button></div><div class="sc-lots" title="− / + to set lots by hand · tap the label to go back to auto (sized from your risk rules)"><small data-lot-auto="${side}" data-lots-mode="${side}">${size.manual ? 'Lots · manual' : 'Lots · auto'}</small><span class="sc-lot-step"><button type="button" data-lot-step="-1" data-lot-side="${side}" aria-label="${option}: one lot less">−</button><input class="input sc-lots-input" data-lots="${side}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" enterkeyhint="done" value="${size.lots}" aria-label="${option} lots: type a number, or use − / +" title="Type the lots (1–500) and press Enter"><button type="button" data-lot-step="1" data-lot-side="${side}" aria-label="${option}: one lot more">+</button></span></div><div class="sc-btn-col buy"><button class="btn btn-primary sc-order-btn ${t.buyShort ? 'short' : ''}" data-order-side="BUY" data-option="${option}" ${ready ? '' : 'disabled'}><span>Buy</span><small title="Funds needed to buy the full quantity" data-funds="buy">${t.buy}</small></button></div></div><small data-ticket-note>${t.note}</small></section>`;
 }
 // Button labels: a lakh or more as ₹14.28L so it fits on a phone button.
 export const compactRupees = n => Math.abs(n) >= 1e5 ? `₹${(Math.round(n / 1e3) / 100).toFixed(2)}L` : rupees(n);
@@ -1082,7 +1105,8 @@ function updateTickets(ctx) {
     // The premium moves the lot count; refresh Dhan's sell margin only when the count actually changes.
     if ((ctx.ui.autoLots ||= {})[side] !== size.lots) { ctx.ui.autoLots[side] = size.lots; ctx.ui.refreshMarginsSoon?.([side]); }
     const lotsOut = box.querySelector('[data-lots]');
-    if (lotsOut && lotsOut.textContent !== String(size.lots)) lotsOut.textContent = String(size.lots);
+    // A typed number is left alone while the box has focus; it is applied on Enter or when the box is left.
+    if (lotsOut && document.activeElement !== lotsOut && lotsOut.value !== String(size.lots)) lotsOut.value = String(size.lots);
     for (const [key, text, short] of [['buy', t.buy, t.buyShort], ['sell', t.sell, t.sellShort]]) {
       const label = box.querySelector(`[data-funds="${key}"]`);
       if (label && label.textContent !== text) label.textContent = text;

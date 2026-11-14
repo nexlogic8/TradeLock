@@ -81,13 +81,13 @@ test('Power Scalper sizes lots automatically: 20% SL on the premium, risk = dail
   const margins={ce:{securityId:'501',lots:2,qty:130,lotSize:65,buy:13000,sell:150000,available:204713.48}};
   const view=String(page.view({data,ui:{ceId:'501',peId:'502',interval:'1',margins,signalRisk:{budget}},el:{}}));
   // CE ₹100: SL ₹80 risks ₹20 × 65 = ₹1,300 a lot → floor(3628.09 / 1300) = 2 lots.
-  assert.match(view,/data-lots="ce"[^>]*>2<\/output>/);
+  assert.match(view,/<input[^>]*sc-lots-input[^>]*data-lots="ce"[^>]*value="2"/);
   assert.match(view,/2 lots × 65 · SL ₹80\.00 \(−20%\) · risk ₹2,600 of ₹3,628 \(5% ÷ 3 trades\) · capital ₹13,000 · available ₹2,04,713/);
   assert.match(view,/data-funds="buy">₹13,000</);
   // PE ₹40 (independent): ₹8 × 65 = ₹520 a lot → 6 lots, ₹15,600 capital.
-  assert.match(view,/data-lots="pe"[^>]*>6<\/output>/);
+  assert.match(view,/<input[^>]*sc-lots-input[^>]*data-lots="pe"[^>]*value="6"/);
   assert.match(view,/6 lots × 65 · SL ₹32\.00 \(−20%\) · risk ₹3,120 of ₹3,628/);
-  assert.doesNotMatch(view,/<input[^>]*sc-lots-input/,'lots cannot be typed');
+  assert.match(view,/data-lots="ce" type="text" inputmode="numeric"/,'lots can be typed with the keyboard (number pad on phones)');
   // Without risk rules nothing can be sized, so orders are disabled with the reason.
   const unset=String(page.view({data,ui:{ceId:'501',peId:'502',interval:'1'},el:{}}));
   assert.match(unset,/Set a daily loss limit in Risk rules to size orders/);
