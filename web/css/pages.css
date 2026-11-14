@@ -2090,3 +2090,17 @@ body .sc-ticket .sc-lots input.sc-lots-input:focus { outline:none; border-color:
 .sc-hdr-lots .sc-hdr-lots-unit.manual { color:var(--amber); cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
 body.sc-split .sc-hdr-lots .sc-hdr-lots-input { width:46px; height:28px; font-size:14px; }
 @media (max-width:760px) { .sc-hdr-lots .sc-hdr-lots-input { width:44px; height:30px; font-size:15px; } }
+/* Manual lots switch: off = lots locked (auto from the risk rules); on = typed / − / +. */
+.sc-lots.locked .sc-lots-input, .sc-hdr-lots.locked .sc-hdr-lots-input { cursor:default; color:var(--muted); background:var(--panel-2); }
+.sc-lots.locked .sc-lots-input:focus, .sc-hdr-lots.locked .sc-hdr-lots-input:focus { border-color:var(--line-2); box-shadow:none; }
+.sc-lots.locked .sc-lot-step button, .sc-hdr-lots.locked button { opacity:.35; cursor:not-allowed; }
+.sc-lots small[data-lots-mode].manual { color:var(--amber); }
+.sc-lotmode[aria-checked="true"] { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 45%, transparent); }
+.sc-lotmode[aria-checked="true"] i { background:var(--amber); }
+.sc-lotmode-m { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.sc-lotmode-m i { position:relative; width:22px; height:13px; border-radius:7px; background:var(--switch-off); flex:none; transition:background .15s; }
+.sc-lotmode-m i::after { content:''; position:absolute; top:2px; left:2px; width:9px; height:9px; border-radius:50%; background:#fff; transition:transform .15s; }
+.sc-lotmode-m[aria-checked="true"] i { background:var(--amber); }
+.sc-lotmode-m[aria-checked="true"] i::after { transform:translateX(9px); }
+.sc-lotmode-m[aria-checked="true"] b { color:var(--amber); }
+.sc-lotmode-m b { font-weight:700; }

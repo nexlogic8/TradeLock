@@ -43,7 +43,7 @@ const ownerOf = userId => (sharedSource() ? 'shared' : userId);
 /** { NIFTY: { ce: 3, pe: 2 }, CRUDEOILM: { ce: 1 } }: the user's lots set by hand (absent = auto). */
 export function savedLots(userId) {
   const out = {};
-  for (const r of stmt('SELECT underlying, side, lots FROM scalper_lots WHERE user_id = ?').all(userId)) (out[r.underlying] ||= {})[r.side] = r.lots;
+  for (const r of stmt("SELECT underlying, side, lots FROM scalper_lots WHERE user_id = ? AND underlying <> '*'").all(userId)) (out[r.underlying] ||= {})[r.side] = r.lots;
   return out;
 }
 
@@ -805,7 +805,17 @@ export function scalperRoutes(r) {
     return {trade,day,candles,optionCandles,strategy:row.strategy,exitLogic:row.exit_logic||'horizon',stopLogic:row.stop_logic||'none',emaApproximate};
   });
   // Lots set by hand (− / +), remembered per instrument and side so the page opens with them again (web and app).
-  r.get('/api/scalper/lots', ctx => ({ lots: savedLots(ctx.user.id) }));
+  // The Manual lots switch (toolbar): off = lots sized automatically from the risk rules and locked; on = typed / − / +.
+  // Stored as the row with underlying '*'.
+  const manualMode = userId => !!stmt("SELECT 1 FROM scalper_lots WHERE user_id = ? AND underlying = '*' AND lots = 1").get(userId);
+  r.get('/api/scalper/lots', ctx => ({ lots: savedLots(ctx.user.id), manual: manualMode(ctx.user.id) }));
+  r.put('/api/scalper/lots/mode', ctx => {
+    limit(`scalper-lots:${ctx.user.id}`, 120, 60_000);
+    if (typeof ctx.body?.manual !== 'boolean') throw bad('INVALID_MODE', 'manual must be true or false');
+    stmt(`INSERT INTO scalper_lots (user_id, underlying, side, lots, updated_at) VALUES (?, '*', 'ce', ?, ?)
+      ON CONFLICT (user_id, underlying, side) DO UPDATE SET lots = excluded.lots, updated_at = excluded.updated_at`).run(ctx.user.id, ctx.body.manual ? 1 : 0, Date.now());
+    return { manual: manualMode(ctx.user.id) };
+  });
   r.put('/api/scalper/lots', ctx => {
     limit(`scalper-lots:${ctx.user.id}`, 120, 60_000);
     const { underlying, side } = ctx.body || {}, lots = Number(ctx.body?.lots);
@@ -815,7 +825,7 @@ export function scalperRoutes(r) {
     if (lots === 0) stmt('DELETE FROM scalper_lots WHERE user_id = ? AND underlying = ? AND side = ?').run(ctx.user.id, underlying, side);
     else stmt(`INSERT INTO scalper_lots (user_id, underlying, side, lots, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (user_id, underlying, side) DO UPDATE SET lots = excluded.lots, updated_at = excluded.updated_at`).run(ctx.user.id, underlying, side, lots, Date.now());
-    return { lots: savedLots(ctx.user.id) };
+    return { lots: savedLots(ctx.user.id), manual: manualMode(ctx.user.id) };
   });
   r.post('/api/scalper/signal', async ctx => {
     return scanScalperSignal(ctx.user.id, ctx.ip, {

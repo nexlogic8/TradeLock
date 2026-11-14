@@ -208,13 +208,25 @@ test('desktop layout switch: Classic / Split icons, right strip, Sell · lots ·
   assert.match(view,/<nav class="sc-rail"[^>]*><button type="button" data-rail="chain" aria-pressed="true" title="Option chain"><svg[\s\S]*data-rail="positions" aria-pressed="false"[\s\S]*data-rail="both"/);
   assert.doesNotMatch(view,/sc-split-tools/,'the old Option chain / Positions text buttons are gone');
   // Buy shows the full amount for the auto lots (2 lots × 65 × ₹100); Sell shows the margin once loaded.
-  assert.match(view,/data-order-side="SELL" data-option="CE" data-hdr-btn="ce" >Sell <small data-hdr-funds="ce-sell">[^<]*<\/small><\/button><span class="sc-hdr-lots"[^>]*><button type="button" data-lot-step="-1" data-lot-side="ce"[^>]*>−<\/button><input class="sc-hdr-lots-input "[^>]*data-hdr-lots="ce"[^>]*value="2"[^>]*><span class="sc-hdr-lots-unit[^"]*"[^>]*>lots<\/span><button type="button" data-lot-step="1" data-lot-side="ce"[^>]*>\+<\/button><\/span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="CE" data-hdr-btn="ce" >Buy <small data-hdr-funds="ce-buy">₹13,000<\/small>/);
+  assert.match(view,/data-order-side="SELL" data-option="CE" data-hdr-btn="ce" >Sell <small data-hdr-funds="ce-sell">[^<]*<\/small><\/button><span class="sc-hdr-lots[^"]*"[^>]*><button type="button" data-lot-step="-1" data-lot-side="ce"[^>]*>−<\/button><input class="sc-hdr-lots-input "[^>]*data-hdr-lots="ce"[^>]*value="2"[^>]*><button type="button" data-lot-step="1" data-lot-side="ce"[^>]*>\+<\/button><\/span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="CE" data-hdr-btn="ce" >Buy <small data-hdr-funds="ce-buy">₹13,000<\/small>/);
   // Lots by hand (− / +): 5 manual lots replace the auto 2; 0 is back to auto.
   const { chosenSize } = await import('../../web/js/pages/scalper.js');
   const risk = { optionSlPct:20, budget:{ available:1000, perTrade:1000, trades:1 } }, item = { ltp:100 };
   assert.deepEqual([chosenSize(item, 65, risk, 5).lots, chosenSize(item, 65, risk, 5).manual, chosenSize(item, 65, risk, 5).capital], [5, true, 32500]);
   assert.equal(chosenSize(item, 65, risk, 0).manual, undefined);
   assert.match(view,/data-hdr-lots="pe" type="text" inputmode="numeric"[^>]*value="6"/,'the header lots can be typed too');
+  // Manual lots switch: off (default) = auto lots, boxes read-only and − / + off, no "lots" word beside the box.
+  assert.match(view,/class="sc-strategy sc-lotmode" role="switch" data-lot-mode-toggle aria-checked="false"/);
+  assert.match(view,/data-hdr-lots="ce"[^>]*readonly/);
+  assert.match(view,/data-lots="ce" type="text"[^>]*readonly/);
+  assert.match(view,/data-lot-step="1" data-lot-side="ce"[^>]*disabled/);
+  assert.doesNotMatch(view,/sc-hdr-lots-unit|>lots<\/span>/);
+  const { manualOf } = await import('../../web/js/pages/scalper.js');
+  assert.deepEqual([manualOf({ manualMode:false, manualLots:{ ce:5 } }, 'ce'), manualOf({ manualMode:true, manualLots:{ ce:5 } }, 'ce')], [0, 5], 'saved lots count only with Manual lots on');
+  const manualView=String(page.view({data,ui:{ceId:'501',peId:'502',interval:'5',layout:'split',signalRisk:{budget},manualMode:true,manualLots:{ce:5}},el:{}}));
+  assert.match(manualView,/data-lot-mode-toggle aria-checked="true"/);
+  assert.match(manualView,/data-hdr-lots="ce"[^>]*value="5"/);
+  assert.doesNotMatch(manualView,/data-hdr-lots="ce"[^>]*readonly/);
   const busy=String(page.view({data,ui:{ceId:'501',peId:'502',interval:'5',layout:'split',signalRisk:{budget}},el:{},state:{dash:{positions:[{symbol:'X',qty:65}],orders:[]}}}));
   assert.match(busy,/data-option="CE" data-hdr-btn="ce" disabled>Sell/,'one trade at a time applies to the header buttons too');
 });

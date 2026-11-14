@@ -120,6 +120,13 @@ function strategyChecks(ui) {
   const on = ui.strategies || {};
   return STRATEGIES.map(([key, label, hint]) => html`<button type="button" class="scm-check" role="menuitemcheckbox" data-strategy="${key}" aria-checked="${String(on[key] !== false && !hammerOff(key))}" title="${hammerOff(key) ? 'Needs the 1-minute chart, which is switched off for now' : hint}" ${hammerOff(key) ? 'disabled' : ''}><i aria-hidden="true"></i><b>${label}</b></button>`);
 }
+/** Manual lots switch: off = auto lots from the risk rules (locked boxes), on = lots typed or set with − / +. */
+function lotModeSwitch(ui, compact = false) {
+  const on = !!ui.manualMode, hint = 'Manual lots: on = type the lots or use − / + (remembered per instrument); off = auto from your risk rules';
+  return compact
+    ? html`<button type="button" class="scm-tool sc-lotmode-m" role="switch" data-lot-mode-toggle aria-checked="${String(on)}" title="${hint}"><i aria-hidden="true"></i>Lots <b data-lot-mode-text>${on ? 'Manual' : 'Auto'}</b></button>`
+    : html`<button type="button" class="sc-strategy sc-lotmode" role="switch" data-lot-mode-toggle aria-checked="${String(on)}" title="${hint}"><i aria-hidden="true"></i>Manual lots</button>`;
+}
 function strategySwitches(ui) {
   if (!isAdmin()) return '';
   const on = ui.strategies || {};
@@ -256,7 +263,10 @@ export default {
     data.underlying.candles = [];
     data.selectedCharts = { ...data.selectedCharts, ce: [], pe: [] };
     // Lots set by hand, remembered per instrument and side for this user (web and app); auto when none saved.
-    if (!ctx.ui.savedLots) { try { ctx.ui.savedLots = (await get('/scalper/lots')).lots || {}; } catch { ctx.ui.savedLots = {}; } }
+    if (!ctx.ui.savedLots) {
+      try { const r = await get('/scalper/lots'); ctx.ui.savedLots = r.lots || {}; ctx.ui.manualMode = !!r.manual; }
+      catch { ctx.ui.savedLots = {}; ctx.ui.manualMode = false; }
+    }
     ctx.ui.manualLots = { ...(ctx.ui.savedLots[ctx.ui.underlying] || {}) };
     applySnapshot(ctx.ui, data);
     ctx.ui.chartsPending = true;
@@ -270,6 +280,7 @@ export default {
     const optionRows = d.strikes.filter(row => Math.abs(row.strike - Number(atmStrike)) <= 12 * strikeStep(d.strikes, Number(atmStrike)));
     const indexName = d.underlying.symbol || 'NIFTY 50', focus = isFocus();
     const current = ctx.ui.underlying || d.underlyingKey || 'NIFTY', sidePanel = ctx.ui.sidePanel || 'chain';
+    lotsEditable = !!ctx.ui.manualMode;
     return html`
       ${scmTop(ctx)}
       <section class="panel scalper-toolbar">
@@ -280,6 +291,7 @@ export default {
         <label class="scalper-control"><small>Chart interval</small><select class="input" id="sc-interval">${INTERVALS.map(([v,l]) => html`<option value="${v}" ${v === ctx.ui.interval ? 'selected' : ''}>${l}</option>`)}</select></label>
         <div class="scalper-control sc-span"><small>Session</small><div class="seg" role="group" aria-label="Chart history">${SPANS.map(([k, l, hint]) => html`<button type="button" data-span="${k}" aria-pressed="${String(chartSpan === k)}" title="${hint}">${l}</button>`)}</div></div>
         ${strategySwitches(ctx.ui)}
+        ${lotModeSwitch(ctx.ui)}
         <div class="sc-view-tools">
           <button type="button" class="btn btn-ghost btn-sm sc-fullscreen" id="sc-fullscreen" aria-pressed="${String(focus)}" title="${focus ? 'Exit full screen (Esc)' : 'Full screen'}">${icon(focus ? 'shrink' : 'expand')}<span class="sc-fs-text">${focus ? 'Exit full screen' : html`<span class="sc-fs-long">Full screen<span class="sc-fs-trade"> · trade</span></span><span class="sc-fs-short">Trade</span>`}</span></button>
           <div class="seg sc-layout" role="group" aria-label="Layout">${LAYOUTS.map(([key, label, ic, hint]) => html`<button type="button" data-layout="${key}" aria-pressed="${String((ctx.ui.layout || 'classic') === key)}" title="${hint}" aria-label="${label} layout">${icon(ic)}</button>`)}</div>
@@ -298,6 +310,7 @@ export default {
             <button type="button" class="scm-tool scm-fx" data-studies="spot" aria-haspopup="dialog" title="Indicators">ƒx</button>
             ${scmMenu('interval', 'Chart interval', ctx.ui.interval, INTERVALS.map(([v, l]) => [v, l, l.replace(' min', 'm').replace('1 hour', '1h')]))}
             ${scmMenu('span', 'Chart history', chartSpan, SPANS.map(([k, l, hint]) => [k, `${l} · ${hint.replace(' (last session when the market is closed)', '')}`, l]))}
+            ${lotModeSwitch(ctx.ui, true)}
             ${isAdmin() ? html`<div class="scm-strat-pop" data-scm-strat-pop role="menu" aria-label="Chart strategies" hidden>${strategyChecks(ctx.ui)}</div>` : ''}
           </div>
           <div class="scm-bar scm-side">
@@ -331,9 +344,9 @@ export default {
       <div class="scm-scrim" data-close-sheet></div>
       <section class="scalper-tickets mside-${ctx.ui.mSide || 'ce'}">
         <div class="scm-ordertype"><span class="on">Market order</span><span>Lots auto-sized from your risk rules</span></div>
-        ${ticket('CALL', 'CE', ce, d.lotSize, ctx.ui.margins?.ce, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), ctx.ui.manualLots?.ce || 0)}
+        ${ticket('CALL', 'CE', ce, d.lotSize, ctx.ui.margins?.ce, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), manualOf(ctx.ui, 'ce'))}
         <div class="panel sc-position-summary"><span class="eyebrow">${indexName}</span><b data-spot>${money(d.underlying.ltp)}</b><div class="sc-range"><span>${money(d.underlying.candles.at(-1)?.low)}</span><i><em></em></i><span>${money(d.underlying.candles.at(-1)?.high)}</span></div><button class="btn btn-ghost btn-sm" data-side-panel="positions">Show positions</button><small>All orders go through TradeLock risk rules and Dhan.</small></div>
-        ${ticket('PUT', 'PE', pe, d.lotSize, ctx.ui.margins?.pe, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), ctx.ui.manualLots?.pe || 0)}
+        ${ticket('PUT', 'PE', pe, d.lotSize, ctx.ui.margins?.pe, ctx.ui.signalRisk, runningTrade(ctx.state, ctx.ui), manualOf(ctx.ui, 'pe'))}
       </section>
       <p class="scalper-disclaimer">Live prices may be delayed or unavailable during market closures. Check the contract and quantity before placing an order. TradeLock risk rules can block any order. Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts</a>.</p>`;
   },
@@ -642,6 +655,7 @@ export default {
     // Lots by hand: − / + start from the lots shown (auto or manual), 1 to 500 lots; the server's risk gate still checks
     // every order. Tapping the lots label / number goes back to auto sizing from the risk rules.
     on(el, 'click', '[data-lot-step]', (_, button) => {
+      if (!ui.manualMode) return;   // auto lots: switch Manual lots on first
       const side = button.dataset.lotSide, item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`]));
       const now = sizeOf(ctx, side, item).lots || 0, step = Number(button.dataset.lotStep);
       ui.manualLots = { ...ui.manualLots, [side]: Math.min(500, Math.max(1, now + step)) };
@@ -653,7 +667,8 @@ export default {
     on(el, 'input', '[data-lots]', (_, input) => { const v = input.value.replace(/\D/g, '').slice(0, 3); if (v !== input.value) input.value = v; }, signal);
     on(el, 'focusin', '[data-lots]', (_, input) => { input.dataset.before = input.value; setTimeout(() => input.select?.(), 0); }, signal);
     const applyTypedLots = input => {
-      if (input.value === input.dataset.before) return;   // nothing typed (or Escape): leave auto / manual as it was
+      if (!ui.manualMode || input.readOnly) return;
+      if (input.value === input.dataset.before) return;   // nothing typed (or Escape): leave it as it was
       const side = input.dataset.lots, typed = parseInt(input.value, 10);
       const item = strikeIndex(ctx.data).byId.get(String(ui[`${side}Id`])), shown = sizeOf(ctx, side, item).lots || 0;
       if (!(typed > 0)) { input.value = String(shown); return; }
@@ -671,13 +686,14 @@ export default {
       else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); input.value = String(Math.min(500, Math.max(1, (parseInt(input.value, 10) || 0) + (e.key === 'ArrowUp' ? 1 : -1)))); }
     }, signal);
     on(el, 'focusout', '[data-lots]', (_, input) => applyTypedLots(input), signal);
-    on(el, 'click', '[data-lot-auto]', (_, label) => {
-      const side = label.dataset.lotAuto;
-      if (!ui.manualLots?.[side]) return;
-      ui.manualLots = { ...ui.manualLots, [side]: 0 };
-      rememberLots(ui, side);
-      updateTickets(ctx); refreshMarginsSoon([side]);
-      toast(`${side.toUpperCase()} lots back to auto (from your risk rules).`, 'ok');
+    // Manual lots switch (toolbar, and the full-screen bar on phones): off = auto lots from the risk rules, locked;
+    // on = the lots last set for this instrument (or the auto ones to start from), typed or − / +. Saved for the user.
+    on(el, 'click', '[data-lot-mode-toggle]', () => {
+      ui.manualMode = !ui.manualMode;
+      for (const b of $$('[data-lot-mode-toggle]', el)) { b.setAttribute('aria-checked', String(ui.manualMode)); const t = b.querySelector('[data-lot-mode-text]'); if (t) t.textContent = ui.manualMode ? 'Manual' : 'Auto'; }
+      put('/scalper/lots/mode', { manual: ui.manualMode }).catch(() => { /* kept for this visit */ });
+      updateTickets(ctx); refreshMarginsSoon();
+      toast(ui.manualLots && ui.manualMode ? 'Manual lots: type or use − / +.' : 'Auto lots: sized from your risk rules.', 'ok');
     }, signal);
 
     on(el, 'click', '[data-order-side]', (_, button) => {
@@ -1025,7 +1041,7 @@ function chartPanel(name, instrument, key, _candles, spot, interval = '5', order
   const { fast, slow } = emaPeriods(interval);
   const subtitle = key === 'spot' && !isAdmin() ? `EMA ${fast} / EMA ${slow}` : key === 'spot' ? (showsHammerMarkers(interval) ? 'EMA45 wick-touch hammer + 5m opening-range breakout arrows · next candle confirms' : ['5'].includes(String(interval)) ? `EMA ${fast} / EMA ${slow} · 5m opening-range breakout arrows · hammer signals on 1-minute` : `EMA ${fast} / EMA ${slow} · breakout and hammer arrows show on the 1- and 5-minute charts`) : instrument?.symbol || name;
   const live = key === 'spot' ? html`<span class="sc-hdr-index"><strong data-spot>${money(instrument?.ltp || 0)}</strong><em class="${(instrument?.ltp || 0) >= (_candles?.at?.(-1)?.open || instrument?.ltp || 0) ? 'pos' : 'neg'}">Live index</em></span>` : '';
-  return html`<section class="panel sc-chart-panel" data-chart-panel="${key}"><header><span><b>${heading}${live}</b><small>${subtitle}</small></span><span class="sc-chart-ltp" data-ltp="${key}">${money(instrument?.ltp || 0)}</span>${order ? html`<span class="sc-hdr-order" title="${order.reason}"><button type="button" class="btn btn-sm sc-hdr-sell" data-order-side="SELL" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Sell <small data-hdr-funds="${key}-sell">${order.sell}</small></button><span class="sc-hdr-lots" title="Type the lots or use − / + · tap 'lots' to go back to auto"><button type="button" data-lot-step="-1" data-lot-side="${key}" aria-label="One lot less">−</button><input class="sc-hdr-lots-input ${order.manual ? 'manual' : ''}" data-lots="${key}" data-hdr-lots="${key}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" enterkeyhint="done" value="${order.lots}" aria-label="${key.toUpperCase()} lots: type a number, or use − / +" title="Type the lots (1–500) and press Enter"><span class="sc-hdr-lots-unit ${order.manual ? 'manual' : ''}" data-lot-auto="${key}" data-lots-mode="${key}" title="${order.manual ? 'Manual lots: tap to go back to auto' : 'Auto lots (from your risk rules)'}">lots</span><button type="button" data-lot-step="1" data-lot-side="${key}" aria-label="One lot more">+</button></span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Buy <small data-hdr-funds="${key}-buy">${order.buy}</small></button></span>` : ''}</header><div class="sc-chart-meta"><button type="button" class="sc-ind sc-ind-add" data-studies="${key}" title="Add or change indicators" aria-haspopup="dialog">ƒx Indicators</button><span class="sc-legend" data-legend="${key}"></span><span>Spot <b>${money(spot)}</b></span><span>${key === 'spot' ? 'PCR' : 'OI'} <b class="oi-value">--</b></span><span class="sc-chart-count" data-candle-count></span></div><div class="sc-studies-pop" data-studies-pop="${key}" role="dialog" aria-label="Indicators" hidden></div><div class="sc-chart-host" data-chart="${key}" role="img" aria-label="${name} live candlestick chart"></div><div class="sc-chart-controls" aria-label="Chart zoom controls"><span>TIME</span><button type="button" data-chart-control="x-out" aria-label="Zoom time out" title="Zoom out on time axis">-</button><button type="button" data-chart-control="x-in" aria-label="Zoom time in" title="Zoom in on time axis">+</button><span>PRICE</span><button type="button" data-chart-control="y-out" aria-label="Zoom price out" title="Zoom out on price axis">-</button><button type="button" data-chart-control="y-in" aria-label="Zoom price in" title="Zoom in on price axis">+</button><button type="button" data-chart-control="reset" aria-label="Reset chart zoom" title="Back to the selected session (1D / 5D)">Reset</button></div></section>`;
+  return html`<section class="panel sc-chart-panel" data-chart-panel="${key}"><header><span><b>${heading}${live}</b><small>${subtitle}</small></span><span class="sc-chart-ltp" data-ltp="${key}">${money(instrument?.ltp || 0)}</span>${order ? html`<span class="sc-hdr-order" title="${order.reason}"><button type="button" class="btn btn-sm sc-hdr-sell" data-order-side="SELL" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Sell <small data-hdr-funds="${key}-sell">${order.sell}</small></button><span class="sc-hdr-lots ${lotsEditable ? '' : 'locked'}" title="${lotsEditable ? 'Lots: type a number or use − / +' : 'Auto lots from your risk rules · switch Manual lots on to change them'}"><button type="button" data-lot-step="-1" data-lot-side="${key}" aria-label="One lot less" ${lotsEditable ? '' : 'disabled'}>−</button><input class="sc-hdr-lots-input ${order.manual ? 'manual' : ''}" data-lots="${key}" data-hdr-lots="${key}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" enterkeyhint="done" value="${order.lots}" aria-label="${key.toUpperCase()} lots" ${lotsEditable ? '' : 'readonly'}><button type="button" data-lot-step="1" data-lot-side="${key}" aria-label="One lot more" ${lotsEditable ? '' : 'disabled'}>+</button></span><button type="button" class="btn btn-sm sc-hdr-buy" data-order-side="BUY" data-option="${key.toUpperCase()}" data-hdr-btn="${key}" ${order.disabled ? 'disabled' : ''}>Buy <small data-hdr-funds="${key}-buy">${order.buy}</small></button></span>` : ''}</header><div class="sc-chart-meta"><button type="button" class="sc-ind sc-ind-add" data-studies="${key}" title="Add or change indicators" aria-haspopup="dialog">ƒx Indicators</button><span class="sc-legend" data-legend="${key}"></span><span>Spot <b>${money(spot)}</b></span><span>${key === 'spot' ? 'PCR' : 'OI'} <b class="oi-value">--</b></span><span class="sc-chart-count" data-candle-count></span></div><div class="sc-studies-pop" data-studies-pop="${key}" role="dialog" aria-label="Indicators" hidden></div><div class="sc-chart-host" data-chart="${key}" role="img" aria-label="${name} live candlestick chart"></div><div class="sc-chart-controls" aria-label="Chart zoom controls"><span>TIME</span><button type="button" data-chart-control="x-out" aria-label="Zoom time out" title="Zoom out on time axis">-</button><button type="button" data-chart-control="x-in" aria-label="Zoom time in" title="Zoom in on time axis">+</button><span>PRICE</span><button type="button" data-chart-control="y-out" aria-label="Zoom price out" title="Zoom out on price axis">-</button><button type="button" data-chart-control="y-in" aria-label="Zoom price in" title="Zoom in on price axis">+</button><button type="button" data-chart-control="reset" aria-label="Reset chart zoom" title="Back to the selected session (1D / 5D)">Reset</button></div></section>`;
 }
 // Order tickets: [Sell] [lots] [Buy]. Lots are sized automatically from the risk rules, never typed:
 // SL = Option SL room % (Risk rules) below the live premium, and the loss at that SL may not exceed the per-trade budget
@@ -1063,12 +1079,16 @@ export function chosenSize(item, lotSize, risk, manual = 0) {
   return { lots:manual, manual:true, reason:'', sl, slPct, risk: sl != null ? round2(manual * (item.ltp - sl) * lotSize) : null,
     capital: round2(manual * lotSize * item.ltp), auto: auto.lots };
 }
-const sizeOf = (ctx, side, item) => chosenSize(item, ctx.data.lotSize, ctx.ui.signalRisk, ctx.ui.manualLots?.[side] || 0);
+// Lots set by hand count only while the Manual lots switch is on; otherwise auto sizing from the risk rules.
+// Rendering: whether the lots boxes are editable (the Manual lots switch); set at the start of each view.
+let lotsEditable = false;
+export const manualOf = (ui, side) => (ui?.manualMode ? ui.manualLots?.[side] || 0 : 0);
+const sizeOf = (ctx, side, item) => chosenSize(item, ctx.data.lotSize, ctx.ui.signalRisk, manualOf(ctx.ui, side));
 function ticket(name, option, item, lotSize, margin, risk, busy = '', manual = 0) {
   const side = option.toLowerCase(), size = chosenSize(item, lotSize, risk, manual), t = ticketText(item, size, lotSize, margin);
   const ready = item && lotSize && size.lots > 0 && !busy;
   if (busy) t.note = busy;
-  return html`<section class="panel sc-ticket ${busy ? 'busy' : ''}" data-ticket="${side}"><header><span class="sc-option-tag ${side}">${option}</span><b><span class="tk-full">${item ? `${item.underlying || 'NIFTY'} ${item.expiry} ${item.strike} ${name}` : name}</span><span class="tk-short">${item ? `${item.strike} ${option}` : option}</span></b><span class="sc-last" data-ltp="${side}">${money(item?.ltp)}</span></header><div class="sc-ticket-buttons"><div class="sc-btn-col sell"><button class="btn btn-danger sc-order-btn ${t.sellShort ? 'short' : ''}" data-order-side="SELL" data-option="${option}" ${ready ? '' : 'disabled'}><span>Sell</span><small title="Margin Dhan blocks to sell (write) the full quantity" data-funds="sell">${t.sell}</small></button></div><div class="sc-lots" title="− / + to set lots by hand · tap the label to go back to auto (sized from your risk rules)"><small data-lot-auto="${side}" data-lots-mode="${side}">${size.manual ? 'Lots · manual' : 'Lots · auto'}</small><span class="sc-lot-step"><button type="button" data-lot-step="-1" data-lot-side="${side}" aria-label="${option}: one lot less">−</button><input class="input sc-lots-input" data-lots="${side}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" enterkeyhint="done" value="${size.lots}" aria-label="${option} lots: type a number, or use − / +" title="Type the lots (1–500) and press Enter"><button type="button" data-lot-step="1" data-lot-side="${side}" aria-label="${option}: one lot more">+</button></span></div><div class="sc-btn-col buy"><button class="btn btn-primary sc-order-btn ${t.buyShort ? 'short' : ''}" data-order-side="BUY" data-option="${option}" ${ready ? '' : 'disabled'}><span>Buy</span><small title="Funds needed to buy the full quantity" data-funds="buy">${t.buy}</small></button></div></div><small data-ticket-note>${t.note}</small></section>`;
+  return html`<section class="panel sc-ticket ${busy ? 'busy' : ''}" data-ticket="${side}"><header><span class="sc-option-tag ${side}">${option}</span><b><span class="tk-full">${item ? `${item.underlying || 'NIFTY'} ${item.expiry} ${item.strike} ${name}` : name}</span><span class="tk-short">${item ? `${item.strike} ${option}` : option}</span></b><span class="sc-last" data-ltp="${side}">${money(item?.ltp)}</span></header><div class="sc-ticket-buttons"><div class="sc-btn-col sell"><button class="btn btn-danger sc-order-btn ${t.sellShort ? 'short' : ''}" data-order-side="SELL" data-option="${option}" ${ready ? '' : 'disabled'}><span>Sell</span><small title="Margin Dhan blocks to sell (write) the full quantity" data-funds="sell">${t.sell}</small></button></div><div class="sc-lots ${lotsEditable ? '' : 'locked'}" title="${lotsEditable ? 'Lots: type a number or use − / +' : 'Auto lots from your risk rules · switch Manual lots on to change them'}"><small data-lots-mode="${side}">${lotsEditable ? 'Lots · manual' : 'Lots · auto'}</small><span class="sc-lot-step"><button type="button" data-lot-step="-1" data-lot-side="${side}" aria-label="${option}: one lot less" ${lotsEditable ? '' : 'disabled'}>−</button><input class="input sc-lots-input" data-lots="${side}" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" enterkeyhint="done" value="${size.lots}" aria-label="${option} lots" ${lotsEditable ? '' : 'readonly'}><button type="button" data-lot-step="1" data-lot-side="${side}" aria-label="${option}: one lot more" ${lotsEditable ? '' : 'disabled'}>+</button></span></div><div class="sc-btn-col buy"><button class="btn btn-primary sc-order-btn ${t.buyShort ? 'short' : ''}" data-order-side="BUY" data-option="${option}" ${ready ? '' : 'disabled'}><span>Buy</span><small title="Funds needed to buy the full quantity" data-funds="buy">${t.buy}</small></button></div></div><small data-ticket-note>${t.note}</small></section>`;
 }
 // Button labels: a lakh or more as ₹14.28L so it fits on a phone button.
 export const compactRupees = n => Math.abs(n) >= 1e5 ? `₹${(Math.round(n / 1e3) / 100).toFixed(2)}L` : rupees(n);
@@ -1099,9 +1119,13 @@ function updateTickets(ctx) {
     if (!box) continue;
     box.classList.toggle('busy', !!busy);
     const item = strikeIndex(ctx.data).byId.get(String(ctx.ui[`${side}Id`]));
-    const size = chosenSize(item, ctx.data.lotSize, risk, ctx.ui.manualLots?.[side] || 0), t = ticketText(item, size, ctx.data.lotSize, ctx.ui.margins?.[side]);
+    const size = chosenSize(item, ctx.data.lotSize, risk, manualOf(ctx.ui, side)), t = ticketText(item, size, ctx.data.lotSize, ctx.ui.margins?.[side]);
     const mode = ctx.el.querySelectorAll(`[data-lots-mode="${side}"]`);
-    for (const m of mode) { const text = m.tagName === 'SMALL' ? (size.manual ? 'Lots · manual' : 'Lots · auto') : null; if (text && m.textContent !== text) m.textContent = text; m.classList.toggle('manual', !!size.manual); }
+    const editable = !!ctx.ui.manualMode;
+    for (const m of mode) { const text = editable ? 'Lots · manual' : 'Lots · auto'; if (m.textContent !== text) m.textContent = text; m.classList.toggle('manual', editable); }
+    // The Manual lots switch locks or unlocks the boxes and − / + (ticket and chart header) in place.
+    for (const node of ctx.el.querySelectorAll(`[data-lots="${side}"]`)) { node.readOnly = !editable; node.classList.toggle('manual', !!size.manual); node.closest('.sc-lots, .sc-hdr-lots')?.classList.toggle('locked', !editable); }
+    for (const b of ctx.el.querySelectorAll(`[data-lot-step][data-lot-side="${side}"]`)) b.disabled = !editable;
     // The premium moves the lot count; refresh Dhan's sell margin only when the count actually changes.
     if ((ctx.ui.autoLots ||= {})[side] !== size.lots) { ctx.ui.autoLots[side] = size.lots; ctx.ui.refreshMarginsSoon?.([side]); }
     const lotsOut = box.querySelector('[data-lots]');

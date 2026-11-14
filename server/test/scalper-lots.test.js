@@ -39,3 +39,16 @@ test('bad input is refused', async () => {
   assert.throws(put({ underlying: 'NIFTY', side: 'ce', lots: 501 }), /lots/);
   assert.throws(put({ underlying: 'NIFTY', side: 'ce', lots: 1.5 }), /lots/);
 });
+
+test('the Manual lots switch is saved per user and kept apart from the lots', async () => {
+  const r = await routes(), a = newUser('lots-mode-a@test'), b = newUser('lots-mode-b@test');
+  const get = id => r.get('GET /api/scalper/lots')({ user: { id } });
+  assert.equal(get(a).manual, false, 'auto by default');
+  r.get('PUT /api/scalper/lots')({ user: { id: a }, body: { underlying: 'NIFTY', side: 'ce', lots: 3 } });
+  assert.deepEqual(r.get('PUT /api/scalper/lots/mode')({ user: { id: a }, body: { manual: true } }), { manual: true });
+  assert.deepEqual(get(a), { lots: { NIFTY: { ce: 3 } }, manual: true }, 'the switch is not listed as an instrument');
+  assert.equal(get(b).manual, false, 'another user keeps their own');
+  r.get('PUT /api/scalper/lots/mode')({ user: { id: a }, body: { manual: false } });
+  assert.deepEqual(get(a), { lots: { NIFTY: { ce: 3 } }, manual: false }, 'switching off keeps the saved lots for next time');
+  assert.throws(() => r.get('PUT /api/scalper/lots/mode')({ user: { id: a }, body: { manual: 'yes' } }), /manual/);
+});
