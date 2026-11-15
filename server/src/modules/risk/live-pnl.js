@@ -6,12 +6,12 @@ import { getBook } from '../broker/book.js';
 import { emit, hasListeners } from '../../lib/bus.js';
 import { ist } from '../../lib/time.js';
 import { config } from '../../config.js';
-import { liveTick, positionsWatch, onTick } from '../scalper/live.js';
+import { liveTick, positionsWatch, onTick, broadcastScalperUser } from '../scalper/live.js';
 import { recordPoint, algoSecurityIds, algoPnlOf } from './service.js';
 import { mcxLotValue, estimateCharges } from './charges.js';
 import { fillsForDay } from '../trades/service.js';
 import { stmt } from '../../db/index.js';
-import { alertKeys, checkAlerts } from '../alerts/service.js';
+import { activeAlerts, alertKeys, checkAlerts } from '../alerts/service.js';
 
 const FLUSH_MS = 250, TICK_FRESH_MS = 60_000, FRESH_MS = 5_000;
 const state = new Map();   // userId -> { keys, snap, algoIds }
@@ -96,7 +96,12 @@ export function startLivePnl() {
   const off = onTick((userId, key, tick) => {
     if (!state.get(userId)?.keys.has(key)) return;
     dirty.add(userId);
-    if (tick?.ltp > 0) { try { if (checkAlerts(userId, key, tick.ltp).length) trackPositions(userId); } catch (e) { console.error('[alerts]', e.message); } }
+    if (tick?.ltp > 0) { try {
+      if (checkAlerts(userId, key, tick.ltp).length) {
+        trackPositions(userId);
+        broadcastScalperUser(userId, { type: 'alerts', alerts: activeAlerts(userId) });
+      }
+    } catch (e) { console.error('[alerts]', e.message); } }
   });
   const timer = setInterval(() => { try { flush(); } catch (e) { console.error('[live-pnl]', e.message); } }, FLUSH_MS);
   timer.unref?.();

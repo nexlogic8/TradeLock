@@ -4,6 +4,7 @@ import { store } from '../core/store.js';
 import { icon } from '../ui/icons.js';
 import { toast, toastError } from '../ui/toast.js';
 import { themePref, setThemePref } from '../core/theme.js';
+import { ringPriceAlert } from '../ui/price-alarm.js';
 
 const PREFS = [
   ['emergencyConfirm', 'Kill switch confirmation', 'Ask before the kill switch closes positions and locks the account'],
@@ -47,6 +48,7 @@ export default {
           <p class="small muted" style="margin:0 0 12px">While Algo Trading is on, every automatic entry rings this phone like an alarm, with the app open or closed, on silent and in Do Not Disturb, until you press Stop.</p>
           <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-sm btn-primary" type="button" id="s-alarm-test">Test alarm</button>
+            <button class="btn btn-sm" type="button" id="s-price-alarm-test">Test price alarm</button>
             <button class="btn btn-sm" type="button" id="s-alarm-setup">Check phone permissions</button>
           </div>
         </div>` : ''}
@@ -62,6 +64,9 @@ export default {
       return user;
     };
     on(el, 'click', '#s-alarm-test', () => window.TradeLockApp?.testTradeAlarm?.(), signal);
+    on(el, 'click', '#s-price-alarm-test', () => ringPriceAlert({
+      id: `test-${Date.now()}`, symbol: 'TEST ONLY', dir: 'above', price: 100, triggeredPrice: 100,
+    }), signal);
     on(el, 'click', '#s-alarm-setup', () => window.TradeLockApp?.setupTradeAlerts?.(), signal);
     on(el, 'click', '[data-theme-pref]', (_, b) => {
       setThemePref(b.dataset.themePref);

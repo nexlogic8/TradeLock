@@ -2202,8 +2202,20 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
   border:1px solid color-mix(in srgb, var(--mint) 55%, transparent); background:color-mix(in srgb, var(--panel, #0e1420) 80%, var(--mint) 20%);
   color:var(--mint); cursor:pointer; box-shadow:0 4px 14px rgba(0, 0, 0, .35), 0 0 0 3px color-mix(in srgb, var(--mint) 12%, transparent);
   transition:transform .12s ease, background .12s ease; -webkit-tap-highlight-color:transparent; }
-.sc-lvl-plus:hover { transform:scale(1.12); background:var(--mint); color:#05121a; }
+.sc-lvl-plus:hover, .sc-lvl-plus:focus-visible { transform:scale(1.12); background:#0b6b3a; border-color:#16a34a; color:#ffffff; outline:none;
+  box-shadow:0 5px 16px rgba(0,0,0,.42), 0 0 0 4px rgba(22,163,74,.28); }
+.sc-lvl-plus:active { transform:scale(1.04); background:#064e2a; }
 .sc-lvl-plus[hidden] { display:none; }
+.sc-lvl-drag-point { position:absolute; z-index:9; width:34px; height:16px; padding:0; display:grid; place-items:center; border-radius:8px;
+  border:1px solid #2DE0C0; background:#2DE0C0; color:#07594d;
+  box-shadow:0 2px 6px rgba(0,0,0,.3); transform:translateX(-50%); cursor:ns-resize; touch-action:none; -webkit-tap-highlight-color:transparent; }
+.sc-lvl-drag-point svg { width:18px; height:10px; fill:currentColor; pointer-events:none; }
+.sc-lvl-drag-point[hidden] { display:none; }
+.sc-lvl-alert-drag { position:absolute; z-index:9; left:50%; width:34px; height:16px; padding:0; display:grid; place-items:center; border-radius:8px;
+  border:1px solid #B48CFF; background:#B48CFF; color:#26144d; box-shadow:0 2px 6px rgba(0,0,0,.35); cursor:ns-resize;
+  transform:translateX(-50%); touch-action:none; user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent; }
+.sc-lvl-alert-drag svg { fill:currentColor; pointer-events:none; }
+.sc-lvl-alert-drag[hidden] { display:none; }
 .sc-lvl-menu { position:absolute; z-index:10; width:228px; padding:6px; border-radius:12px; background:var(--panel, #0e1420); border:1px solid var(--line-2);
   box-shadow:0 14px 40px rgba(0, 0, 0, .45); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); animation:sc-lvl-in .14s ease-out; }
 .sc-lvl-menu[hidden] { display:none; }
@@ -2220,6 +2232,15 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
 .sc-lvl-menu button.buy:hover { background:rgba(90, 184, 255, .14); } .sc-lvl-menu button.sell:hover { background:rgba(255, 186, 82, .14); } .sc-lvl-menu button.alert:hover { background:rgba(180, 140, 255, .14); }
 .sc-chart-host[data-lvl-cursor="ns-resize"], .sc-chart-host[data-lvl-cursor="ns-resize"] * { cursor:ns-resize !important; }
 .sc-chart-host[data-lvl-cursor="pointer"], .sc-chart-host[data-lvl-cursor="pointer"] * { cursor:pointer !important; }
-@media (max-width:760px) { .sc-lvl-plus { width:32px; height:32px; } .sc-lvl-menu button { padding:10px 8px; } }
+@media (max-width:760px) {
+  .sc-lvl-plus { width:32px; height:32px; }
+  .sc-lvl-menu button { padding:10px 8px; }
+}
+@media (max-width:760px) {
+  /* A chart crosshair can be restored/programmatically moved by WebView. Only
+     reveal the action button after this overlay receives an actual drag. */
+  .sc-chart-host .sc-lvl-plus { display:none; }
+  .sc-chart-host[data-lvl-touch-selected="1"] .sc-lvl-plus:not([hidden]) { display:grid; }
+}
 .sc-lvl-menu button.hline svg { color:#FFBA52; } .sc-lvl-menu button.hline:hover { background:rgba(255, 186, 82, .12); }
 .sc-lvl-menu button.hline { border-top:1px solid var(--line-2); border-radius:0 0 8px 8px; margin-top:2px; }

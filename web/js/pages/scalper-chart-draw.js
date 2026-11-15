@@ -272,7 +272,7 @@ export class DrawingLayer {
   // ---- pointer and keyboard ----
   bind() {
     const host = this.host, local = e => { const r = host.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-    const onUi = e => e.target.closest?.('.sc-draw, .sc-draw-sel, .sc-draw-edit');
+    const onUi = e => e.target.closest?.('.sc-draw, .sc-draw-sel, .sc-draw-edit, .sc-lvl-plus, .sc-lvl-menu');
     this.on = {
       down: e => {
         if (onUi(e) || this.hidden || (e.button != null && e.button > 0)) return;

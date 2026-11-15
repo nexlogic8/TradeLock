@@ -11,7 +11,7 @@ import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } f
 import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
 import { DrawingLayer, mountDrawRail } from './scalper-chart-draw.js';
 import { PositionOverlay } from './scalper-chart-position.js';
-import { LevelOverlay } from './scalper-chart-levels.js';
+import { LevelOverlay } from './scalper-chart-levels.js?v=20261115-plus-hover1';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -505,7 +505,11 @@ export default {
       if (signal.aborted) return;
       const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(`${scheme}//${location.host}/api/scalper/live`);
-      socket.addEventListener('open', () => socket.send(JSON.stringify({ type:'watch', instruments: watched() })));
+      socket.addEventListener('open', async () => {
+        socket.send(JSON.stringify({ type:'watch', instruments: watched() }));
+        // Reconcile after reconnect so a device also catches changes made while it was offline.
+        try { const { alerts } = await get('/alerts'); if (!signal.aborted) setLocalAlerts(ctx, () => alerts || []); } catch { /* the live push remains primary */ }
+      });
       socket.addEventListener('message', event => {
         let msg; try { msg = JSON.parse(event.data); } catch { return; }
         if (msg.type === 'status') {
@@ -520,6 +524,9 @@ export default {
           // Ticks flowing means the feed is live, whatever status message arrived first.
           if (!feedLive) { feedLive = true; const label = $('[data-feed-label]', el); if (label) label.textContent = 'Live'; $('.scalper-feed', el)?.classList.add('live'); $('.scalper-feed', el)?.classList.remove('offline'); }
           applyTick(ctx, msg);
+        } else if (msg.type === 'alerts' && Array.isArray(msg.alerts)) {
+          // Account-scoped server push: create, move, fire or delete on another device.
+          setLocalAlerts(ctx, () => msg.alerts);
         }
       });
       socket.addEventListener('close', () => { if (!signal.aborted) reconnectTimer = setTimeout(connect, 2500); });

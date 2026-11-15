@@ -1,6 +1,6 @@
 import { store } from './core/store.js';
 import { get } from './core/api.js';
-import { show, currentRoute, migrateHashUrl } from './core/router.js';
+import { show, currentRoute, migrateHashUrl } from './core/router.js?v=20261115-plus-hover1';
 import { signedIn } from './core/session.js';
 import './core/theme.js';
 import { initPullRefresh } from './ui/pullrefresh.js';

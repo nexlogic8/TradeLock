@@ -10,8 +10,8 @@ android {
     applicationId 'in.tradelock.app'
     minSdk 24
     targetSdk 36
-    versionCode 24
-    versionName '1.4.15'
+    versionCode 25
+    versionName '1.4.16'
     buildConfigField 'String', 'HOME_URL', '"https://tradelock.in/overview"'
     buildConfigField 'String', 'HOST', '"tradelock.in"'
     // Google "web" OAuth client ID (public), from the original sign-in project, whose Android client is registered for

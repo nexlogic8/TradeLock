@@ -21,6 +21,18 @@ const hubBusy = hub => [...hub.feeds].some(f => f.clients.size);
 const MAX_WATCH = 99; // one slot is reserved for NIFTY 50
 const send = (socket, data) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(data)); };
 
+/** Push an account-scoped UI event to every open Power Scalper screen for that user. */
+export function broadcastScalperUser(userId, data) {
+  const feed = feeds.get(userId);
+  if (!feed) return 0;
+  let sent = 0;
+  for (const client of feed.clients) {
+    if (client.internal || client.readyState !== WebSocket.OPEN) continue;
+    send(client, data); sent++;
+  }
+  return sent;
+}
+
 export function allowScalperContracts(userId, expiry, strikes, underlying = { securityId:'13', optionSegment:'NSE_FNO' }) {
   const ids = new Set(strikes.flatMap(row => [row.ce?.securityId, row.pe?.securityId]).filter(Boolean).map(String));
   // One entry per index, so loading (or preloading) another index keeps this one's contracts valid.

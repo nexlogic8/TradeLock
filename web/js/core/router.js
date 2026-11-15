@@ -24,7 +24,7 @@ const PAGES = {
   rules: () => import('../pages/rules.js'),
   strategy: () => import('../pages/strategy.js'),
   backtest: () => import('../pages/backtest.js'),
-  scalper: () => import('../pages/scalper.js'),
+  scalper: () => import('../pages/scalper.js?v=20261115-plus-hover1'),
   algo: () => import('../pages/algo.js'),
   positions: () => import('../pages/trades.js'),
   analytics: () => import('../pages/analytics.js'),
