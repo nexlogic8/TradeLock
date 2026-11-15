@@ -133,13 +133,13 @@ export default {
     const open = d.positions;
     return html`
       <div class="kpis ov-kpis">
-        <div class="panel kpi ${net(d) < 0 ? 'acc-red' : 'acc-mint'}">
+        <div class="panel kpi ov-kpi-pnl ${net(d) < 0 ? 'acc-red' : 'acc-mint'}">
           <div class="lbl">Today's P&amp;L <small class="muted">after charges</small> ${st.protecting ? pill('Live', '', { sm: true }) : st.pill === 'Market closed' ? pill('Closed', 'grey', { sm: true }) : pill(st.pill || 'Delayed', 'amber', { sm: true })}</div>
           <div class="val ${tone(net(d))}" id="kpi-pnl" title="After estimated charges">${inr(net(d), { sign: true })}</div>
           <div class="foot" id="kpi-pnl-foot">${pnlFoot(d)}</div>
           <svg class="spark" id="spark" aria-hidden="true"></svg>
         </div>
-        <div class="panel kpi acc-amber">
+        <div class="panel kpi ov-kpi-loss acc-amber">
           <div class="lbl">Daily loss limit</div>
           <div class="val">${!r.maxLoss.on ? 'Off' : d.limits.maxLoss ? inr(d.limits.maxLoss) : `${r.maxLoss.value}%`}</div>
           <div class="foot">${!r.maxLoss.on ? 'No stop-loss today' : d.limits.maxLoss ? "Today's stop-loss" : 'Waiting for starting capital'}</div>

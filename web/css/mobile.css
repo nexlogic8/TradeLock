@@ -265,8 +265,13 @@
   .topbar .top-right > .market-chip { justify-self: stretch; margin: 0; padding: 0; }
   .topbar .top-right .broker-chip:has(.b-mark) span:last-child { display: inline; }   /* room for "Dhan" in the grid */
   .topbar .top-right .market-board-face { width: 100%; justify-content: center; }
-  .topbar .top-right > .market-chip { order: 1; } .topbar .top-right > #conn-chip { order: 2; }
-  .topbar .top-right > #algo-btn { order: 3; } .topbar .top-right > .wallet-wrap { order: 4; } .topbar .top-right > #theme-btn { order: 5; }
+  /* Row 1: Protection | Algo (the two switches); row 2: Dhan | Today's P&L after charges. */
+  .topbar .top-right > .wallet-wrap:not(#pnl-wrap) { order: 1; } .topbar .top-right > #algo-btn { order: 2; }
+  .topbar .top-right > #conn-chip { order: 3; } .topbar .top-right > #pnl-wrap { order: 4; } .topbar .top-right > #theme-btn { order: 5; }
+  .topbar .top-right > #pnl-wrap .wallet-btn { width: 100%; height: 30px; justify-content: center; }
+  .topbar .top-right > #pnl-wrap .wallet-pop { position: fixed; left: 16px; right: 16px; width: auto; }
+  /* Today's P&L and the daily loss limit are in the header chip and on Risk rules: not repeated on the phone's Overview. */
+  .ov-kpis > .ov-kpi-pnl, .ov-kpis > .ov-kpi-loss { display: none; }
   .alarm-banner { flex-wrap: wrap; }
   .alarm-banner .grow { flex: 1 1 calc(100% - 34px); }
   .alarm-banner .alarm-actions { width: 100%; padding-left: 30px; }

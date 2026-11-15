@@ -74,7 +74,7 @@ export function mountShell(root) {
             <a class="chip-btn" id="conn-chip" href="/brokers"></a>
             <button class="theme-btn" id="theme-btn" type="button"></button>
           </div>
-          <div class="header-actions"><div class="wallet-wrap">
+          <div class="header-actions"><div class="wallet-wrap" id="pnl-wrap">
               <button class="chip-btn wallet-btn" id="wallet-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="wallet-pop" title="Today's P&L">${icon('chart')}<span class="num" id="wallet-total">₹–</span></button>
               <div class="panel wallet-pop" id="wallet-pop" role="dialog" aria-label="Wallet" hidden></div>
             </div>
@@ -248,7 +248,19 @@ export function mountShell(root) {
 
   // Today's P&L chip; its popover: the day's P&L, broker margin and the TradeLock wallet at a glance.
   const pop = $('#wallet-pop'), wbtn = $('#wallet-btn');
-  const setOpen = open => { pop.hidden = !open; wbtn.setAttribute('aria-expanded', open); if (open) renderWallet(); };
+  const setOpen = open => {
+    pop.hidden = !open; wbtn.setAttribute('aria-expanded', open);
+    if (!open) return;
+    renderWallet();
+    // On phones the popover is fixed to the screen: open it just under the chip, wherever the chip sits.
+    if (getComputedStyle(pop).position === 'fixed') pop.style.top = `${Math.round(wbtn.getBoundingClientRect().bottom + 8)}px`;
+    else pop.style.top = '';
+  };
+  // Phones: the P&L chip joins the status grid (Protection | Algo, then Dhan | P&L); wider screens keep it by the bell.
+  const pnlWrap = $('#pnl-wrap'), actions = pnlWrap.parentElement, topRight = $('.top-right'), phone = matchMedia('(max-width: 620px)');
+  const placePnl = () => { if (phone.matches) topRight.append(pnlWrap); else actions.prepend(pnlWrap); };
+  phone.addEventListener('change', placePnl, { signal });
+  placePnl();
   wbtn.addEventListener('click', e => { e.stopPropagation(); setOpen(pop.hidden); }, { signal });
   document.addEventListener('click', e => { if (!pop.hidden && !e.target.closest('.wallet-wrap')) setOpen(false); }, { signal });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) { setOpen(false); wbtn.focus(); } }, { signal });
