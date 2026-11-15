@@ -1,5 +1,5 @@
 ﻿import { html, $, on, $$ } from '../core/dom.js';
-import { get, post, put } from '../core/api.js';
+import { get, post, put, del } from '../core/api.js';
 import { icon } from '../ui/icons.js';
 import { toast, toastError } from '../ui/toast.js';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, createSeriesMarkers } from '../vendor/lightweight-charts.standalone.production.mjs';
@@ -11,6 +11,7 @@ import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } f
 import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
 import { DrawingLayer, mountDrawRail } from './scalper-chart-draw.js';
 import { PositionOverlay } from './scalper-chart-position.js';
+import { LevelOverlay } from './scalper-chart-levels.js';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -363,7 +364,7 @@ export default {
     for (const [key, value] of Object.entries(selected)) {
       const host = $(`.sc-chart-host[data-chart="${key}"]`, ctx.el);
       let view = ctx.ui.chartViews[key];
-      if (!host) { view?.draw?.destroy(); view?.pos?.destroy(); view?.chart.remove(); delete ctx.ui.chartViews[key]; continue; }
+      if (!host) { view?.draw?.destroy(); view?.pos?.destroy(); view?.levels?.destroy(); view?.chart.remove(); delete ctx.ui.chartViews[key]; continue; }
       if (!view || view.host !== host) {
         // Keep the user's zoom only when the same contract and interval are redrawn.
         let range, priceRange;
@@ -374,9 +375,9 @@ export default {
             const scale = view.chart.priceScale('right');
             if (scale.options().autoScale === false) priceRange = scale.getVisibleRange();
           }
-          view.sizeWatch?.disconnect(); view.draw?.destroy(); view.pos?.destroy(); view.chart.remove();
+          view.sizeWatch?.disconnect(); view.draw?.destroy(); view.pos?.destroy(); view.levels?.destroy(); view.chart.remove();
         }
-        view = ctx.ui.chartViews[key] = createChartView(host, value.rows, ctx.ui.indicators, key, ctx.ui.interval);
+        view = ctx.ui.chartViews[key] = createChartView(host, value.rows, ctx.ui.indicators, key, ctx.ui.interval, ctx);
         view.instrumentId = String(value.id || '');
         view.draw?.setKey(view.instrumentId);
         view.interval = ctx.ui.interval;
@@ -453,7 +454,7 @@ export default {
     el.addEventListener('scroll', e => { if (e.target.matches?.('.sc-chain-body')) ui.chainScroll = e.target.scrollTop; }, { capture:true, signal });
     // Charts hold ResizeObservers and canvases; free them when the page goes away.
     signal.addEventListener('abort', () => {
-      for (const view of Object.values(ui.chartViews || {})) { view.sizeWatch?.disconnect(); view.draw?.destroy(); view.pos?.destroy(); try { view.chart.remove(); } catch {} }
+      for (const view of Object.values(ui.chartViews || {})) { view.sizeWatch?.disconnect(); view.draw?.destroy(); view.pos?.destroy(); view.levels?.destroy(); try { view.chart.remove(); } catch {} }
       ui.chartViews = {};
     }, { once:true });
     const showError = message => {
@@ -1034,6 +1035,51 @@ function fitWorkspace(ctx) {
   const height = Math.round(Math.min(1100, Math.max(320, window.innerHeight - top - below)));
   if (ws.style.height !== `${height}px`) ws.style.height = `${height}px`;
 }
+/** This chart's contract: the option shown, or the index / MCX future on the spot chart. */
+function chartContract(ctx, view) {
+  const d = ctx.data;
+  if (!d || !view.instrumentId) return null;
+  if (view.key === 'spot') return { securityId: view.instrumentId, segment: spotSegment(d), symbol: d.underlying.symbol, ltp: d.underlying.ltp, tradable: false };
+  const item = strikeIndex(d).byId.get(view.instrumentId);
+  return item ? { securityId: String(item.securityId), segment: item.exchangeSegment, symbol: item.symbol, ltp: item.ltp, tradable: true, item } : null;
+}
+/** What the chart's "+" menu does: limit orders (this ticket's lots, through the same risk checks) and price alerts. */
+function levelOptions(ctx, view) {
+  const lotsOf = qty => Math.round(qty / (ctx.data?.qtyPerLot ?? ctx.data?.lotSize ?? 1));
+  return {
+    contract: () => chartContract(ctx, view),
+    size: () => {
+      const c = chartContract(ctx, view);
+      if (!c?.tradable) return null;
+      const s = sizeOf(ctx, view.key, c.item);
+      return s.lots > 0 ? { lots: s.lots, qty: s.lots * (ctx.data.qtyPerLot ?? ctx.data.lotSize) } : null;
+    },
+    act: async (kind, { id, price }) => {
+      const c = chartContract(ctx, view);
+      try {
+        if (kind === 'buy' || kind === 'sell') {
+          const s = sizeOf(ctx, view.key, c?.item), qty = s.lots * (ctx.data.qtyPerLot ?? ctx.data.lotSize);
+          if (!c?.tradable || !(qty > 0)) throw new Error(s.reason || 'No lots to order: set lots on the ticket first.');
+          const side = kind.toUpperCase();
+          const r = await post('/orders', { symbol: c.symbol, securityId: c.securityId, exchangeSegment: c.segment, side, qty, type: 'LIMIT', price, productType: 'INTRADAY' });
+          toast(`${side} limit ${lotsOf(qty)} lot${lotsOf(qty) === 1 ? '' : 's'} @ ${price} placed at Dhan (${r.order?.id || 'pending'}).`, 'ok');
+        } else if (kind === 'move-order') { await put(`/orders/${encodeURIComponent(id)}`, { price }); toast(`Limit order moved to ${price}.`, 'ok'); }
+        else if (kind === 'cancel-order') { await del(`/orders/${encodeURIComponent(id)}`); toast('Order cancelled.', 'ok'); }
+        else if (kind === 'alert') {
+          await post('/alerts', { segment: c.segment, securityId: c.securityId, symbol: c.symbol, price, ltp: c.ltp });
+          armAlertDelivery();
+          toast(`Alert set: ${c.symbol} ${c.ltp > 0 && price < c.ltp ? '≤' : '≥'} ${price}. TradeLock rings when it gets there.`, 'ok');
+        } else if (kind === 'move-alert') { await put(`/alerts/${id}`, { price, ltp: c?.ltp }); toast(`Alert moved to ${price}.`, 'ok'); }
+        else if (kind === 'delete-alert') { await del(`/alerts/${id}`); toast('Alert removed.', 'ok'); }
+      } catch (e) { toastError(e); throw e; }
+    },
+  };
+}
+/** First alert: ask for browser notifications, and wake the Android app's alarm service (it rings even when closed). */
+function armAlertDelivery() {
+  try { if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission(); } catch { /* not supported */ }
+  try { window.TradeLockApp?.startTradeAlerts?.(); } catch { /* not the app */ }
+}
 /** Each chart's open position (by contract), its target / stop and live P&L: on every broker sync and live tick. */
 function refreshChartPositions(ctx) {
   const dash = ctx.state?.dash, d = ctx.data;
@@ -1045,6 +1091,12 @@ function refreshChartPositions(ctx) {
     const pos = id && (dash?.positions || []).find(p => String(p.securityId) === id && Number(p.qty) !== 0);
     const ltp = byId.get(id)?.ltp;
     view.pos.set({ pos: pos ? { securityId: id, qty: Number(pos.qty), avg: Number(pos.avg) } : null, bracket: (dash?.brackets || []).find(b => b.securityId === id) || null, ltp, pointValue });
+    // Level markers: this contract's pending limit orders (not the stop-loss orders) and price alerts.
+    const perLot = d.qtyPerLot ?? d.lotSize ?? 1;
+    view.levels?.set({
+      orders: (dash?.orders || []).filter(o => String(o.securityId) === id && o.type === 'LIMIT').map(o => ({ id: o.id, side: o.side, qty: o.qty, lots: perLot > 0 ? Math.round(o.qty / perLot) : null, price: Number(o.price) })),
+      alerts: (dash?.alerts || []).filter(a => String(a.securityId) === id),
+    });
   }
 }
 function refreshPositions(ctx) {
@@ -1316,7 +1368,7 @@ function restyleChart(view) {
   for (const [k, l] of Object.entries(view.previousDayLines || {})) l.line.applyOptions({ color:k === 'high' ? p.prevHigh : p.prevLow });
   view.profile?.requestUpdate?.(); view.oiProfile?.requestUpdate?.();
 }
-function createChartView(host, rows, indicators, key, interval = '1') {
+function createChartView(host, rows, indicators, key, interval = '1', ctx = null) {
   const theme = themeOptions(), colors = seriesColors();
   const chart = createChart(host, {
     autoSize:true,
@@ -1350,6 +1402,8 @@ function createChartView(host, rows, indicators, key, interval = '1') {
     onSave: async b => { await put('/brackets', b); toast(b.tp == null && b.sl == null ? 'Target and stop-loss removed.' : `Saved${b.sl != null ? ` · stop-loss ${b.sl} placed at your broker` : ''}${b.tp != null ? ` · target ${b.tp}` : ''}.`, 'ok'); },
     onError: e => toastError(e),
   });
+  // Hover "+" (limit order / alert at a price) and the pending orders' and alerts' level markers.
+  if (ctx) view.levels = new LevelOverlay(view, levelOptions(ctx, view));
   view.draw = new DrawingLayer(view);   // trend lines, Fib, risk : reward and the other drawing tools
   setChartData(view,rows,indicators,interval);
   if (view.lastTime) fitSpan(view);

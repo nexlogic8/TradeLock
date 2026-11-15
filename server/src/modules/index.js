@@ -14,6 +14,7 @@ import { brokerRoutes } from './broker/routes.js';
 import { stoxkartRoutes } from './broker/stoxkart.js';
 import { ordersRoutes } from './orders/routes.js';
 import { bracketRoutes } from './brackets/routes.js';
+import { alertRoutes } from './alerts/routes.js';
 import { emergencyRoutes } from './emergency/routes.js';
 import { tradesRoutes } from './trades/routes.js';
 import { analyticsRoutes } from './analytics/routes.js';
@@ -42,7 +43,7 @@ export function buildRouter() {
   }), { public: true });
 
   for (const register of [
-    authRoutes, googleRoutes, rulesRoutes, strategyRoutes, algoRoutes, scalperRoutes, riskRoutes, brokerRoutes, stoxkartRoutes, ordersRoutes, bracketRoutes, emergencyRoutes, tradesRoutes,
+    authRoutes, googleRoutes, rulesRoutes, strategyRoutes, algoRoutes, scalperRoutes, riskRoutes, brokerRoutes, stoxkartRoutes, ordersRoutes, bracketRoutes, alertRoutes, emergencyRoutes, tradesRoutes,
     analyticsRoutes, notificationRoutes, billingRoutes, affiliateRoutes, settingsRoutes, auditRoutes, streamRoutes, walletRoutes, adminRoutes, journalRoutes,
   ]) register(r);
   return r;

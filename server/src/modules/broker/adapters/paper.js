@@ -155,7 +155,7 @@ export function createPaperAdapter({ userId, data }) {
       return {
         posSig: positions.map(p => `${p.securityId}:${p.qty}`).join('|'), orderSig: open.map(o => `${o.id}:${o.status}`).join('|') + `#${fills.length}`,
         funds: funds(), positions,
-        orders: open.map(o => ({ id: pid(o.id), symbol: o.symbol, side: o.side, qty: o.qty, price: o.limit_price ?? o.trigger_price, type: o.type, status: 'PENDING' })),
+        orders: open.map(o => ({ id: pid(o.id), symbol: o.symbol, side: o.side, qty: o.qty, price: o.limit_price ?? o.trigger_price, type: o.type, status: 'PENDING', securityId: o.security_id != null ? String(o.security_id) : undefined })),
         trades: fills.map(f => ({ id: `paper:${f.id}`, orderId: pid(f.order_id), ts: f.created_at, symbol: f.symbol, side: f.side, qty: f.qty, price: f.price, pnl: null })),
       };
     },

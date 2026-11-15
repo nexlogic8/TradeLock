@@ -171,14 +171,15 @@ public class TradeAlertService extends Service {
       if (!MarketSession.inWindow(this, System.currentTimeMillis())) { sleepUntilNextSession(); return; }
       // Fast polls with the CPU kept awake only while Algo Trading is on; otherwise a slow check is enough
       // (it notices Algo Trading being switched on from another device within a minute).
-      boolean algo = MarketSession.algoOn(this);
+      // Fast polls (CPU kept awake) while Algo Trading is on or a price alert waits.
+      boolean algo = MarketSession.algoOn(this) || getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("alertsActive", false);
       if (algo && !wake.isHeld()) wake.acquire(7 * 60 * 60_000L);
       if (!algo && wake.isHeld()) wake.release();
       String status;
       try { status = checkOnce(); } catch (Exception e) { status = "Waiting for connection…"; Log.w(TAG, "poll failed", e); }
       // The first poll of a holiday (or any closed day) brings the server's calendar: stop right there.
       if (!MarketSession.inWindow(this, System.currentTimeMillis())) { sleepUntilNextSession(); return; }
-      algo = MarketSession.algoOn(this);
+      algo = MarketSession.algoOn(this) || getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("alertsActive", false);
       String text = (algo ? "Watching for entries · " : "Algo Trading is off · ") + status;
       if (!text.equals(lastStatus)) { lastStatus = text; updateWatch(text); }
       try { Thread.sleep(algo ? MARKET_POLL_MS : IDLE_POLL_MS); } catch (InterruptedException e) { break; }
@@ -210,9 +211,10 @@ public class TradeAlertService extends Service {
   private String checkOnce() throws Exception {
     SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
     long after = p.getLong("lastId", -1);   // -1 = first start: take the latest id, never ring for old trades
+    long alertsAfter = p.getLong("lastAlertId", -1);   // price alerts from the chart, the same way
     String cookie = CookieManager.getInstance().getCookie("https://" + BuildConfig.HOST);
     if (cookie == null || cookie.isEmpty()) return "open TradeLock and sign in";
-    HttpURLConnection http = (HttpURLConnection) new URL("https://" + BuildConfig.HOST + "/api/algo/entries?after=" + after).openConnection();
+    HttpURLConnection http = (HttpURLConnection) new URL("https://" + BuildConfig.HOST + "/api/algo/entries?after=" + after + "&alertsAfter=" + alertsAfter).openConnection();
     http.setConnectTimeout(8_000);
     http.setReadTimeout(8_000);
     http.setRequestProperty("Cookie", cookie);
@@ -224,6 +226,23 @@ public class TradeAlertService extends Service {
     JSONObject res = new JSONObject(read(http.getInputStream()));
     MarketSession.save(this, res.optJSONObject("session"), res.optBoolean("algoOn", true));
     long latest = res.optLong("latestId", 0), serverTime = res.optLong("serverTime", System.currentTimeMillis());
+    // Price alerts: poll fast while any wait; ring for each one fired since the last.
+    p.edit().putBoolean("alertsActive", res.optBoolean("alertsActive", false)).apply();
+    long latestAlert = res.optLong("latestAlertId", 0);
+    if (alertsAfter < 0) p.edit().putLong("lastAlertId", latestAlert).apply();
+    else {
+      JSONArray alerts = res.optJSONArray("alerts");
+      long seenAlert = alertsAfter;
+      for (int i = 0; alerts != null && i < alerts.length(); i++) {
+        JSONObject a = alerts.getJSONObject(i);
+        seenAlert = Math.max(seenAlert, a.optLong("id"));
+        if (serverTime - a.optLong("triggeredAt") > FRESH_MS) continue;
+        ring("PRICE ALERT · " + a.optString("symbol"),
+            ("below".equals(a.optString("dir")) ? "Fell to " : "Reached ") + a.optDouble("price") + "\nTraded at " + a.optDouble("triggeredPrice"));
+      }
+      if (latestAlert < alertsAfter) seenAlert = latestAlert;
+      p.edit().putLong("lastAlertId", seenAlert).apply();
+    }
     if (after < 0) { p.edit().putLong("lastId", latest).apply(); return "connected"; }
     JSONArray entries = res.optJSONArray("entries");
     long seen = after;

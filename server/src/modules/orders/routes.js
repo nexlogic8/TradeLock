@@ -117,6 +117,22 @@ export function ordersRoutes(r) {
     return { order: { ...order, ...result }, reducing: verdict.reducing };
   });
 
+  // Move a pending LIMIT order to a new price (dragging its line on the Power Scalper chart). Same order, same quantity.
+  r.put('/api/orders/:id', async ctx => {
+    limit(`order-modify:${ctx.user.id}`, 60, 60e3);
+    const acct = requireAccount(ctx.user.id);
+    const price = v.num(ctx.body?.price, 'Limit price', { min: 0.05, max: 1_000_000 });
+    const o = (getBook(ctx.user.id).orders || []).find(x => String(x.id) === String(ctx.params.id));
+    if (!o) throw bad('NO_ORDER', 'That order is no longer pending.');
+    if (o.type !== 'LIMIT') throw bad('NOT_LIMIT', 'Only a limit order can be moved here.');
+    const adapter = adapterFor(acct);
+    if (!adapter.modifyOrder) throw bad('UNSUPPORTED', 'This broker does not allow changing an order here.');
+    const result = await brokerCall(() => adapter.modifyOrder(o.id, { price, qty: o.qty }));
+    audit(ctx.user.id, 'order.modified', { id: o.id, symbol: o.symbol, from: o.price, to: price }, ctx.ip);
+    await syncAccount(acct);
+    return { order: { ...o, price, ...result } };
+  });
+
   r.delete('/api/orders/:id', async ctx => {
     const acct = requireAccount(ctx.user.id);
     await brokerCall(() => adapterFor(acct).cancelOrder(ctx.params.id));

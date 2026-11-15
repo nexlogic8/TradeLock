@@ -11,6 +11,7 @@ import { recordPoint, algoSecurityIds, algoPnlOf } from './service.js';
 import { mcxLotValue, estimateCharges } from './charges.js';
 import { fillsForDay } from '../trades/service.js';
 import { stmt } from '../../db/index.js';
+import { alertKeys, checkAlerts } from '../alerts/service.js';
 
 const FLUSH_MS = 250, TICK_FRESH_MS = 60_000, FRESH_MS = 5_000;
 const state = new Map();   // userId -> { keys, snap, algoIds }
@@ -41,7 +42,8 @@ export function livePnlOf(positions, ltpOf) {
 
 /** After each broker sync: follow this user's open contracts on the feed (none open: stop). */
 export function trackPositions(userId) {
-  const open = getBook(userId).positions.filter(p => p.qty !== 0), keys = new Set(open.map(keyOf));
+  // The feed follows open positions (live P&L) and contracts with a price alert (alerts/service.js).
+  const open = getBook(userId).positions.filter(p => p.qty !== 0), keys = new Set([...open.map(keyOf), ...alertKeys(userId)]);
   const st = state.get(userId) || { keys: new Set(), snap: null };
   const same = keys.size === st.keys.size && [...keys].every(k => st.keys.has(k));
   if (!same) { try { positionsWatch(userId, keys); } catch (e) { console.error('[live-pnl] watch', e.message); } st.keys = keys; }
@@ -91,7 +93,11 @@ function flush(now = Date.now()) {
 }
 
 export function startLivePnl() {
-  const off = onTick((userId, key) => { if (state.get(userId)?.keys.has(key)) dirty.add(userId); });
+  const off = onTick((userId, key, tick) => {
+    if (!state.get(userId)?.keys.has(key)) return;
+    dirty.add(userId);
+    if (tick?.ltp > 0) { try { if (checkAlerts(userId, key, tick.ltp).length) trackPositions(userId); } catch (e) { console.error('[alerts]', e.message); } }
+  });
   const timer = setInterval(() => { try { flush(); } catch (e) { console.error('[live-pnl]', e.message); } }, FLUSH_MS);
   timer.unref?.();
   return () => { off(); clearInterval(timer); };

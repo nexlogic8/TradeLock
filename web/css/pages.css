@@ -2196,3 +2196,28 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
 /* Chart position overlay (scalper-chart-position.js): cursors over the TP / SL lines and their buttons. */
 .sc-chart-host[data-pos-cursor="ns-resize"], .sc-chart-host[data-pos-cursor="ns-resize"] * { cursor:ns-resize !important; }
 .sc-chart-host[data-pos-cursor="pointer"], .sc-chart-host[data-pos-cursor="pointer"] * { cursor:pointer !important; }
+
+/* ===== Chart levels (scalper-chart-levels.js): round "+" at the crosshair, its menu, cursors over order / alert lines ===== */
+.sc-lvl-plus { position:absolute; z-index:9; width:26px; height:26px; padding:0; display:grid; place-items:center; border-radius:50%;
+  border:1px solid color-mix(in srgb, var(--mint) 55%, transparent); background:color-mix(in srgb, var(--panel, #0e1420) 80%, var(--mint) 20%);
+  color:var(--mint); cursor:pointer; box-shadow:0 4px 14px rgba(0, 0, 0, .35), 0 0 0 3px color-mix(in srgb, var(--mint) 12%, transparent);
+  transition:transform .12s ease, background .12s ease; -webkit-tap-highlight-color:transparent; }
+.sc-lvl-plus:hover { transform:scale(1.12); background:var(--mint); color:#05121a; }
+.sc-lvl-plus[hidden] { display:none; }
+.sc-lvl-menu { position:absolute; z-index:10; width:228px; padding:6px; border-radius:12px; background:var(--panel, #0e1420); border:1px solid var(--line-2);
+  box-shadow:0 14px 40px rgba(0, 0, 0, .45); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); animation:sc-lvl-in .14s ease-out; }
+.sc-lvl-menu[hidden] { display:none; }
+@keyframes sc-lvl-in { from { opacity:0; transform:translateY(-4px) scale(.98); } to { opacity:1; transform:none; } }
+.sc-lvl-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:4px 8px 8px; border-bottom:1px solid var(--line-2); margin-bottom:4px; }
+.sc-lvl-head b { font:700 15px var(--font-mono, ui-monospace, monospace); color:var(--fg); }
+.sc-lvl-head small { font-size:11px; color:var(--muted); }
+.sc-lvl-menu button { display:grid; grid-template-columns:22px 1fr; grid-template-rows:auto auto; column-gap:8px; align-items:center; width:100%; padding:7px 8px; border:0; border-radius:8px;
+  background:transparent; color:var(--fg); text-align:left; cursor:pointer; font:600 13px var(--font, Inter, system-ui, sans-serif); }
+.sc-lvl-menu button svg { grid-row:1 / span 2; justify-self:center; }
+.sc-lvl-menu button em { grid-column:2; font-style:normal; font-weight:500; font-size:11px; color:var(--muted); }
+.sc-lvl-menu button.buy svg { color:#5AB8FF; } .sc-lvl-menu button.sell svg { color:#FFBA52; } .sc-lvl-menu button.alert svg { color:#B48CFF; }
+.sc-lvl-menu button:hover, .sc-lvl-menu button:focus-visible { outline:none; background:color-mix(in srgb, var(--fg) 8%, transparent); }
+.sc-lvl-menu button.buy:hover { background:rgba(90, 184, 255, .14); } .sc-lvl-menu button.sell:hover { background:rgba(255, 186, 82, .14); } .sc-lvl-menu button.alert:hover { background:rgba(180, 140, 255, .14); }
+.sc-chart-host[data-lvl-cursor="ns-resize"], .sc-chart-host[data-lvl-cursor="ns-resize"] * { cursor:ns-resize !important; }
+.sc-chart-host[data-lvl-cursor="pointer"], .sc-chart-host[data-lvl-cursor="pointer"] * { cursor:pointer !important; }
+@media (max-width:760px) { .sc-lvl-plus { width:32px; height:32px; } .sc-lvl-menu button { padding:10px 8px; } }

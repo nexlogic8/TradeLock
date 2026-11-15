@@ -866,4 +866,19 @@ export const MIGRATIONS = [
   ) WITHOUT ROWID;`,
   // Intraday P&L curve after charges: today's estimated charges at each point (net = pnl − charges; null = before this).
   `ALTER TABLE pnl_points ADD COLUMN charges REAL;`,
+  // Price alerts set on a Power Scalper chart: ring (browser, Android app) when the contract's price reaches the level.
+  // dir: 'above' (the price was below when set: rings on reaching it from below) or 'below'.
+  `CREATE TABLE price_alerts (
+    id              INTEGER PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    segment         TEXT NOT NULL,
+    security_id     TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    price           REAL NOT NULL,
+    dir             TEXT NOT NULL CHECK (dir IN ('above', 'below')),
+    created_at      INTEGER NOT NULL,
+    triggered_at    INTEGER,
+    triggered_price REAL
+  );
+  CREATE INDEX price_alerts_user ON price_alerts(user_id, triggered_at);`,
 ];

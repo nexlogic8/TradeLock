@@ -4,6 +4,7 @@ import { ist, marketOpen, toMinutes } from '../../lib/time.js';
 import { getRules } from '../rules/service.js';
 import { bracketsFor } from '../brackets/store.js';
 import { livePnl, chargesToday } from './live-pnl.js';
+import { activeAlerts } from '../alerts/service.js';
 import { accountFor, accountSummary } from '../broker/registry.js';
 import { getBook, getKillStatus, markDirty } from '../broker/book.js';
 import { fillsForDay } from '../trades/service.js';
@@ -192,6 +193,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     positions: book.positions.filter(p => p.qty !== 0).map(p => (lv?.positions[String(p.securityId)] ? { ...p, ltp: lv.positions[String(p.securityId)].ltp ?? p.ltp, unrealized: lv.positions[String(p.securityId)].unrealized } : p)),
     // Target / stop set on the Power Scalper chart for open positions (the stop is an order at the broker).
     brackets: bracketsFor(userId).map(({ securityId, tp, sl, slOrderId }) => ({ securityId, tp, sl, slAtBroker: !!slOrderId })),
+    // Price alerts waiting on Power Scalper charts (drawn as level markers).
+    alerts: activeAlerts(userId).map(({ id, segment, securityId, price, dir }) => ({ id, segment, securityId, price, dir })),
     orders: book.orders,
     funds: book.funds,
     syncedAt: book.at,

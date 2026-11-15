@@ -9,6 +9,7 @@ import { icon, logoMark } from './icons.js';
 import { statusOf, toneColor, brokerMark, avatar } from './parts.js';
 import { toast, toastError } from './toast.js';
 import { confirmDialog, noticeDialog, confirmAlgoStart } from './dialog.js';
+import { ringPriceAlert } from './price-alarm.js';
 
 // Sidebar: one list in order of use (most-used first). `trading` = also a tile in the phone menu's Trading grid.
 const NAV = [
@@ -398,6 +399,7 @@ export function mountShell(root) {
     if (['dash', 'live', 'unread', 'user', 'meta'].some(k => k in patch)) update();
     if ('wallet' in patch || 'dash' in patch || 'pnl' in patch) renderWallet();   // the header P&L chip ticks live
     if ('theme' in patch) { paintThemeBtn(); paintBars(); }
+    if ('priceAlert' in patch) ringPriceAlert(patch.priceAlert);   // on every page, not only Power Scalper
   });
   const clock = setInterval(tickClock, 10_000);
   tickClock();

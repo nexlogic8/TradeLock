@@ -3,6 +3,7 @@ import { stmt } from '../../db/index.js';
 import { accountFor } from '../broker/registry.js';
 import { algoLive } from '../scalper/algo-live.js';
 import { sessionInfo } from '../../lib/market-calendar.js';
+import { activeAlerts, firedAlertsAfter, lastAlertId } from '../alerts/service.js';
 import { algoStatus, analyzeOptions, closePaperTrade, openPaperTrade, recordAlgoFailure, refreshPaperTrades, saveAlgoConfig } from './service.js';
 
 export function algoRoutes(r) {
@@ -20,7 +21,13 @@ export function algoRoutes(r) {
         json_extract(detail, '$.setup.strategy') AS strategy FROM auto_trades
       WHERE user_id = ? AND id > ? AND entry_price IS NOT NULL ORDER BY id LIMIT 10`).all(ctx.user.id, after) : [];
     const algoOn = !!stmt('SELECT 1 FROM broker_accounts WHERE user_id = ? AND algo_on = 1 AND agent_on = 1 LIMIT 1').get(ctx.user.id);
-    return { latestId, entries, serverTime: Date.now(), session: sessionInfo(), algoOn };
+    // Price alerts: the app rings for alerts fired after `alertsAfter` (-1 on first start: just the latest id). While
+    // alerts wait, it polls fast; an MCX alert keeps it awake to 23:55 (the MCX session) instead of 15:30.
+    const aa = Math.floor(Number(ctx.query.alertsAfter)), alertsAfter = Number.isFinite(aa) ? Math.max(-1, aa) : -1;
+    const active = activeAlerts(ctx.user.id), session = sessionInfo();
+    if (session.tradingDay && active.some(a => /^MCX/.test(a.segment))) session.closeAt = Math.max(session.closeAt || 0, Date.parse(`${session.day}T23:55:00+05:30`));
+    return { latestId, entries, serverTime: Date.now(), session, algoOn,
+      alerts: alertsAfter >= 0 ? firedAlertsAfter(ctx.user.id, alertsAfter) : [], latestAlertId: lastAlertId(ctx.user.id), alertsActive: active.length > 0 };
   });
   r.put('/api/algo', ctx => ({ config: saveAlgoConfig(ctx.user.id, ctx.body.config ?? ctx.body, ctx.ip) }));
   r.post('/api/algo/paper-trades/open', ctx => ({ trade: openPaperTrade(ctx.user.id, ctx.body, ctx.ip) }));

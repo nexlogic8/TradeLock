@@ -41,6 +41,8 @@ export function startStream() {
     }
     store.set({ pnl: v });
   });
+  // A price alert fired: ring on this screen (ui/price-alarm.js via the shell).
+  source.addEventListener('alert', e => store.set({ priceAlert: json(e) }));
   source.addEventListener('unread', e => store.set({ unread: json(e).count }));
   source.addEventListener('emergency', e => store.set({ emergency: json(e) }));
   source.addEventListener('wallet', e => store.set({ wallet: json(e) }));

@@ -279,6 +279,16 @@ public class MainActivity extends ComponentActivity {
     @JavascriptInterface
     public void stopTradeAlerts() { runOnUiThread(() -> TradeAlertService.stop(MainActivity.this)); }
 
+    /** A price alert fired while the app is open: ring the real alarm with its text (Stop to end it). */
+    @JavascriptInterface
+    public void ringAlarm(String title, String body) {
+      runOnUiThread(() -> {
+        Intent i = new Intent(MainActivity.this, TradeAlertService.class).setAction(TradeAlertService.ACTION_RING)
+            .putExtra("title", title == null || title.isEmpty() ? "PRICE ALERT" : title).putExtra("body", body == null ? "" : body);
+        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
+      });
+    }
+
     /** Rings the real alarm once (Stop to end it), to check sound, vibration and the full-screen alert. */
     @JavascriptInterface
     public void testTradeAlarm() {
