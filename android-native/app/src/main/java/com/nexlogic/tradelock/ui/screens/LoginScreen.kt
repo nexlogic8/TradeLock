@@ -64,6 +64,8 @@ fun LoginScreen(vm: AppViewModel) {
     var password by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var needCode by remember { mutableStateOf(false) }
+    // Two-step sign-in after Google: only the code is asked for (the server keeps the pending sign-in).
+    var googleCode by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -73,7 +75,7 @@ fun LoginScreen(vm: AppViewModel) {
         if (busy) return
         busy = true; error = null
         scope.launch {
-            val r = vm.login(email, password, if (needCode) code else null)
+            val r = if (googleCode) vm.googleMfa(code) else vm.login(email, password, if (needCode) code else null)
             busy = false
             when (r) {
                 null -> Unit
@@ -95,7 +97,10 @@ fun LoginScreen(vm: AppViewModel) {
                     CredentialManager.create(activity).getCredential(activity, GetCredentialRequest.Builder().addCredentialOption(option).build())
                 }
                 val token = GoogleIdTokenCredential.createFrom(res.credential.data).idToken
-                error = vm.googleLogin(token)
+                when (val r = vm.googleLogin(token)) {
+                    "MFA_REQUIRED_GOOGLE" -> { googleCode = true; needCode = true; code = ""; error = "Enter the 6-digit code from your authenticator app." }
+                    else -> error = r
+                }
             } catch (e: Exception) {
                 android.util.Log.w("TradeLockLogin", "Google sign-in failed", e)
                 error = when (e) {
