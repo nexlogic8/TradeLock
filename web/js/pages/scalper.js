@@ -79,7 +79,7 @@ const isMcxKey = key => MCX_LIST.some(([k]) => k === key);
 // own instruments and reopens the one last used on it.
 const lastOf = mcx => { try { const v = localStorage.getItem(mcx ? 'tradelock.scalper.lastMcx' : 'tradelock.scalper.lastIndex'); return (mcx ? MCX_LIST : INDICES).some(([k]) => k === v) ? v : (mcx ? 'CRUDEOILM' : 'NIFTY'); } catch { return mcx ? 'CRUDEOILM' : 'NIFTY'; } };
 const underlyingsFor = current => (isMcxKey(current) ? MCX_LIST : INDICES);
-const marketSwitch = current => html`<div class="seg sc-market" role="group" aria-label="Market">${[[false, 'NIFTY', 'Indices: NIFTY 50, BANK NIFTY, SENSEX'], [true, 'MCX', 'MCX commodity options: Crude Oil Mini and Gold Mini (09:00 to 23:30 / 23:55)']].map(([mcx, label, hint]) =>
+const marketSwitch = current => html`<div class="seg sc-market" role="group" aria-label="Market">${[[false, 'Equity', 'Equity index options: NIFTY 50, BANK NIFTY (NSE) and SENSEX (BSE)'], [true, 'Commodity', 'MCX commodity options: Crude Oil Mini and Gold Mini (09:00 to 23:30 / 23:55)']].map(([mcx, label, hint]) =>
   html`<button type="button" data-underlying="${isMcxKey(current) === mcx ? current : lastOf(mcx)}" aria-pressed="${String(isMcxKey(current) === mcx)}" title="${hint}" class="${mcx ? 'sc-mcx' : ''}">${label}</button>`)}</div>`;
 // Phones show one pane at a time: a chart or the option chain.
 export const MOBILE_PANES = [['spot', 'Index'], ['ce', 'CE'], ['pe', 'PE'], ['chain', 'Chain']];

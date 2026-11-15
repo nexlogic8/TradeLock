@@ -2,7 +2,7 @@
 import { html, $ } from '../core/dom.js';
 import { store } from '../core/store.js';
 import { get, post } from '../core/api.js';
-import { istNow, paise, inr, ago } from '../core/format.js';
+import { paise, inr, ago } from '../core/format.js';
 import { signOut } from '../core/session.js';
 import { resolvedTheme, setThemePref } from '../core/theme.js';
 import { icon, logoMark } from './icons.js';
@@ -67,7 +67,6 @@ export function mountShell(root) {
           <button class="icon-btn menu-btn" id="menu" aria-label="Open menu">${icon('menu')}</button>
           <div class="grow"><h1 id="pg-title"></h1><p class="t-sub" id="pg-sub"></p></div>
           <div class="top-right">
-            <span class="chip-btn market-chip" id="clock" role="status"></span>
             <div class="wallet-wrap">
               <button class="agent-btn" id="agent-btn" type="button" hidden></button>
             </div>
@@ -387,13 +386,6 @@ export function mountShell(root) {
     badge.textContent = s.unread > 99 ? '99+' : s.unread;
     if (mod && typeof mod.sub === 'function') $('#pg-sub').textContent = mod.sub(s);
   };
-  const tickClock = () => {
-    const n = istNow();
-    // Market box: NSE session state (09:15–15:30 IST, weekdays) and the IST time.
-    const el = $('#clock');
-    el.className = `chip-btn market-chip ${n.open ? 'ok' : 'closed'}`;
-    el.innerHTML = String(html`<span class="market-board-face"><span class="dot ${n.open ? 'pulse' : ''}"></span><span>Market ${n.open ? 'Open' : 'Closed'}</span><span class="num long">${n.hhmm} IST</span></span>`);
-  };
 
   const off = store.on(patch => {
     if (['dash', 'live', 'unread', 'user', 'meta'].some(k => k in patch)) update();
@@ -401,8 +393,6 @@ export function mountShell(root) {
     if ('theme' in patch) { paintThemeBtn(); paintBars(); }
     if ('priceAlert' in patch) ringPriceAlert(patch.priceAlert);   // on every page, not only Power Scalper
   });
-  const clock = setInterval(tickClock, 10_000);
-  tickClock();
   update();
 
   shell = {
@@ -423,7 +413,7 @@ export function mountShell(root) {
       else t.innerHTML = String(html`<a class="header-home" href="/overview" aria-label="Go to Overview" title="Overview">${logoMark()}</a><span>${m.title}</span>`);
       $('#pg-sub').textContent = typeof m.sub === 'function' ? m.sub(store.get()) : m.sub || '';
     },
-    destroy() { ac.abort(); off(); clearInterval(clock); },
+    destroy() { ac.abort(); off(); },
   };
   return shell;
 }
