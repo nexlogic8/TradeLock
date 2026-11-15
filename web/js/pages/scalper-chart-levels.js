@@ -125,7 +125,7 @@ export class LevelOverlay {
     this.chart.subscribeCrosshairMove(this.onCross);
   }
   openMenu() {
-    this.plusHover = false;
+    this.plusHover = false; if (this.hoverLine) this.hoverLine.hidden = true;
     const price = this.series.coordinateToPrice(this.plusY);
     if (price == null) return;
     const p = toTick(price), size = this.opts.size?.(), c = this.opts.contract?.(), fmt = this.fmt(p);
@@ -309,8 +309,16 @@ export class LevelOverlay {
     this.plus.addEventListener('pointerdown', this.on.plus, true);
     this.plus.addEventListener('click', this.on.plus); // keyboard activation
     // Hovering the "+" takes the pointer off the chart canvas; without this the chart hides it and the click misses.
-    this.plus.addEventListener('pointerenter', () => { this.plusHover = true; });
-    this.plus.addEventListener('pointerleave', () => { this.plusHover = false; });
+    // While hovered, a dotted green line marks the price across the chart.
+    const hoverLine = this.hoverLine = document.createElement('div');
+    hoverLine.className = 'sc-lvl-hoverline'; hoverLine.hidden = true; this.host.append(hoverLine);
+    this.plus.addEventListener('pointerenter', () => {
+      this.plusHover = true;
+      hoverLine.style.top = `${Math.round(this.plusY)}px`;
+      hoverLine.style.width = `${this.chart.timeScale().width()}px`;
+      hoverLine.hidden = false;
+    });
+    this.plus.addEventListener('pointerleave', () => { this.plusHover = false; hoverLine.hidden = true; });
     this.menu.addEventListener('click', this.on.menu);
     this.menu.addEventListener('pointerdown', e => e.stopPropagation(), true);
     document.addEventListener('pointerdown', this.on.outside, true);
@@ -331,7 +339,7 @@ export class LevelOverlay {
     host.removeEventListener('pointerdown', this.on.down, true); host.removeEventListener('pointermove', this.on.move, true);
     host.removeEventListener('pointerup', this.on.up, true); host.removeEventListener('pointercancel', this.on.up, true);
     host.removeEventListener('pointerleave', this.on.leave);
-    this.plus.remove(); this.dragPoint.remove(); this.menu.remove(); this.unlock(); this.on = null;
+    this.plus.remove(); this.hoverLine?.remove(); this.dragPoint.remove(); this.menu.remove(); this.unlock(); this.on = null;
     for (const handle of this.alertHandles.values()) handle.remove();
     this.alertHandles.clear();
   }
