@@ -21,6 +21,7 @@ import { notify } from '../notifications/service.js';
 import { getRules } from '../rules/service.js';
 import { upsertFills, fillsForDay, logRiskEvent } from '../trades/service.js';
 import { runEmergency, tryKillSwitch } from '../emergency/service.js';
+import { watchBrackets } from '../brackets/service.js';
 import { evaluate, countEntries, closedTrades } from './engine.js';
 import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds, algoSecurityIds, algoPnlOf, setAlgoPnl } from './service.js';
 
@@ -146,6 +147,8 @@ export async function syncAccount(acct, { force = false } = {}) {
     const bookKey = snap.posSig === undefined ? null : `${snap.posSig}#${snap.orderSig}#${snap.funds?.available}:${snap.funds?.used}`;
     if (bookKey === null || bookKey !== m.bookKey) { m.bookKey = bookKey; markDirty(uid); }
     if (live || isTradingDay()) s = applySnapshot(uid, t, snap, m);
+    // Chart TP / SL: exit at the target, tidy up after the stop filled or the position closed.
+    if (live) watchBrackets(uid, acct).catch(e => console.error('[brackets]', e.message));
     await refreshKillStatus(uid, adapter, live || isTradingDay(), s);
     await refreshPermissions(uid, acct, adapter, force);
     const now = Date.now();

@@ -2193,3 +2193,6 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
   body.scalper-focus .sc-draw-rail { top:110px; }
   .sc-draw-rail button { width:34px; height:34px; }
 }
+/* Chart position overlay (scalper-chart-position.js): cursors over the TP / SL lines and their buttons. */
+.sc-chart-host[data-pos-cursor="ns-resize"], .sc-chart-host[data-pos-cursor="ns-resize"] * { cursor:ns-resize !important; }
+.sc-chart-host[data-pos-cursor="pointer"], .sc-chart-host[data-pos-cursor="pointer"] * { cursor:pointer !important; }

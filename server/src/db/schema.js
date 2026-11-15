@@ -849,4 +849,19 @@ export const MIGRATIONS = [
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, underlying, side)
   ) WITHOUT ROWID;`,
+  // Take-profit / stop-loss dragged on the Power Scalper chart for an open position. The stop is a real stop-loss
+  // order at the broker (sl_order_id); the target is watched by TradeLock and exited at market when reached.
+  `CREATE TABLE position_brackets (
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    security_id TEXT NOT NULL,
+    segment     TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    side        INTEGER NOT NULL CHECK (side IN (1, -1)),
+    qty         INTEGER NOT NULL,
+    tp          REAL,
+    sl          REAL,
+    sl_order_id TEXT,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (user_id, security_id)
+  ) WITHOUT ROWID;`,
 ];

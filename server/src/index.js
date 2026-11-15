@@ -12,6 +12,10 @@ import { startAlerts } from './modules/admin/alerts.js';
 import { startAlgoScanner } from './modules/algo/service.js';
 import { attachScalperWebSocket } from './modules/scalper/live.js';
 import { startAutoTrader } from './modules/scalper/autotrade.js';
+import { startBracketWatcher } from './modules/brackets/service.js';
+import { usersWithBrackets } from './modules/brackets/store.js';
+import { accountFor } from './modules/broker/registry.js';
+import { marketOpen } from './lib/time.js';
 import { startPaperTrading } from './modules/scalper/paper-retest.js';
 import { startScalperWarmup } from './modules/scalper/routes.js';
 
@@ -32,6 +36,7 @@ const stopAlerts = startAlerts();
 const stopPnlSync = config.monitor ? startBrokerPnlSync() : () => {};
 const stopAlgoScanner = startAlgoScanner();
 const stopAutoTrader = config.monitor ? startAutoTrader() : () => {};
+const stopBrackets = config.monitor ? startBracketWatcher({ nseOpen: () => marketOpen(), accountFor, usersWithBrackets }) : () => {};
 const stopPaperTrading = config.monitor ? startPaperTrading() : () => {};
 const stopScalperWarmup = config.monitor ? startScalperWarmup() : () => {};
 detectServerIp().then(ip => ip && console.log(`Public IP for broker whitelisting: ${ip}`));
@@ -43,6 +48,7 @@ housekeeping.unref();
 function shutdown(signal) {
   console.log(`${signal} received, shutting down`);
   stopMonitor();
+  stopBrackets();
   stopAlerts();
   stopPnlSync();
   stopAlgoScanner();

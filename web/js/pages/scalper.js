@@ -10,6 +10,7 @@ import { STUDIES, computeStudy, newStudy, defaultStudies, sanitizeStudies } from
 import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } from './scalper-chart-indicators.js';
 import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
 import { DrawingLayer, mountDrawRail } from './scalper-chart-draw.js';
+import { PositionOverlay } from './scalper-chart-position.js';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -362,7 +363,7 @@ export default {
     for (const [key, value] of Object.entries(selected)) {
       const host = $(`.sc-chart-host[data-chart="${key}"]`, ctx.el);
       let view = ctx.ui.chartViews[key];
-      if (!host) { view?.draw?.destroy(); view?.chart.remove(); delete ctx.ui.chartViews[key]; continue; }
+      if (!host) { view?.draw?.destroy(); view?.pos?.destroy(); view?.chart.remove(); delete ctx.ui.chartViews[key]; continue; }
       if (!view || view.host !== host) {
         // Keep the user's zoom only when the same contract and interval are redrawn.
         let range, priceRange;
@@ -373,7 +374,7 @@ export default {
             const scale = view.chart.priceScale('right');
             if (scale.options().autoScale === false) priceRange = scale.getVisibleRange();
           }
-          view.sizeWatch?.disconnect(); view.draw?.destroy(); view.chart.remove();
+          view.sizeWatch?.disconnect(); view.draw?.destroy(); view.pos?.destroy(); view.chart.remove();
         }
         view = ctx.ui.chartViews[key] = createChartView(host, value.rows, ctx.ui.indicators, key, ctx.ui.interval);
         view.instrumentId = String(value.id || '');
@@ -391,6 +392,7 @@ export default {
       if (view.oiProfile) { view.oiProfile.setData(d.strikes); showIndicators(view, ctx.ui.indicators); }
     }
     mountDrawRail($('.scalper-chart-grid', ctx.el));   // one drawing-tool rail for the three charts
+    refreshChartPositions(ctx);
     refreshSignalMarkers(ctx);
   },
 
@@ -403,6 +405,7 @@ export default {
     }
     if (!patch.dash) return;
     refreshPositions(ctx);
+    refreshChartPositions(ctx);
     const pnl = Number(patch.dash.pnl) || 0, chip = $('[data-scm-pnl]', ctx.el), count = $('[data-scm-poscount]', ctx.el);
     if (chip) { chip.textContent = signedInr(pnl); chip.className = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''; }
     if (count) count.textContent = String((patch.dash.positions || []).filter(p => Number(p.qty) !== 0).length);
@@ -443,7 +446,7 @@ export default {
     el.addEventListener('scroll', e => { if (e.target.matches?.('.sc-chain-body')) ui.chainScroll = e.target.scrollTop; }, { capture:true, signal });
     // Charts hold ResizeObservers and canvases; free them when the page goes away.
     signal.addEventListener('abort', () => {
-      for (const view of Object.values(ui.chartViews || {})) { view.sizeWatch?.disconnect(); view.draw?.destroy(); try { view.chart.remove(); } catch {} }
+      for (const view of Object.values(ui.chartViews || {})) { view.sizeWatch?.disconnect(); view.draw?.destroy(); view.pos?.destroy(); try { view.chart.remove(); } catch {} }
       ui.chartViews = {};
     }, { once:true });
     const showError = message => {
@@ -518,7 +521,7 @@ export default {
     flushTimer = setInterval(() => {
       if (Date.now() - lastTickPaint < 180) return;
       if (!ui.tickDirty) return;
-      ui.tickDirty = false; lastTickPaint = Date.now(); updateLiveCharts(ctx); updateLiveLabels(ctx); updateTickets(ctx);
+      ui.tickDirty = false; lastTickPaint = Date.now(); updateLiveCharts(ctx); updateLiveLabels(ctx); updateTickets(ctx); refreshChartPositions(ctx);
     }, 200);
     const refreshStaleCandles = async () => {
       const now = Date.now(), market = isMarketSession(now, ctx.data?.session);
@@ -1024,6 +1027,19 @@ function fitWorkspace(ctx) {
   const height = Math.round(Math.min(1100, Math.max(320, window.innerHeight - top - below)));
   if (ws.style.height !== `${height}px`) ws.style.height = `${height}px`;
 }
+/** Each chart's open position (by contract), its target / stop and live P&L: on every broker sync and live tick. */
+function refreshChartPositions(ctx) {
+  const dash = ctx.state?.dash, d = ctx.data;
+  if (!d) return;
+  const { byId } = strikeIndex(d), pointValue = d.mcx ? Number(d.lotSize) || 1 : 1;
+  for (const view of Object.values(ctx.ui.chartViews || {})) {
+    if (!view.pos) continue;
+    const id = view.instrumentId;
+    const pos = id && (dash?.positions || []).find(p => String(p.securityId) === id && Number(p.qty) !== 0);
+    const ltp = byId.get(id)?.ltp;
+    view.pos.set({ pos: pos ? { securityId: id, qty: Number(pos.qty), avg: Number(pos.avg) } : null, bracket: (dash?.brackets || []).find(b => b.securityId === id) || null, ltp, pointValue });
+  }
+}
 function refreshPositions(ctx) {
   const host = $('[data-sc-positions]', ctx.el);
   if (host) host.innerHTML = String(positionsBlock(ctx));
@@ -1320,6 +1336,11 @@ function createChartView(host, rows, indicators, key, interval = '1') {
   const empty = document.createElement('div'); empty.className='sc-chart-empty'; empty.textContent='Waiting for Dhan candle history'; host.append(empty);
   const view = {host,chart,candles,volume,oi,profile,smc,oiProfile,instrumentId:'',key,empty,lastTime:0,openingRangeLines:{},previousDayLines:{},studies:studiesFor(key),studySeries:[],studySig:''};
   view.signalMarkers = createSeriesMarkers(candles, []);
+  // The open position on this chart: entry with live P&L, draggable TP / SL (before the drawings: a TP / SL line wins).
+  view.pos = new PositionOverlay(view, {
+    onSave: async b => { await put('/brackets', b); toast(b.tp == null && b.sl == null ? 'Target and stop-loss removed.' : `Saved${b.sl != null ? ` · stop-loss ${b.sl} placed at your broker` : ''}${b.tp != null ? ` · target ${b.tp}` : ''}.`, 'ok'); },
+    onError: e => toastError(e),
+  });
   view.draw = new DrawingLayer(view);   // trend lines, Fib, risk : reward and the other drawing tools
   setChartData(view,rows,indicators,interval);
   if (view.lastTime) fitSpan(view);

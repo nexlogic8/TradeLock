@@ -2,6 +2,7 @@ import { stmt, deferWrite } from '../../db/index.js';
 import { config } from '../../config.js';
 import { ist, marketOpen, toMinutes } from '../../lib/time.js';
 import { getRules } from '../rules/service.js';
+import { bracketsFor } from '../brackets/store.js';
 import { accountFor, accountSummary } from '../broker/registry.js';
 import { getBook, getKillStatus, markDirty } from '../broker/book.js';
 import { fillsForDay } from '../trades/service.js';
@@ -185,6 +186,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     },
     broker,
     positions: book.positions.filter(p => p.qty !== 0),
+    // Target / stop set on the Power Scalper chart for open positions (the stop is an order at the broker).
+    brackets: bracketsFor(userId).map(({ securityId, tp, sl, slOrderId }) => ({ securityId, tp, sl, slAtBroker: !!slOrderId })),
     orders: book.orders,
     funds: book.funds,
     syncedAt: book.at,
