@@ -1039,9 +1039,11 @@ function fitWorkspace(ctx) {
 function chartContract(ctx, view) {
   const d = ctx.data;
   if (!d || !view.instrumentId) return null;
-  if (view.key === 'spot') return { securityId: view.instrumentId, segment: spotSegment(d), symbol: d.underlying.symbol, ltp: d.underlying.ltp, tradable: false };
+  // The price the chart shows (its latest candle, kept current by live ticks): what an alert or limit is compared with.
+  const shown = Number(view.data?.at(-1)?.close) || null;
+  if (view.key === 'spot') return { securityId: view.instrumentId, segment: spotSegment(d), symbol: d.underlying.symbol, ltp: shown ?? d.underlying.ltp, tradable: false };
   const item = strikeIndex(d).byId.get(view.instrumentId);
-  return item ? { securityId: String(item.securityId), segment: item.exchangeSegment, symbol: item.symbol, ltp: item.ltp, tradable: true, item } : null;
+  return item ? { securityId: String(item.securityId), segment: item.exchangeSegment, symbol: item.symbol, ltp: shown ?? item.ltp, tradable: true, item } : null;
 }
 /** What the chart's "+" menu does: limit orders (this ticket's lots, through the same risk checks) and price alerts. */
 function levelOptions(ctx, view) {
