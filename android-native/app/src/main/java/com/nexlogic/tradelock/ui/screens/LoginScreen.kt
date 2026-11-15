@@ -98,7 +98,7 @@ fun LoginScreen(vm: AppViewModel) {
                 }
                 val token = GoogleIdTokenCredential.createFrom(res.credential.data).idToken
                 when (val r = vm.googleLogin(token)) {
-                    "MFA_REQUIRED_GOOGLE" -> { googleCode = true; needCode = true; code = ""; error = "Enter the 6-digit code from your authenticator app." }
+                    "MFA_REQUIRED_GOOGLE" -> { googleCode = true; needCode = true; code = ""; error = null }
                     else -> error = r
                 }
             } catch (e: Exception) {
@@ -126,16 +126,24 @@ fun LoginScreen(vm: AppViewModel) {
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Rounded.Lock, null, tint = Color(0xFF04261F), modifier = Modifier.size(30.dp)) }
             Spacer(Modifier.height(28.dp))
-            Text("Trade with\ndiscipline.", color = Tl.text, fontSize = 40.sp, lineHeight = 44.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(12.dp))
-            Text("Your limits, enforced at your broker. Sign in to TradeLock.", style = TlType.body, color = Tl.muted)
-            Spacer(Modifier.height(36.dp))
-
-            Field("Email", email, { email = it }, KeyboardType.Email)
-            Spacer(Modifier.height(12.dp))
-            Field("Password", password, { password = it }, KeyboardType.Password, secret = true, done = !needCode) { signIn() }
-            AnimatedVisibility(needCode) {
-                Column { Spacer(Modifier.height(12.dp)); Field("6-digit code", code, { code = it.filter(Char::isDigit).take(6) }, KeyboardType.NumberPassword, done = true) { signIn() } }
+            if (googleCode) {
+                // Second step of a Google sign-in: only the code (the email and password don't apply here).
+                Text("Two-step\nsign-in", color = Tl.text, fontSize = 40.sp, lineHeight = 44.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(12.dp))
+                Text("You're signing in with Google. Enter the 6-digit code from your authenticator app.", style = TlType.body, color = Tl.muted)
+                Spacer(Modifier.height(36.dp))
+                Field("6-digit code", code, { code = it.filter(Char::isDigit).take(6); if (code.length == 6) signIn() }, KeyboardType.NumberPassword, done = true, big = true) { signIn() }
+            } else {
+                Text("Trade with\ndiscipline.", color = Tl.text, fontSize = 40.sp, lineHeight = 44.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(12.dp))
+                Text("Your limits, enforced at your broker. Sign in to TradeLock.", style = TlType.body, color = Tl.muted)
+                Spacer(Modifier.height(36.dp))
+                Field("Email", email, { email = it }, KeyboardType.Email)
+                Spacer(Modifier.height(12.dp))
+                Field("Password", password, { password = it }, KeyboardType.Password, secret = true, done = !needCode) { signIn() }
+                AnimatedVisibility(needCode) {
+                    Column { Spacer(Modifier.height(12.dp)); Field("6-digit code", code, { code = it.filter(Char::isDigit).take(6) }, KeyboardType.NumberPassword, done = true) { signIn() } }
+                }
             }
             error?.let { Spacer(Modifier.height(12.dp)); Text(it, style = TlType.small, color = Tl.red) }
             Spacer(Modifier.height(24.dp))
@@ -149,7 +157,11 @@ fun LoginScreen(vm: AppViewModel) {
                 else Text(if (needCode) "Verify and sign in" else "Sign in", color = Color(0xFF04261F), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
             Spacer(Modifier.height(12.dp))
-            Row(
+            if (googleCode) {
+                Text("← Use a different sign-in", style = TlType.label, color = Tl.mint, modifier = Modifier.fillMaxWidth()
+                    .tactile({ googleCode = false; needCode = false; code = ""; error = null }).padding(vertical = 14.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            } else Row(
                 Modifier.fillMaxWidth().height(56.dp).tactile({ google() }, enabled = !busy)
                     .clip(RoundedCornerShape(16.dp)).background(Tl.surface).border(1.dp, Tl.lineHi, RoundedCornerShape(16.dp)),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
@@ -164,9 +176,10 @@ fun LoginScreen(vm: AppViewModel) {
 }
 
 @Composable
-private fun Field(label: String, value: String, onChange: (String) -> Unit, type: KeyboardType, secret: Boolean = false, done: Boolean = false, onDone: () -> Unit = {}) {
+private fun Field(label: String, value: String, onChange: (String) -> Unit, type: KeyboardType, secret: Boolean = false, done: Boolean = false, big: Boolean = false, onDone: () -> Unit = {}) {
     OutlinedTextField(
         value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
+        textStyle = if (big) TlType.num.copy(fontSize = 26.sp, letterSpacing = 10.sp, color = Tl.text) else androidx.compose.ui.text.TextStyle.Default.copy(color = Tl.text),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         visualTransformation = if (secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
