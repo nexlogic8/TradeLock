@@ -864,4 +864,6 @@ export const MIGRATIONS = [
     updated_at  INTEGER NOT NULL,
     PRIMARY KEY (user_id, security_id)
   ) WITHOUT ROWID;`,
+  // Intraday P&L curve after charges: today's estimated charges at each point (net = pnl − charges; null = before this).
+  `ALTER TABLE pnl_points ADD COLUMN charges REAL;`,
 ];

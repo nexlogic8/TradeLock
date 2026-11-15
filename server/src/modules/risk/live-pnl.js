@@ -85,7 +85,7 @@ function flush(now = Date.now()) {
       // The intraday curve: the last value of each minute, from ticks (the Algo part from its own contracts).
       if (!st.algoIds || st.algoIds.day !== t.day || now - st.algoIds.at > 10_000) st.algoIds = { day: t.day, at: now, ids: algoSecurityIds(userId, t.day) };
       const algo = algoPnlOf(positions.map(p => ({ ...p, unrealized: v.positions[String(p.securityId)]?.unrealized ?? p.unrealized })), st.algoIds.ids);
-      recordPoint(userId, t.day, t.minutes, v.pnl, algo);
+      recordPoint(userId, t.day, t.minutes, v.pnl, algo, charges);
     }
   }
 }

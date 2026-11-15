@@ -122,7 +122,7 @@ function drawDay(ctx) {
   const svg = document.getElementById('day-chart');
   const d = ctx.data.days.find(x => x.day === ctx.ui.sel);
   if (!svg || !d) return;
-  const pts = (ctx.ui.points || []).filter(p => p.minute >= OPEN - 15).map(p => [p.minute, p.pnl]);
+  const pts = (ctx.ui.points || []).filter(p => p.minute >= OPEN - 15).map(p => [p.minute, p.pnl - (Number(p.charges) || 0)]);   // after charges at that minute
   if (!pts.length) pts.push([OPEN, 0], [CLOSE, d.pnl]);
   const reach = Math.max(1, ...pts.map(p => Math.abs(p[1])));
   const sc = niceScale(-reach, reach, 4);

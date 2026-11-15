@@ -107,8 +107,8 @@ export default {
     if (!d || d.day !== ctx.data.day) return;
     const minute = istNow().minutes;
     const pts = ctx.data.points;
-    if (pts.at(-1)?.minute === minute) Object.assign(pts.at(-1), { pnl: d.pnl, algo: d.algoPnl ?? null });
-    else pts.push({ minute, pnl: d.pnl, algo: d.algoPnl ?? null });
+    if (pts.at(-1)?.minute === minute) Object.assign(pts.at(-1), { pnl: d.pnl, algo: d.algoPnl ?? null, charges: d.charges ?? null });
+    else pts.push({ minute, pnl: d.pnl, algo: d.algoPnl ?? null, charges: d.charges ?? null });
     if (!('pnl' in patch) || patch.dash) return;
     // Live P&L from market ticks: just the numbers and the curve, no repaint of the page.
     const set = (sel, text, cls) => { const n = ctx.el.querySelector(sel); if (n) { if (n.textContent !== text) n.textContent = text; if (cls != null) n.className = cls; } };
@@ -157,7 +157,7 @@ export default {
         <div class="panel pad chart-panel">
           <div class="panel-head">
             <h3 class="panel-title">Intraday P&amp;L</h3>
-            <div class="legend"><span><i class="l-mint"></i>Day P&amp;L</span>${splitLegend(ctx.data.points)}${d.limits?.maxLoss ? html`<span><i class="l-red dashed"></i>${otherSl(d) ? (d.stopLosses.mode === 'algo' ? 'Algo SL' : 'Manual SL') : 'Stop-loss'} −${inr(d.limits.maxLoss)}</span>${otherSl(d) ? html`<span><i class="l-amber dashed"></i>${otherSl(d).key === 'algo' ? 'Algo SL' : 'Manual SL'} −${inr(otherSl(d).amount)}</span>` : ''}` : !r.maxLoss.on ? html`<span><i class="l-red dashed"></i>No stop-loss</span>` : ''}${d.limits?.profitLock ? html`<span><i class="l-mint dashed"></i>${otherTarget(d) ? (d.profitTargets.mode === 'algo' ? 'Algo target' : 'Manual target') : 'Target'} ${inr(d.limits.profitLock)}</span>` : !r.profitLock.on && !otherTarget(d) ? html`<span><i class="l-mint dashed"></i>No profit limit</span>` : ''}${otherTarget(d) ? html`<span><i class="l-mint dashed faint"></i>${otherTarget(d).key === 'algo' ? 'Algo target' : 'Manual target'} ${inr(otherTarget(d).amount)}${d.limits?.profitLock ? '' : ' (not in force)'}</span>` : ''}${r.cutoff.on ? html`<span><i class="l-amber"></i>Cutoff ${fmt12(r.cutoff.value)}</span>` : ''}<span><i class="l-red dot"></i>Day low</span></div>
+            <div class="legend"><span><i class="l-mint"></i>Day P&amp;L after charges</span>${splitLegend(ctx.data.points)}${d.limits?.maxLoss ? html`<span><i class="l-red dashed"></i>${otherSl(d) ? (d.stopLosses.mode === 'algo' ? 'Algo SL' : 'Manual SL') : 'Stop-loss'} −${inr(d.limits.maxLoss)}</span>${otherSl(d) ? html`<span><i class="l-amber dashed"></i>${otherSl(d).key === 'algo' ? 'Algo SL' : 'Manual SL'} −${inr(otherSl(d).amount)}</span>` : ''}` : !r.maxLoss.on ? html`<span><i class="l-red dashed"></i>No stop-loss</span>` : ''}${d.limits?.profitLock ? html`<span><i class="l-mint dashed"></i>${otherTarget(d) ? (d.profitTargets.mode === 'algo' ? 'Algo target' : 'Manual target') : 'Target'} ${inr(d.limits.profitLock)}</span>` : !r.profitLock.on && !otherTarget(d) ? html`<span><i class="l-mint dashed"></i>No profit limit</span>` : ''}${otherTarget(d) ? html`<span><i class="l-mint dashed faint"></i>${otherTarget(d).key === 'algo' ? 'Algo target' : 'Manual target'} ${inr(otherTarget(d).amount)}${d.limits?.profitLock ? '' : ' (not in force)'}</span>` : ''}${r.cutoff.on ? html`<span><i class="l-amber"></i>Cutoff ${fmt12(r.cutoff.value)}</span>` : ''}<span><i class="l-red dot"></i>Day low</span></div>
           </div>
           <svg class="chart" id="intraday" role="img" aria-label="Intraday P&L, now ${inr(d.pnl, { sign: true })}, low ${inr(d.worst)}"></svg>
         </div>
@@ -212,8 +212,8 @@ export default {
     if (!d?.broker) return;
     const ringEl = document.getElementById('trade-ring');
     if (ringEl) ring(ringEl, d.usage.trades);
-    const pts = ctx.data.points.filter(p => p.minute >= OPEN - 15).map(p => [p.minute, p.pnl]);
-    if (!pts.length) pts.push([istNow().minutes, d.pnl]);
+    const pts = ctx.data.points.filter(p => p.minute >= OPEN - 15).map(p => [p.minute, p.pnl - (Number(p.charges) || 0)]);   // after charges at that minute
+    if (!pts.length) pts.push([istNow().minutes, net(d)]);
     const spark = document.getElementById('spark');
     const ys = pts.map(p => p[1]);
     if (spark) lineChart(spark, pts, { bare: true, yDomain: [Math.min(0, ...ys) - 200, Math.max(0, ...ys) + 200] });
@@ -253,7 +253,7 @@ export default {
       xDomain: [x0, x1], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, hlines, notes, series,
       vlines: d.rules.cutoff.on ? [{ x: toMin(d.rules.cutoff.value), color: getComputedStyle(document.documentElement).getPropertyValue('--amber').trim(), label: 'Cutoff' }] : [],
       low: low[1] < 0 ? [low[0], low[1], inr(low[1])] : null,
-      endLabel: inr(d.pnl, { sign: true }),
+      endLabel: inr(net(d), { sign: true }),
     });
   },
 

@@ -58,12 +58,12 @@ export function patchDay(userId, day, patch, { defer = false } = {}) {
 
 const cents = v => (v == null ? null : Math.round(v * 100) / 100);
 /** `algo`: the Algo Trading part of `pnl` (the rest is manual trading), null when not known. */
-export const recordPoint = (userId, day, minute, pnl, algo = null) => deferWrite(() =>
-  stmt('INSERT INTO pnl_points (user_id, day, minute, pnl, algo) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET pnl = excluded.pnl, algo = excluded.algo')
-    .run(userId, day, minute, cents(pnl), cents(algo)));
+export const recordPoint = (userId, day, minute, pnl, algo = null, charges = null) => deferWrite(() =>
+  stmt('INSERT INTO pnl_points (user_id, day, minute, pnl, algo, charges) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET pnl = excluded.pnl, algo = excluded.algo, charges = excluded.charges')
+    .run(userId, day, minute, cents(pnl), cents(algo), cents(charges)));
 
 export const intradayPoints = (userId, day = ist().day) =>
-  stmt('SELECT minute, pnl, algo FROM pnl_points WHERE user_id = ? AND day = ? ORDER BY minute').all(userId, day);
+  stmt('SELECT minute, pnl, algo, charges FROM pnl_points WHERE user_id = ? AND day = ? ORDER BY minute').all(userId, day);
 
 // Today's Algo Trading P&L per user, from the last broker sync (the dashboard's live split; not persisted).
 const algoNow = new Map();

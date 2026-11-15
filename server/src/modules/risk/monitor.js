@@ -22,7 +22,7 @@ import { getRules } from '../rules/service.js';
 import { upsertFills, fillsForDay, logRiskEvent } from '../trades/service.js';
 import { runEmergency, tryKillSwitch } from '../emergency/service.js';
 import { watchBrackets } from '../brackets/service.js';
-import { trackPositions, livePnl } from './live-pnl.js';
+import { trackPositions, livePnl, chargesToday } from './live-pnl.js';
 import { evaluate, countEntries, closedTrades } from './engine.js';
 import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds, algoSecurityIds, algoPnlOf, setAlgoPnl } from './service.js';
 
@@ -257,7 +257,7 @@ export function applySnapshot(uid, t, snap, m) {
   setAlgoPnl(uid, algo);
   // While ticks drive the live P&L (live-pnl.js), they draw the curve; the broker's figure fills in without them.
   if (!livePnl(uid) && (!m.point || m.point.minute !== t.minutes || m.point.pnl !== pnl || m.point.algo !== algo)) {
-    recordPoint(uid, t.day, t.minutes, pnl, algo);
+    recordPoint(uid, t.day, t.minutes, pnl, algo, chargesToday(uid, t.day).total);
     m.point = { minute: t.minutes, pnl, algo };
   }
   return { ...s, ...patch };
