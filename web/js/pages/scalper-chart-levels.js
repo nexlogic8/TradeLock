@@ -319,6 +319,15 @@ export class LevelOverlay {
       hoverLine.hidden = false;
     });
     this.plus.addEventListener('pointerleave', () => { this.plusHover = false; hoverLine.hidden = true; });
+    // The chart's crosshair gets no moves while the pointer is over the "+": follow the pointer here so the
+    // "+" and its line keep gliding up and down with it.
+    this.plus.addEventListener('pointermove', e => {
+      if (!this.plusHover || !this.menu.hidden || e.pointerType === 'touch') return;
+      const y = e.clientY - this.host.getBoundingClientRect().top;
+      if (Math.abs(y - this.plusY) < 0.5 || this.series.coordinateToPrice(y) == null) return;
+      this.placePlus(y);
+      hoverLine.style.top = `${Math.round(y)}px`;
+    });
     this.menu.addEventListener('click', this.on.menu);
     this.menu.addEventListener('pointerdown', e => e.stopPropagation(), true);
     document.addEventListener('pointerdown', this.on.outside, true);
