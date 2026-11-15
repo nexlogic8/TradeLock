@@ -48,6 +48,12 @@ export class PositionOverlay {
     if (!this.pos) { this.drag = null; this.unlock(); }
     this.requestUpdate?.();
   }
+  /** A live tick (WebSocket) for this chart's contract: the entry P&L moves with every tick, not with the 2 s sync. */
+  setLtp(ltp) {
+    if (!(ltp > 0) || ltp === this.ltp) return;
+    this.ltp = ltp;
+    if (this.pos) this.requestUpdate?.();
+  }
   /** What is on screen: a drag in progress, else what is being saved, else the saved bracket. */
   levels() {
     const b = this.saving || this.bracket || {};
@@ -147,16 +153,26 @@ export class PositionOverlay {
         let x = W - 8;
         for (const c of [...chips].reverse()) {
           const w = ctx.measureText(c.text).width + 12;
-          x -= w; rr(x, y - 10, w, 20, 5); ctx.fillStyle = c.bg; ctx.fill();
+          // A solid base under the tint: the entry line must not show through the button text.
+          x -= w; rr(x, y - 10, w, 20, 5); ctx.fillStyle = 'rgb(8, 13, 21)'; ctx.fill(); ctx.fillStyle = c.bg; ctx.fill();
           ctx.fillStyle = c.fg; ctx.fillText(c.text, x + 6, y);
           this.hits.push({ act: c.act, x0: x - 2, x1: x + w + 2, y0: y - 12, y1: y + 12 });
           x -= 4;
         }
-        const tw = parts.reduce((a, p) => a + ctx.measureText(p.text).width, 0) + 14;
+        // A part with `act` is a button inside the pill (the ✕): a hairline divider before it and a wider hit area.
+        const widths = parts.map(p => ctx.measureText(p.text).width + (p.act ? 16 : 0));
+        const tw = widths.reduce((a, w) => a + w, 0) + 14;
         x -= tw; rr(x, y - 11, tw, 22, 6); ctx.fillStyle = parts.bg; ctx.fill();
         if (parts.ring) { ctx.strokeStyle = parts.ring; ctx.lineWidth = 1; ctx.stroke(); }
         let tx = x + 7;
-        for (const p of parts) { ctx.fillStyle = p.color; ctx.fillText(p.text, tx, y); tx += ctx.measureText(p.text).width; }
+        parts.forEach((p, i) => {
+          if (p.act) {
+            ctx.fillStyle = p.divider || 'rgba(5, 18, 26, 0.35)'; ctx.fillRect(tx + 4, y - 7, 1, 14);
+            ctx.fillStyle = p.color; ctx.fillText(p.text, tx + 11, y);
+            this.hits.push({ act: p.act, x0: tx + 2, x1: x + tw + 2, y0: y - 13, y1: y + 13 });
+          } else { ctx.fillStyle = p.color; ctx.fillText(p.text, tx, y); }
+          tx += widths[i];
+        });
       };
       const long = pos.qty > 0, ltp = this.ltp, live = ltp ? pnlAt(pos, ltp, this.pointValue) : null, lv = this.levels();
       // Entry with live P&L; "+ TP" / "+ SL" chips while one is not set.
@@ -179,8 +195,9 @@ export class PositionOverlay {
         line(y, color, dragging ? [] : [], dragging ? 2.2 : 1.6);
         const pending = this.saving && !dragging, note = kind === 'sl' && this.bracket?.slAtBroker && !pending ? ' · at broker' : '';
         const parts = [{ text: `${kind === 'tp' ? 'TP' : 'SL'} ${this.fmt(price)}  `, color: INK }, { text: inr(pnl), color: INK }, { text: pending ? '  saving…' : note, color: 'rgba(5,18,26,.75)' }];
+        if (!dragging) parts.push({ text: '✕', act: `del-${kind}`, color: INK });   // remove, inside the pill
         parts.bg = color;
-        label(y, parts, dragging ? [] : [{ text: '✕', act: `del-${kind}`, bg: 'rgba(8, 13, 21, 0.88)', fg: color }]);
+        label(y, parts);
         // Grip: a small handle at the left shows the line can be dragged.
         ctx.fillStyle = color; rr(6, y - 4, 18, 8, 4); ctx.fill();
         ctx.fillStyle = INK; for (const gx of [11, 15, 19]) { ctx.beginPath(); ctx.arc(gx, y, 1, 0, Math.PI * 2); ctx.fill(); }

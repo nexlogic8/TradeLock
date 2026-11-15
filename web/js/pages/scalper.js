@@ -1192,6 +1192,8 @@ function applyTick(ctx, tick) {
   }
   const { byId } = strikeIndex(d), item = byId.get(id);
   if (item) { item.ltp = tick.ltp; item.volume = tick.volume ?? item.volume; item.oi = tick.oi ?? item.oi; }
+  // The open position's live P&L on its chart: straight from this tick, not from the next broker sync.
+  for (const view of Object.values(ctx.ui.chartViews || {})) if (view.instrumentId === id) view.pos?.setLtp(tick.ltp);
   const ce = byId.get(String(ctx.ui.ceId)), pe = byId.get(String(ctx.ui.peId));
   if (isMarketSession(now, d.session) && ce && String(ce.securityId) === id) updateCandle(ctx.ui.ceCandles, tick, now, Number(ctx.ui.interval));
   if (isMarketSession(now, d.session) && pe && String(pe.securityId) === id) updateCandle(ctx.ui.peCandles, tick, now, Number(ctx.ui.interval));
