@@ -248,21 +248,54 @@ export function mountShell(root) {
 
   // Today's P&L chip; its popover: the day's P&L, broker margin and the TradeLock wallet at a glance.
   const pop = $('#wallet-pop'), wbtn = $('#wallet-btn');
+  // Phones: the P&L chip joins the status grid (Protection | Algo, then Dhan | P&L) and its details open as a
+  // bottom sheet (slides up over a dimmed screen; tap outside, Esc or swipe down to close). Wider screens: a popover by the bell.
+  const pnlWrap = $('#pnl-wrap'), actions = pnlWrap.parentElement, topRight = $('.top-right'), phone = matchMedia('(max-width: 620px)');
+  const scrim = document.createElement('div');
+  scrim.className = 'wallet-scrim'; scrim.hidden = true;
+  let closeTimer = null;
+  const settle = () => { clearTimeout(closeTimer); closeTimer = null; pop.classList.remove('closing'); scrim.classList.remove('closing'); pop.style.transform = ''; pop.style.removeProperty('--drag'); };
   const setOpen = open => {
-    pop.hidden = !open; wbtn.setAttribute('aria-expanded', open);
-    if (!open) return;
+    const sheet = pop.classList.contains('wallet-sheet');
+    wbtn.setAttribute('aria-expanded', open);
+    if (!open) {
+      if (pop.hidden || closeTimer) return;
+      if (!sheet) { pop.hidden = true; return; }
+      pop.classList.add('closing'); scrim.classList.add('closing'); document.body.classList.remove('sheet-open');
+      closeTimer = setTimeout(() => { pop.hidden = true; scrim.hidden = true; settle(); }, 220);
+      return;
+    }
+    settle();
+    pop.hidden = false;
     renderWallet();
-    // On phones the popover is fixed to the screen: open it just under the chip, wherever the chip sits.
-    if (getComputedStyle(pop).position === 'fixed') pop.style.top = `${Math.round(wbtn.getBoundingClientRect().bottom + 8)}px`;
+    if (sheet) { scrim.hidden = false; pop.style.top = ''; pop.scrollTop = 0; document.body.classList.add('sheet-open'); }
+    else if (getComputedStyle(pop).position === 'fixed') pop.style.top = `${Math.round(wbtn.getBoundingClientRect().bottom + 8)}px`;
     else pop.style.top = '';
   };
-  // Phones: the P&L chip joins the status grid (Protection | Algo, then Dhan | P&L); wider screens keep it by the bell.
-  const pnlWrap = $('#pnl-wrap'), actions = pnlWrap.parentElement, topRight = $('.top-right'), phone = matchMedia('(max-width: 620px)');
-  const placePnl = () => { if (phone.matches) topRight.append(pnlWrap); else actions.prepend(pnlWrap); };
+  const placePnl = () => {
+    if (!pop.hidden) { pop.hidden = true; scrim.hidden = true; settle(); document.body.classList.remove('sheet-open'); wbtn.setAttribute('aria-expanded', false); }
+    if (phone.matches) { topRight.append(pnlWrap); document.body.append(scrim, pop); pop.classList.add('wallet-sheet'); }
+    else { actions.prepend(pnlWrap); pnlWrap.append(pop); scrim.remove(); pop.classList.remove('wallet-sheet'); }
+  };
   phone.addEventListener('change', placePnl, { signal });
   placePnl();
-  wbtn.addEventListener('click', e => { e.stopPropagation(); setOpen(pop.hidden); }, { signal });
-  document.addEventListener('click', e => { if (!pop.hidden && !e.target.closest('.wallet-wrap')) setOpen(false); }, { signal });
+  signal.addEventListener('abort', () => { scrim.remove(); if (pop.parentElement === document.body) pop.remove(); document.body.classList.remove('sheet-open'); });
+  // Swipe the sheet down to close it (only from its top, so scrolling its content still works).
+  let drag = null;
+  pop.addEventListener('touchstart', e => { if (pop.classList.contains('wallet-sheet') && pop.scrollTop <= 0) drag = { y: e.touches[0].clientY, dy: 0 }; }, { signal, passive: true });
+  pop.addEventListener('touchmove', e => {
+    if (!drag) return;
+    drag.dy = Math.max(0, e.touches[0].clientY - drag.y);
+    pop.style.transition = 'none'; pop.style.transform = drag.dy ? `translateY(${drag.dy}px)` : '';
+  }, { signal, passive: true });
+  pop.addEventListener('touchend', () => {
+    if (!drag) return;
+    const dy = drag.dy; drag = null; pop.style.transition = '';
+    if (dy > 90) { pop.style.setProperty('--drag', `${dy}px`); pop.style.transform = ''; setOpen(false); }
+    else pop.style.transform = '';
+  }, { signal });
+  wbtn.addEventListener('click', e => { e.stopPropagation(); setOpen(pop.hidden || !!closeTimer); }, { signal });
+  document.addEventListener('click', e => { if (!pop.hidden && !e.target.closest('.wallet-wrap') && !pop.contains(e.target)) setOpen(false); }, { signal });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) { setOpen(false); wbtn.focus(); } }, { signal });
   pop.addEventListener('click', e => {
     const a = e.target.closest('[data-section]');
