@@ -45,6 +45,10 @@ function toggleHidden(key) {
   return h;
 }
 
+/** Today's P&L after estimated charges (brokerage, STT, exchange, SEBI, stamp, GST); gross before the first figures arrive. */
+const net = d => (Number.isFinite(d?.netPnl) ? d.netPnl : d?.pnl ?? 0);
+const pnlFoot = d => `Gross ${inr(d.pnl, { sign: true })} · Charges −${inr(Math.abs(d.charges || 0))} · Open ${inr(d.unrealized, { sign: true })}`;
+
 const fundsMissing = d => (d.broker.status === 'connected'
   ? `Appears after the first sync with ${d.broker.label}`
   : d.broker.status === 'expired' ? `Reconnect ${d.broker.label} to see it`
@@ -99,12 +103,23 @@ export default {
   load: () => get('/dashboard/intraday'),
 
   onStore(ctx, patch) {
-    const d = patch.dash;
+    const d = patch.dash || ('pnl' in patch ? ctx.state.dash : null);
     if (!d || d.day !== ctx.data.day) return;
     const minute = istNow().minutes;
     const pts = ctx.data.points;
     if (pts.at(-1)?.minute === minute) Object.assign(pts.at(-1), { pnl: d.pnl, algo: d.algoPnl ?? null });
     else pts.push({ minute, pnl: d.pnl, algo: d.algoPnl ?? null });
+    if (!('pnl' in patch) || patch.dash) return;
+    // Live P&L from market ticks: just the numbers and the curve, no repaint of the page.
+    const set = (sel, text, cls) => { const n = ctx.el.querySelector(sel); if (n) { if (n.textContent !== text) n.textContent = text; if (cls != null) n.className = cls; } };
+    set('#kpi-pnl', inr(net(d), { sign: true }), `val ${tone(net(d))}`);
+    set('#kpi-pnl-foot', pnlFoot(d));
+    for (const p of d.positions || []) {
+      set(`[data-pos-pnl="${p.securityId}"]`, inr(p.unrealized, { sign: true }), `r num ${tone(p.unrealized)}`);
+      set(`[data-pos-ltp="${p.securityId}"]`, price(p.ltp));
+    }
+    // The intraday chart redraws at most twice a second.
+    if (Date.now() - (ctx.ui.livePnlDrawn || 0) > 500) { ctx.ui.livePnlDrawn = Date.now(); this.draw?.(ctx); }
   },
 
   view(ctx) {
@@ -118,10 +133,10 @@ export default {
     const open = d.positions;
     return html`
       <div class="kpis ov-kpis">
-        <div class="panel kpi ${d.pnl < 0 ? 'acc-red' : 'acc-mint'}">
-          <div class="lbl">Today's P&amp;L ${st.protecting ? pill('Live', '', { sm: true }) : st.pill === 'Market closed' ? pill('Closed', 'grey', { sm: true }) : pill(st.pill || 'Delayed', 'amber', { sm: true })}</div>
-          <div class="val ${tone(d.pnl)}">${inr(d.pnl, { sign: true })}</div>
-          <div class="foot">Realized ${inr(d.realized)} · Open ${inr(d.unrealized)}</div>
+        <div class="panel kpi ${net(d) < 0 ? 'acc-red' : 'acc-mint'}">
+          <div class="lbl">Today's P&amp;L <small class="muted">after charges</small> ${st.protecting ? pill('Live', '', { sm: true }) : st.pill === 'Market closed' ? pill('Closed', 'grey', { sm: true }) : pill(st.pill || 'Delayed', 'amber', { sm: true })}</div>
+          <div class="val ${tone(net(d))}" id="kpi-pnl" title="After estimated charges">${inr(net(d), { sign: true })}</div>
+          <div class="foot" id="kpi-pnl-foot">${pnlFoot(d)}</div>
           <svg class="spark" id="spark" aria-hidden="true"></svg>
         </div>
         <div class="panel kpi acc-amber">
@@ -171,8 +186,8 @@ export default {
             <tbody>
               ${open.map(p => html`<tr>
                 <td class="inst span"><b>${p.symbol}</b><span>Position</span></td><td data-label="Type"><span class="side-tag ${p.qty > 0 ? 'buy' : 'sell'}">${p.qty > 0 ? 'LONG' : 'SHORT'}</span></td>
-                <td class="r num" data-label="Qty">${Math.abs(p.qty)}</td><td class="r num" data-label="Avg">${price(p.avg)}</td><td class="r num" data-label="LTP">${price(p.ltp)}</td>
-                <td class="r num ${tone(p.unrealized)}" data-label="Open P&L">${inr(p.unrealized, { sign: true })}</td>
+                <td class="r num" data-label="Qty">${Math.abs(p.qty)}</td><td class="r num" data-label="Avg">${price(p.avg)}</td><td class="r num" data-label="LTP" data-pos-ltp="${p.securityId}">${price(p.ltp)}</td>
+                <td class="r num ${tone(p.unrealized)}" data-label="Open P&L" data-pos-pnl="${p.securityId}">${inr(p.unrealized, { sign: true })}</td>
                 <td class="r span"><button class="btn btn-sm btn-close" data-exit="${p.symbol}">${icon('x')}Close</button></td></tr>`)}
               ${d.orders.map(o => html`<tr>
                 <td class="inst span"><b>${o.symbol}</b><span>${o.type.toLowerCase()} order</span></td><td data-label="Side"><span class="side-tag ${o.side === 'BUY' ? 'buy' : 'sell'}">${o.side}</span></td>

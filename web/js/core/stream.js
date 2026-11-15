@@ -31,6 +31,16 @@ export function startStream() {
     const { at } = json(e);
     store.set({ dash: { ...d, syncedAt: at, broker: d.broker && { ...d.broker, lastSyncAt: at } }, live: true });
   });
+  // Live P&L from market ticks (server live-pnl.js, up to 4 a second): update the dashboard's figures in place and
+  // signal 'pnl' (not 'dash'), so pages refresh just their numbers instead of repainting.
+  source.addEventListener('pnl', e => {
+    const v = json(e), d = store.get().dash;
+    if (d) {
+      Object.assign(d, { pnl: v.pnl, realized: v.realized, unrealized: v.unrealized, livePnlAt: v.at, charges: v.charges ?? d.charges, netPnl: v.net ?? d.netPnl });
+      for (const p of d.positions || []) { const r = v.positions?.[String(p.securityId)]; if (r) { p.unrealized = r.unrealized; if (r.ltp != null) p.ltp = r.ltp; } }
+    }
+    store.set({ pnl: v });
+  });
   source.addEventListener('unread', e => store.set({ unread: json(e).count }));
   source.addEventListener('emergency', e => store.set({ emergency: json(e) }));
   source.addEventListener('wallet', e => store.set({ wallet: json(e) }));

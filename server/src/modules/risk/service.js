@@ -3,6 +3,7 @@ import { config } from '../../config.js';
 import { ist, marketOpen, toMinutes } from '../../lib/time.js';
 import { getRules } from '../rules/service.js';
 import { bracketsFor } from '../brackets/store.js';
+import { livePnl, chargesToday } from './live-pnl.js';
 import { accountFor, accountSummary } from '../broker/registry.js';
 import { getBook, getKillStatus, markDirty } from '../broker/book.js';
 import { fillsForDay } from '../trades/service.js';
@@ -127,7 +128,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
   const { active: rules, pending, pendingFrom, mode, manual, algo } = getRules(userId);
   const book = getBook(userId);
   const broker = accountSummary(acct);
-  const pnl = s.realized + s.unrealized;
+  // Shown P&L: from live ticks when fresh (live-pnl.js), else the broker's figure. Rules use the broker's (day state).
+  const lv = livePnl(userId), pnl = lv ? lv.pnl : s.realized + s.unrealized;
   const cutoff = toMinutes(rules.cutoff.value);
   const capital = capitalFor(userId, s);
   // Rupee levels for the rules that are switched on (null = off, or capital not known yet).
@@ -137,7 +139,9 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     day: t.day,
     time: t.hhmm,
     marketOpen: marketOpen(),
-    pnl, realized: s.realized, unrealized: s.unrealized, worst: s.worst, peak: s.peak,
+    pnl, realized: lv ? lv.realized : s.realized, unrealized: lv ? lv.unrealized : s.unrealized, worst: s.worst, peak: s.peak, livePnlAt: lv?.at ?? null,
+    // Estimated charges for today's fills (brokerage, STT / CTT, exchange, SEBI, stamp, GST) and the P&L after them.
+    charges: chargesToday(userId, t.day).total, netPnl: Math.round((pnl - chargesToday(userId, t.day).total) * 100) / 100,
     // Part of `pnl` from Algo Trading (the rest is manual), null when Algo Trading has not traded today.
     algoPnl: algoNow.get(userId) ?? null,
     entries: s.entries,
@@ -185,7 +189,7 @@ export function getDashboard(userId, acct = accountFor(userId)) {
       cutoffLeftMin: Math.max(0, cutoff - t.minutes),
     },
     broker,
-    positions: book.positions.filter(p => p.qty !== 0),
+    positions: book.positions.filter(p => p.qty !== 0).map(p => (lv?.positions[String(p.securityId)] ? { ...p, ltp: lv.positions[String(p.securityId)].ltp ?? p.ltp, unrealized: lv.positions[String(p.securityId)].unrealized } : p)),
     // Target / stop set on the Power Scalper chart for open positions (the stop is an order at the broker).
     brackets: bracketsFor(userId).map(({ securityId, tp, sl, slOrderId }) => ({ securityId, tp, sl, slAtBroker: !!slOrderId })),
     orders: book.orders,

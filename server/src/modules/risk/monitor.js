@@ -22,6 +22,7 @@ import { getRules } from '../rules/service.js';
 import { upsertFills, fillsForDay, logRiskEvent } from '../trades/service.js';
 import { runEmergency, tryKillSwitch } from '../emergency/service.js';
 import { watchBrackets } from '../brackets/service.js';
+import { trackPositions, livePnl } from './live-pnl.js';
 import { evaluate, countEntries, closedTrades } from './engine.js';
 import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds, algoSecurityIds, algoPnlOf, setAlgoPnl } from './service.js';
 
@@ -140,6 +141,7 @@ export async function syncAccount(acct, { force = false } = {}) {
     snap.funds = snap.funds === undefined ? prevBook.funds : snap.funds ?? null;
     snap.orders = snap.orders ?? prevBook.orders;
     setBook(uid, { positions: snap.positions, orders: snap.orders, funds: snap.funds, at: Date.now() });
+    trackPositions(uid);   // follow the open contracts on the market feed: live P&L between syncs
     if (snap.trades) { upsertFills(uid, snap.trades); m.fills = null; }
     m.posSig = snap.posSig;
     m.orderSig = snap.orderSig;
@@ -253,7 +255,8 @@ export function applySnapshot(uid, t, snap, m) {
   if (!m.algoIds || m.algoIds.day !== t.day || Date.now() - m.algoIds.at >= 10_000) m.algoIds = { day: t.day, at: Date.now(), ids: algoSecurityIds(uid, t.day) };
   const algo = algoPnlOf(counted, m.algoIds.ids);
   setAlgoPnl(uid, algo);
-  if (!m.point || m.point.minute !== t.minutes || m.point.pnl !== pnl || m.point.algo !== algo) {
+  // While ticks drive the live P&L (live-pnl.js), they draw the curve; the broker's figure fills in without them.
+  if (!livePnl(uid) && (!m.point || m.point.minute !== t.minutes || m.point.pnl !== pnl || m.point.algo !== algo)) {
     recordPoint(uid, t.day, t.minutes, pnl, algo);
     m.point = { minute: t.minutes, pnl, algo };
   }

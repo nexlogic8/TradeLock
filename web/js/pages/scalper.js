@@ -218,7 +218,7 @@ const optionLabel = (item, option) => {
   return `${day} ${item.strike} ${kind}`;
 };
 function scmTop(ctx) {
-  const dash = ctx.state?.dash, pnl = Number(dash?.pnl) || 0, open = (dash?.positions || []).filter(p => Number(p.qty) !== 0).length;
+  const dash = ctx.state?.dash, pnl = Number(Number.isFinite(dash?.netPnl) ? dash.netPnl : dash?.pnl) || 0, open = (dash?.positions || []).filter(p => Number(p.qty) !== 0).length;
   return html`<div class="scm-top">
     <button type="button" class="scm-x" data-exit-focus aria-label="Exit full screen">${icon('x')}</button>
     <span class="scm-clock" data-scm-clock>${istClock()}</span>
@@ -403,10 +403,17 @@ export default {
       for (const view of Object.values(ctx.ui.chartViews || {})) restyleChart(view);
       refreshSignalMarkers(ctx);
     }
+    if ('pnl' in patch && !patch.dash) {
+      // Live P&L from market ticks: the positions panel and the P&L chip, without the rest of the sync work.
+      refreshPositions(ctx);
+      const d = ctx.state.dash, pnl = Number(Number.isFinite(d?.netPnl) ? d.netPnl : d?.pnl) || 0, chip = $('[data-scm-pnl]', ctx.el);
+      if (chip) { chip.textContent = signedInr(pnl); chip.className = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''; }
+      return;
+    }
     if (!patch.dash) return;
     refreshPositions(ctx);
     refreshChartPositions(ctx);
-    const pnl = Number(patch.dash.pnl) || 0, chip = $('[data-scm-pnl]', ctx.el), count = $('[data-scm-poscount]', ctx.el);
+    const pnl = Number(Number.isFinite(patch.dash.netPnl) ? patch.dash.netPnl : patch.dash.pnl) || 0, chip = $('[data-scm-pnl]', ctx.el), count = $('[data-scm-poscount]', ctx.el);
     if (chip) { chip.textContent = signedInr(pnl); chip.className = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''; }
     if (count) count.textContent = String((patch.dash.positions || []).filter(p => Number(p.qty) !== 0).length);
     // A fill showing up (or the position closing) changes whether the next trade is allowed.

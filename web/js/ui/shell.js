@@ -268,17 +268,20 @@ export function mountShell(root) {
   let mod = null;
   const renderWallet = () => {
     const s = store.get(), w = s.wallet, f = s.dash?.funds, b = s.dash?.broker, d = s.dash;
-    const pnl = b && Number.isFinite(d?.pnl) ? d.pnl : null;
+    // After estimated charges (server charges.js); the gross figure until they arrive.
+    const pnl = b && Number.isFinite(d?.pnl) ? (Number.isFinite(d.netPnl) ? d.netPnl : d.pnl) : null;
     const signed = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${inr(Math.abs(v), { dp: 0 })}`;
     const chip = $('#wallet-total');
     chip.textContent = pnl == null ? '₹–' : signed(pnl);
     chip.className = `num ${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}`;
-    wbtn.title = pnl == null ? "Today's P&L (connect a broker)" : `Today's P&L ${signed(pnl)} · realized ${signed(d.realized)} · open ${signed(d.unrealized)}`;
+    wbtn.title = pnl == null ? "Today's P&L (connect a broker)" : `Today's P&L after charges ${signed(pnl)} · gross ${signed(d.pnl)} · charges −${inr(Math.abs(d.charges || 0), { dp: 0 })}`;
     if (pop.hidden) return;
     pop.innerHTML = String(html`
       <div class="wp-sec">
         <div class="eyebrow">Today's P&L${b ? ` · ${b.label}` : ''}</div>
-        <div class="wp-row"><span>Day P&L</span><b class="num ${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl == null ? '–' : signed(pnl)}</b></div>
+        <div class="wp-row"><span>Day P&L after charges</span><b class="num ${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl == null ? '–' : signed(pnl)}</b></div>
+        <div class="wp-row"><span>Gross P&L</span><span class="num">${pnl == null ? '–' : signed(d.pnl)}</span></div>
+        <div class="wp-row"><span>Charges (estimated)</span><span class="num">${pnl == null ? '–' : `−${inr(Math.abs(d.charges || 0), { dp: 0 })}`}</span></div>
         <div class="wp-row"><span>Realized</span><span class="num">${pnl == null ? '–' : signed(d.realized)}</span></div>
         <div class="wp-row"><span>Open positions</span><span class="num">${pnl == null ? '–' : signed(d.unrealized)}</span></div>
       </div>
@@ -393,7 +396,7 @@ export function mountShell(root) {
 
   const off = store.on(patch => {
     if (['dash', 'live', 'unread', 'user', 'meta'].some(k => k in patch)) update();
-    if ('wallet' in patch || 'dash' in patch) renderWallet();
+    if ('wallet' in patch || 'dash' in patch || 'pnl' in patch) renderWallet();   // the header P&L chip ticks live
     if ('theme' in patch) { paintThemeBtn(); paintBars(); }
   });
   const clock = setInterval(tickClock, 10_000);

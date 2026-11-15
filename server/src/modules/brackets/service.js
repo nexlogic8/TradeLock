@@ -14,6 +14,7 @@ import { indexOptionInstruments } from '../scalper/instruments.js';
 import { audit } from '../audit/service.js';
 import { notify } from '../notifications/service.js';
 import { bracketsFor, bracketOf, saveBracket, dropBracket } from './store.js';
+import { mcxLotValue } from '../risk/charges.js';
 
 // The broker for an account (a mutable object so tests can stand in for it).
 export const BROKER = { adapterFor };
@@ -23,7 +24,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const roundTick = (n, tick = 0.05) => Math.round(Math.round(n / tick) * tick * 10_000) / 10_000;
 
 /** Rupees per 1 point per unit of qty: MCX mini contracts count quantity in lots (×10); others 1. */
-export const pointValue = (segment, symbol) => (/^MCX/.test(String(segment || '')) && /^(CRUDEOILM|GOLDM)/i.test(String(symbol || '')) ? 10 : 1);
+export const pointValue = (segment, symbol) => (/^MCX/.test(String(segment || '')) ? mcxLotValue(symbol) : 1);
 
 /** The stop-loss order's limit price: a buffer beyond the trigger on the exit side, at least one tick away. */
 export function stopLimitFor(sl, long, tick = 0.05) {

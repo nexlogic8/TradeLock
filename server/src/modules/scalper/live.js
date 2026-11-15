@@ -13,6 +13,7 @@ const allowedByUser = new Map();
 const feeds = new Map();   // userId -> feed
 const hubs = new Map();    // credentials key -> hub
 const minuteListeners = new Set();
+const tickListeners = new Set();
 const newFeed = userId => ({ userId, clients: new Set(), algo: null, hub: null });
 const newHub = key => ({ key, feeds: new Set(), upstream: null, subscribed: new Map(), retryCount: 0, retry: null, book: createTickBook() });
 const hubClients = function* (hub) { for (const f of hub.feeds) yield* f.clients; };
@@ -151,6 +152,8 @@ function connectUpstream(hub, credentials) {
     for (const f of hub.feeds) {
       let watching = false;
       for (const c of f.clients) if (c.watch?.has(key)) { watching = true; if (!c.internal) send(c, tick); }
+      // Live P&L of open positions: recomputed on the tick, not on the next broker sync.
+      if (watching) for (const fn of tickListeners) { try { fn(f.userId, key, tick); } catch { /* a listener's problem stays its own */ } }
       // A closed minute matters to the users watching this key (their Algo Trading), not to everyone on the socket.
       if (closed != null && watching) for (const fn of minuteListeners) { try { fn(f.userId, key, closed); } catch { /* a listener's problem stays its own */ } }
     }
@@ -223,6 +226,27 @@ export function algoUnwatch(userId) {
   if (!feed.clients.size) closeFeed(userId, feed);
   else sendSubscriptions(feed.hub);
 }
+// ---- Open positions (live P&L): every user's open contracts, NSE / BSE / MCX, with or without a screen open ----
+/** Keep the user's feed subscribed to their open positions' keys; an empty set stops it. */
+export function positionsWatch(userId, keys) {
+  const next = new Set(keys);
+  let feed = feeds.get(userId);
+  if (!next.size) {
+    if (!feed?.positions) return;
+    feed.clients.delete(feed.positions); feed.positions = null;
+    if (!feed.clients.size) closeFeed(userId, feed); else sendSubscriptions(feed.hub);
+    return;
+  }
+  if (!feed) { feed = newFeed(userId); feeds.set(userId, feed); }
+  if (!feed.positions) { feed.positions = { internal: true, watch: new Set() }; feed.clients.add(feed.positions); }
+  const same = next.size === feed.positions.watch.size && [...next].every(k => feed.positions.watch.has(k));
+  feed.positions.watch = next;
+  const hub = join(feed);
+  if (!same) sendSubscriptions(hub);
+}
+/** fn(userId, key, tick) for every tick of a key that user's feed watches. */
+export function onTick(fn) { tickListeners.add(fn); return () => tickListeners.delete(fn); }
+
 /** Latest tick for key received at or after `since` (ms), or null (no feed, not subscribed, or stale). */
 export const liveTick = (userId, key, opts) => feeds.get(userId)?.hub?.book.tick(key, opts) || null;
 /** The completed tick-built 1-minute candle starting at `minute` (ms), or null when the feed cannot vouch for it. */
