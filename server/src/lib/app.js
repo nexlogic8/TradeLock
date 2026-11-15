@@ -49,7 +49,8 @@ export function createHandler(router) {
     securityHeaders(res);
     const url = new URL(req.url, 'http://localhost');
     try {
-      if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/r/')) {
+      // /r/<code>: referral links; /qr/<code>: a sign-in QR opened by a phone camera (auth/qr.js).
+      if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/r/') && !url.pathname.startsWith('/qr/')) {
         return await serveStatic(req, res, url);
       }
       res.on('finish', () => recordRequest(res.statusCode));

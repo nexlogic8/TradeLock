@@ -93,3 +93,9 @@ test('unknown codes are expired; helpers read links and user agents', async () =
   assert.equal(codeFrom(' AbC '), 'AbC');
   assert.equal(describeBrowser('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'), 'Safari on Mac');
 });
+
+test('a QR link opened by a phone camera explains where to scan it', async () => {
+  const res = await fetch(`${base}/qr/anything`);
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /Scan this in the TradeLock app/);
+});
