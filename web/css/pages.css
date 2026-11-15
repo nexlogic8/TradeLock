@@ -2132,3 +2132,39 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
   body.scalper-focus .sc-order-btn > span { font-size:15px; }
   body.scalper-focus .sc-order-btn > small { font-size:11px; }
 }
+
+/* ===== Power Scalper drawing tools (scalper-chart-draw.js): pencil → tool row; selected drawing → colour / width bar ===== */
+.sc-draw { position:absolute; top:6px; left:6px; z-index:6; display:flex; align-items:flex-start; gap:4px; max-width:calc(100% - 70px); pointer-events:none; }
+.sc-draw > *, .sc-draw-sel { pointer-events:auto; }
+.sc-draw button, .sc-draw-sel button { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:0; border-radius:7px; background:transparent; color:var(--muted); cursor:pointer; transition:background .12s, color .12s; -webkit-tap-highlight-color:transparent; }
+.sc-draw button:hover, .sc-draw-sel button:hover { background:color-mix(in srgb, var(--fg) 10%, transparent); color:var(--fg); }
+.sc-draw button[aria-pressed="true"] { background:color-mix(in srgb, var(--mint) 20%, transparent); color:var(--mint); }
+.sc-draw button:focus-visible, .sc-draw-sel button:focus-visible { outline:2px solid var(--mint); outline-offset:1px; }
+.sc-draw-toggle, .sc-draw-tools, .sc-draw-sel { background:color-mix(in srgb, var(--panel, #0e1420) 82%, transparent); border:1px solid var(--line-2); border-radius:10px; box-shadow:0 6px 20px rgba(0, 0, 0, .28); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.sc-draw .sc-draw-toggle { width:30px; height:30px; color:var(--fg); }
+.sc-draw[data-open="1"] .sc-draw-toggle { color:var(--mint); border-color:color-mix(in srgb, var(--mint) 45%, transparent); }
+.sc-draw-tools { display:none; flex-wrap:wrap; align-items:center; gap:1px; padding:2px; }
+.sc-draw[data-open="1"] .sc-draw-tools { display:flex; animation:sc-draw-in .14s ease-out; }
+@keyframes sc-draw-in { from { opacity:0; transform:translateX(-4px); } to { opacity:1; transform:none; } }
+.sc-draw-sep { width:1px; height:18px; margin:0 3px; background:var(--line-2); }
+.sc-draw button[data-draw-act="clear"][data-armed="1"] { background:color-mix(in srgb, var(--red) 25%, transparent); color:var(--red); }
+.sc-draw-sel { position:absolute; top:6px; right:62px; z-index:6; display:flex; align-items:center; gap:2px; padding:3px; }
+.sc-draw-sel[hidden] { display:none; }
+.sc-draw-swatch::before { content:""; width:14px; height:14px; border-radius:50%; background:var(--c); box-shadow:0 0 0 1px rgba(0, 0, 0, .35); }
+.sc-draw-sel .sc-draw-swatch[aria-pressed="true"] { background:color-mix(in srgb, var(--fg) 12%, transparent); }
+.sc-draw-sel .sc-draw-swatch[aria-pressed="true"]::before { box-shadow:0 0 0 2px var(--panel, #0e1420), 0 0 0 3.5px var(--c); }
+.sc-draw-width i { display:block; width:16px; border-radius:2px; background:currentColor; }
+.sc-draw-sel .sc-draw-width[aria-pressed="true"] { color:var(--mint); background:color-mix(in srgb, var(--mint) 15%, transparent); }
+.sc-draw-sel button[data-draw-act="delete"]:hover { color:var(--red); background:color-mix(in srgb, var(--red) 15%, transparent); }
+.sc-draw-edit { position:absolute; z-index:7; min-width:140px; height:28px; padding:0 8px; border:1px solid var(--mint); border-radius:6px; background:var(--panel, #0e1420); color:var(--fg); font:600 13px Inter, system-ui, sans-serif; outline:none; box-shadow:0 0 0 3px var(--mint-soft); }
+.sc-chart-host.sc-drawing, .sc-chart-host.sc-drawing * { cursor:crosshair !important; }
+.sc-chart-host[data-draw-cursor="move"], .sc-chart-host[data-draw-cursor="move"] * { cursor:move !important; }
+.sc-chart-host[data-draw-cursor="grab"], .sc-chart-host[data-draw-cursor="grab"] * { cursor:grab !important; }
+.sc-chart-host.sc-drawing .sc-draw *, .sc-chart-host.sc-drawing .sc-draw-sel * { cursor:pointer !important; }
+/* Phones: bigger targets; the selected-drawing bar sits under the tool row. */
+@media (max-width:760px) {
+  .sc-draw button, .sc-draw-sel button { width:34px; height:34px; }
+  .sc-draw .sc-draw-toggle { width:34px; height:34px; }
+  .sc-draw { max-width:calc(100% - 60px); }
+  .sc-draw-sel { top:auto; bottom:34px; right:auto; left:6px; }
+}

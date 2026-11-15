@@ -9,6 +9,7 @@ import { chartPalette } from './chart-palette.js';
 import { STUDIES, computeStudy, newStudy, defaultStudies, sanitizeStudies } from './chart-studies.js';
 import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } from './scalper-chart-indicators.js';
 import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
+import { DrawingLayer } from './scalper-chart-draw.js';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -361,7 +362,7 @@ export default {
     for (const [key, value] of Object.entries(selected)) {
       const host = $(`.sc-chart-host[data-chart="${key}"]`, ctx.el);
       let view = ctx.ui.chartViews[key];
-      if (!host) { view?.chart.remove(); delete ctx.ui.chartViews[key]; continue; }
+      if (!host) { view?.draw?.destroy(); view?.chart.remove(); delete ctx.ui.chartViews[key]; continue; }
       if (!view || view.host !== host) {
         // Keep the user's zoom only when the same contract and interval are redrawn.
         let range, priceRange;
@@ -372,15 +373,17 @@ export default {
             const scale = view.chart.priceScale('right');
             if (scale.options().autoScale === false) priceRange = scale.getVisibleRange();
           }
-          view.sizeWatch?.disconnect(); view.chart.remove();
+          view.sizeWatch?.disconnect(); view.draw?.destroy(); view.chart.remove();
         }
         view = ctx.ui.chartViews[key] = createChartView(host, value.rows, ctx.ui.indicators, key, ctx.ui.interval);
         view.instrumentId = String(value.id || '');
+        view.draw?.setKey(view.instrumentId);
         view.interval = ctx.ui.interval;
         if (range && value.rows.length > 1) { view.autoFit = false; view.chart.timeScale().setVisibleLogicalRange(range); }
         if (priceRange && Number.isFinite(priceRange.from) && Number.isFinite(priceRange.to)) view.chart.priceScale('right').setVisibleRange(priceRange);
       } else {
         view.instrumentId = String(value.id || '');
+        view.draw?.setKey(view.instrumentId);
         setChartData(view, value.rows, ctx.ui.indicators, ctx.ui.interval);
       }
       setOpeningRange(view, value.openingRange);
@@ -439,7 +442,7 @@ export default {
     el.addEventListener('scroll', e => { if (e.target.matches?.('.sc-chain-body')) ui.chainScroll = e.target.scrollTop; }, { capture:true, signal });
     // Charts hold ResizeObservers and canvases; free them when the page goes away.
     signal.addEventListener('abort', () => {
-      for (const view of Object.values(ui.chartViews || {})) { view.sizeWatch?.disconnect(); try { view.chart.remove(); } catch {} }
+      for (const view of Object.values(ui.chartViews || {})) { view.sizeWatch?.disconnect(); view.draw?.destroy(); try { view.chart.remove(); } catch {} }
       ui.chartViews = {};
     }, { once:true });
     const showError = message => {
@@ -1235,6 +1238,7 @@ function setChartData(view, rows, indicators, interval = '1') {
   renderStudies(view);
   view.oi.setData(data.filter(c => c.oi > 0).map(c => ({ time:c.time, value:c.oi })));
   view.profile.setData(data); view.smc?.setData(data);
+  view.draw?.setBars(data);
   showIndicators(view, indicators);
   view.lastTime = data.at(-1)?.time || 0;
   const count = view.host.closest('.sc-chart-panel')?.querySelector('[data-candle-count]');
@@ -1315,6 +1319,7 @@ function createChartView(host, rows, indicators, key, interval = '1') {
   const empty = document.createElement('div'); empty.className='sc-chart-empty'; empty.textContent='Waiting for Dhan candle history'; host.append(empty);
   const view = {host,chart,candles,volume,oi,profile,smc,oiProfile,instrumentId:'',key,empty,lastTime:0,openingRangeLines:{},previousDayLines:{},studies:studiesFor(key),studySeries:[],studySig:''};
   view.signalMarkers = createSeriesMarkers(candles, []);
+  view.draw = new DrawingLayer(view);   // trend lines, Fib, risk : reward and the other drawing tools
   setChartData(view,rows,indicators,interval);
   if (view.lastTime) fitSpan(view);
   // The chart is created before the workspace has its final size, and the library keeps bar width (not
