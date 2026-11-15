@@ -35,3 +35,22 @@ test('toolbar: every tool is listed, Fib levels in order', () => {
   assert.deepEqual(DRAW_TOOLS.map(([k]) => k), ['cursor', 'trend', 'ray', 'ext', 'arrow', 'hline', 'hray', 'vline', 'rect', 'fib', 'long', 'short', 'measure', 'text']);
   assert.deepEqual(FIB_LEVELS, [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]);
 });
+
+test('after drawing, the chart scrolls and zooms again (the settings are copied, not referenced)', async () => {
+  const { pauseScroll, resumeScroll } = await import('../../web/js/pages/scalper-chart-draw.js');
+  // Like lightweight-charts: options() returns the chart's live objects, and applyOptions writes into them.
+  const live = { handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, handleScale: { mouseWheel: true, pinch: true } };
+  const chart = {
+    options: () => live,
+    applyOptions(o) {
+      for (const k of ['handleScroll', 'handleScale']) if (k in o) {
+        if (typeof o[k] === 'boolean') for (const f of Object.keys(live[k])) live[k][f] = o[k];
+        else Object.assign(live[k], o[k]);
+      }
+    },
+  };
+  const saved = pauseScroll(chart);
+  assert.equal(live.handleScroll.pressedMouseMove, false, 'paused while drawing');
+  resumeScroll(chart, saved);
+  assert.deepEqual(live, { handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, handleScale: { mouseWheel: true, pinch: true } }, 'back exactly as it was');
+});

@@ -83,6 +83,20 @@ export function timeOfLogical(times, step, l) {
   return times[i] + (l - i) * (times[i + 1] - times[i]);
 }
 
+/**
+ * Pause the chart's scroll and zoom while a drawing is placed or dragged, and put them back after. chart.options()
+ * hands back the chart's own live objects, so the settings are copied first: restoring a reference that the pause
+ * itself switched off left the chart stuck.
+ */
+export function pauseScroll(chart) {
+  const o = chart.options(), saved = clone({ handleScroll: o.handleScroll, handleScale: o.handleScale });
+  chart.applyOptions({ handleScroll: false, handleScale: false });
+  return saved;
+}
+export function resumeScroll(chart, saved) {
+  chart.applyOptions(saved || { handleScroll: true, handleScale: true });
+}
+
 export class DrawingLayer {
   constructor(view) {
     this.view = view; this.chart = view.chart; this.series = view.candles; this.host = view.host;
@@ -200,16 +214,10 @@ export class DrawingLayer {
   }
 
   // ---- chart scrolling is paused while drawing or dragging, so the pointer moves the drawing ----
-  lock() {
-    if (this.locked) return;
-    const o = this.chart.options();
-    this.saved = { handleScroll: o.handleScroll, handleScale: o.handleScale };
-    this.chart.applyOptions({ handleScroll: false, handleScale: false });
-    this.locked = true;
-  }
+  lock() { if (!this.locked) { this.saved = pauseScroll(this.chart); this.locked = true; } }
   unlock() {
     if (!this.locked || this.tool !== 'cursor' || this.drag || this.creating) return;
-    this.chart.applyOptions(this.saved);
+    resumeScroll(this.chart, this.saved);
     this.locked = false;
   }
 
@@ -244,7 +252,8 @@ export class DrawingLayer {
       },
       up: e => {
         if (this.creating?.moved) { this.finish(); return; }
-        if (this.drag) { this.drag = null; this.save(); this.unlock(); this.update(); try { host.releasePointerCapture(e.pointerId); } catch { /* ok */ } }
+        if (this.drag) { this.drag = null; this.save(); this.update(); try { host.releasePointerCapture(e.pointerId); } catch { /* ok */ } }
+        this.unlock();   // back in select mode with nothing in progress: the chart scrolls and zooms again
       },
       dbl: e => {
         if (this.tool !== 'cursor' || onUi(e)) return;
