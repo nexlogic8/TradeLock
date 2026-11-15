@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -72,6 +73,8 @@ private class ChartGeometry {
 @Composable
 fun CandleChart(
     candles: List<Candle>, modifier: Modifier = Modifier, height: Dp = 240.dp, levels: List<ChartLevel> = emptyList(), decimals: Int = 2,
+    /** Take all the height the parent gives (a weighted slot) instead of a fixed height. */
+    fill: Boolean = false,
     onMove: (String, Double) -> Unit = { _, _ -> }, onRemove: (String) -> Unit = {}, onLongPress: ((Double) -> Unit)? = null,
 ) {
     val measurer = rememberTextMeasurer()
@@ -91,7 +94,7 @@ fun CandleChart(
     val ema21 = remember(candles) { ema(candles, 21) }
 
     Canvas(
-        modifier.fillMaxWidth().height(height)
+        modifier.fillMaxWidth().then(if (fill) Modifier.fillMaxHeight() else Modifier.height(height))
             // Two fingers zoom; one finger moving sideways scrolls the bars. A vertical swipe is left to the page.
             .pointerInput(candles.size) {
                 awaitEachGesture {
