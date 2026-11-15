@@ -2,6 +2,7 @@ import { Router } from '../lib/http.js';
 import { config } from '../config.js';
 import { CATALOG } from './broker/registry.js';
 import { authRoutes } from './auth/routes.js';
+import { qrRoutes } from './auth/qr.js';
 import { googleRoutes, googleEnabled } from './auth/google.js';
 import { razorpayEnabled } from './wallet/razorpay.js';
 import { serverIp, serverIpv6 } from '../lib/serverip.js';
@@ -43,7 +44,7 @@ export function buildRouter() {
   }), { public: true });
 
   for (const register of [
-    authRoutes, googleRoutes, rulesRoutes, strategyRoutes, algoRoutes, scalperRoutes, riskRoutes, brokerRoutes, stoxkartRoutes, ordersRoutes, bracketRoutes, alertRoutes, emergencyRoutes, tradesRoutes,
+    authRoutes, qrRoutes, googleRoutes, rulesRoutes, strategyRoutes, algoRoutes, scalperRoutes, riskRoutes, brokerRoutes, stoxkartRoutes, ordersRoutes, bracketRoutes, alertRoutes, emergencyRoutes, tradesRoutes,
     analyticsRoutes, notificationRoutes, billingRoutes, affiliateRoutes, settingsRoutes, auditRoutes, streamRoutes, walletRoutes, adminRoutes, journalRoutes,
   ]) register(r);
   return r;

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.AlarmOn
+import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Analytics
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CardMembership
@@ -52,6 +53,7 @@ import com.nexlogic.tradelock.ui.theme.Tl
 import com.nexlogic.tradelock.ui.theme.TlType
 
 private val TRADING = listOf(
+    Triple("Scan to sign in on web", "qrlogin", Icons.Rounded.QrCodeScanner),
     Triple("Trade alarm", "alarm", Icons.Rounded.AlarmOn),
     Triple("Strategy", "strategy", Icons.Rounded.Tune),
     Triple("Backtest", "backtest", Icons.Rounded.QueryStats),

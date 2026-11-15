@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -102,7 +103,7 @@ fun HomeScreen(vm: AppViewModel, bottomPad: PaddingValues, onOpen: (String) -> U
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPad.calculateBottomPadding() + 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { TopBar(unread) { onOpen("alerts") } }
+            item { TopBar(unread, onQr = { onOpen("qrlogin") }) { onOpen("alerts") } }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -182,7 +183,7 @@ fun HomeScreen(vm: AppViewModel, bottomPad: PaddingValues, onOpen: (String) -> U
 }
 
 @Composable
-private fun TopBar(unread: Int, onBell: () -> Unit) {
+private fun TopBar(unread: Int, onQr: () -> Unit, onBell: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).shadow(16.dp, RoundedCornerShape(12.dp), spotColor = Tl.mint).clip(RoundedCornerShape(12.dp)).background(Tl.mintBrush), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.Lock, null, tint = Color(0xFF04261F), modifier = Modifier.size(20.dp))
@@ -192,6 +193,11 @@ private fun TopBar(unread: Int, onBell: () -> Unit) {
             withStyle(SpanStyle(color = Tl.text)) { append("TRADE") }
             withStyle(SpanStyle(color = Tl.mint)) { append("LOCK") }
         }, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, modifier = Modifier.weight(1f))
+        // Scan the QR on the web login page to sign in there.
+        Box(Modifier.size(46.dp).tactile(onQr).clip(RoundedCornerShape(14.dp)).background(Tl.surface).border(1.dp, Tl.lineHi, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.QrCodeScanner, "Scan to sign in on the web", tint = Tl.mint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(10.dp))
         Box(Modifier.size(46.dp).tactile(onBell).clip(RoundedCornerShape(14.dp)).background(Tl.surface).border(1.dp, Tl.lineHi, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.NotificationsNone, null, tint = Tl.mint, modifier = Modifier.size(22.dp))
             if (unread > 0) Box(Modifier.align(Alignment.TopEnd).offset((-6).dp, 6.dp).size(9.dp).clip(CircleShape).background(Tl.red))

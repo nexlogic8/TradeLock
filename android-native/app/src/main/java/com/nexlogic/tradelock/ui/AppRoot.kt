@@ -118,6 +118,7 @@ private fun Signed(vm: AppViewModel, s: Session.SignedIn?) {
             pages.lastOrNull() == "profile" -> com.nexlogic.tradelock.ui.screens.ProfileScreen(vm, { pages.removeAt(pages.lastIndex) }, open)
             pages.lastOrNull() == "strategy" -> com.nexlogic.tradelock.ui.screens.StrategyScreen(vm, { pages.removeAt(pages.lastIndex) }, open)
             pages.lastOrNull() == "backtest" -> com.nexlogic.tradelock.ui.screens.BacktestScreen(vm, { pages.removeAt(pages.lastIndex) }, open)
+            pages.lastOrNull() == "qrlogin" -> com.nexlogic.tradelock.ui.screens.QrLoginScreen(vm) { pages.removeAt(pages.lastIndex) }
             pages.lastOrNull() == "alerts" -> com.nexlogic.tradelock.ui.screens.NotificationsScreen(vm) { pages.removeAt(pages.lastIndex) }
             pages.lastOrNull() == "brokers" -> com.nexlogic.tradelock.ui.screens.BrokerScreen(vm, { pages.removeAt(pages.lastIndex) }, open)
             pages.isNotEmpty() -> WebPage(pages.last(), PaddingValues(0.dp)) { pages.removeAt(pages.lastIndex) }

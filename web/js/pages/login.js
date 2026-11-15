@@ -35,6 +35,34 @@ const securityPanel = () => html`
     </div>
   </div>`;
 
+// ---- Sign in with the phone: a QR the signed-in TradeLock app scans and approves (server: auth/qr.js) ----
+const QR_STEPS = [
+  ['Open the TradeLock app on your phone', 'Signed in as usual.'],
+  ['Tap the QR button on Home', 'Or Menu → Scan to sign in on web.'],
+  ['Point it at this code and approve', 'This browser signs in by itself.'],
+];
+/** Where a computer shows the QR (the phone itself, or the TradeLock app, has nothing to scan it with). */
+const qrWanted = ctx => ctx.name === 'login' && !window.TradeLockApp && !matchMedia('(max-width: 760px)').matches;
+
+function qrPanel(ctx) {
+  const q = ctx.ui.qr || {};
+  const state = q.status === 'scanned' ? ['Confirm on your phone…', 'ice'] : q.status === 'approved' ? ['Signed in. Opening your dashboard…', ''] : q.status === 'rejected' ? ['Declined on the phone.', 'amber']
+    : q.status === 'expired' ? ['This code expired.', 'grey'] : q.error ? [q.error, 'amber'] : ['Waiting for your phone', 'grey'];
+  return html`
+  <div class="panel auth-card auth-aside qr-card" id="qr-card">
+    <span class="eyebrow">Sign in with your phone</span>
+    <h1 style="font-size:24px;margin-top:8px">Scan with the TradeLock app</h1>
+    <div class="qr-box ${q.status === 'scanned' ? 'scanned' : ''} ${q.status === 'expired' || q.status === 'rejected' ? 'dim' : ''}" id="qr-box">
+      ${q.svg ? raw(q.svg) : html`<span class="qr-wait"></span>`}
+      ${q.status === 'scanned' ? html`<span class="qr-badge">${icon('check')}</span>` : ''}
+      ${q.status === 'expired' || q.status === 'rejected' || q.error ? html`<button class="btn btn-sm qr-refresh" type="button" id="qr-refresh">${icon('refresh')}New code</button>` : ''}
+    </div>
+    <div class="qr-status"><span class="pill sm ${state[1]}"><span class="dot ${q.status === 'pending' || q.status === 'scanned' ? 'pulse' : ''}"></span>${state[0]}</span></div>
+    <ol class="qr-steps">${QR_STEPS.map(([b, s]) => html`<li><b>${b}</b><span>${s}</span></li>`)}</ol>
+    <p class="tiny dim" style="margin:0">Only this browser can use this code, and it changes every 2 minutes.</p>
+  </div>`;
+}
+
 function mfaView(ctx) {
   return html`
     <div class="panel auth-card">
@@ -137,7 +165,7 @@ export default {
       <nav class="nav"><a class="logo" href="/">${logoMark()}<span>TRADE<b>LOCK</b></span></a></nav>
       <div class="auth-grid">
         ${ctx.name === 'mfa' ? mfaView(ctx) : ctx.name === 'forgot' ? forgotView(ctx) : ctx.name === 'reset' ? resetView(ctx) : credentialsView(ctx)}
-        ${securityPanel()}
+        ${qrWanted(ctx) ? qrPanel(ctx) : securityPanel()}
       </div>
     </div>`;
   },
@@ -145,6 +173,39 @@ export default {
   mount(ctx) {
     const { el, signal } = ctx;
     const finish = user => { signedIn(user); navigate(user.broker ? 'overview' : 'brokers'); };
+
+    // QR sign-in: show a code, ask every 2 seconds whether the phone scanned / approved it, renew it when it expires.
+    if (qrWanted(ctx)) {
+      let timer = null, alive = true;
+      signal.addEventListener('abort', () => { alive = false; clearTimeout(timer); }, { once: true });
+      const repaintQr = () => { const card = $('#qr-card', el); if (card) card.outerHTML = String(qrPanel(ctx)); };
+      const start = async () => {
+        clearTimeout(timer);
+        try {
+          const { code, url } = await post('/auth/qr/start');
+          const { default: qrcode } = await import('../vendor/qrcode-generator.mjs');
+          const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+          ctx.ui.qr = { code, status: 'pending', svg: qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true }) };
+        } catch (err) { ctx.ui.qr = { error: err.message || 'Could not make a QR code.' }; }
+        repaintQr();
+        if (ctx.ui.qr.code) timer = setTimeout(poll, 2000);
+      };
+      const poll = async () => {
+        if (!alive) return;
+        const q = ctx.ui.qr;
+        try {
+          const r = await get(`/auth/qr/status?code=${encodeURIComponent(q.code)}`);
+          if (r.status !== q.status) { q.status = r.status; repaintQr(); }
+          if (r.status === 'approved' && r.user) return finish(r.user);
+          if (r.status === 'expired') return start();          // a fresh code, no click needed
+          if (r.status === 'rejected') return;                  // "New code" starts again
+        } catch { /* a dropped poll: try again */ }
+        if (alive && !document.hidden) timer = setTimeout(poll, 2000);
+        else if (alive) timer = setTimeout(poll, 5000);
+      };
+      el.addEventListener('click', e => { if (e.target.closest('#qr-refresh')) start(); }, { signal });
+      start();
+    }
 
     // Referral code: from the invite link (?ref=CODE), else the one remembered from an earlier visit.
     if (ctx.name === 'signup') {
