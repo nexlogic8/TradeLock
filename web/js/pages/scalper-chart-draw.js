@@ -97,15 +97,81 @@ export function resumeScroll(chart, saved) {
   chart.applyOptions(saved || { handleScroll: true, handleScale: true });
 }
 
+// One tool rail for all three charts (left of the chart grid, like TradingView): the tool, magnet and hide are shared;
+// each chart keeps its own drawings. Pick a tool, then draw on whichever chart.
+const shared = { tool: 'cursor', magnet: pref('tradelock.scalper.draw.magnet', false), hidden: false, layers: new Set(), last: null, rail: null };
+
+export function setDrawTool(tool) {
+  shared.tool = DRAW_TOOLS.some(([k]) => k === tool) ? tool : 'cursor';
+  for (const l of shared.layers) l.applyTool();
+  paintRail();
+}
+function paintRail() {
+  const rail = shared.rail;
+  if (!rail?.isConnected) return;
+  for (const b of rail.querySelectorAll('[data-draw-tool]')) b.setAttribute('aria-pressed', String(b.dataset.drawTool === shared.tool));
+  const mag = rail.querySelector('[data-draw-act="magnet"]'), hide = rail.querySelector('[data-draw-act="hide"]');
+  mag?.setAttribute('aria-pressed', String(shared.magnet));
+  if (hide) { hide.setAttribute('aria-pressed', String(shared.hidden)); hide.innerHTML = shared.hidden ? ICONS.eyeOff : ICONS.eye; hide.title = shared.hidden ? 'Show drawings' : 'Hide drawings'; }
+}
+
+/** The vertical tool rail on the left of the chart grid (once; kept across re-renders of the charts). */
+export function mountDrawRail(container) {
+  if (!container) return;
+  container.classList.add('has-draw-rail');
+  let rail = container.querySelector(':scope > .sc-draw-rail');
+  if (rail) { shared.rail = rail; paintRail(); return; }
+  rail = shared.rail = document.createElement('div');
+  rail.className = 'sc-draw-rail';
+  rail.dataset.open = pref('tradelock.scalper.draw.rail', !(typeof matchMedia === 'function' && matchMedia('(max-width: 760px)').matches)) ? '1' : '0';
+  rail.setAttribute('role', 'toolbar'); rail.setAttribute('aria-label', 'Drawing tools'); rail.setAttribute('aria-orientation', 'vertical');
+  rail.innerHTML = `<button type="button" class="sc-draw-rail-toggle" data-draw-act="rail" title="Drawing tools" aria-label="Show or hide drawing tools">${ICONS.pencil}</button>
+    <div class="sc-draw-rail-tools">
+      ${DRAW_TOOLS.map(([k, t], i) => `${i === 1 || i === 5 || i === 8 || i === 10 || i === 12 ? '<i class="sc-draw-sep"></i>' : ''}<button type="button" data-draw-tool="${k}" title="${t}" aria-label="${t}" aria-pressed="${k === shared.tool}">${ICONS[k]}</button>`).join('')}
+      <i class="sc-draw-sep"></i>
+      <button type="button" data-draw-act="magnet" title="Magnet: snap to open / high / low / close" aria-pressed="${shared.magnet}">${ICONS.magnet}</button>
+      <button type="button" data-draw-act="hide" title="Hide drawings" aria-pressed="false">${ICONS.eye}</button>
+      <button type="button" data-draw-act="undo" title="Undo (Ctrl+Z)">${ICONS.undo}</button>
+      <button type="button" data-draw-act="clear" title="Remove all drawings (all three charts)">${ICONS.trash}</button>
+    </div>`;
+  rail.addEventListener('click', e => {
+    const tool = e.target.closest('[data-draw-tool]'), act = e.target.closest('[data-draw-act]')?.dataset.drawAct;
+    if (tool) { setDrawTool(tool.dataset.drawTool === shared.tool ? 'cursor' : tool.dataset.drawTool); return; }
+    if (act === 'rail') { const open = rail.dataset.open !== '1'; rail.dataset.open = open ? '1' : '0'; savePref('tradelock.scalper.draw.rail', open); if (!open) setDrawTool('cursor'); }
+    else if (act === 'magnet') { shared.magnet = !shared.magnet; savePref('tradelock.scalper.draw.magnet', shared.magnet); paintRail(); }
+    else if (act === 'hide') { shared.hidden = !shared.hidden; if (shared.hidden) setDrawTool('cursor'); for (const l of shared.layers) { l.sel = null; l.update(); } paintRail(); }
+    else if (act === 'undo') (shared.last?.history.length ? shared.last : [...shared.layers].find(l => l.history.length))?.undo();
+    else if (act === 'clear') {
+      const btn = rail.querySelector('[data-draw-act="clear"]');
+      if (![...shared.layers].some(l => l.items.length)) return;
+      // Two taps: the first arms it (red), the second removes every drawing on the three charts.
+      if (btn.dataset.armed !== '1') { btn.dataset.armed = '1'; btn.title = 'Tap again to remove all drawings'; clearTimeout(shared.armTimer); shared.armTimer = setTimeout(() => { btn.dataset.armed = '0'; btn.title = 'Remove all drawings (all three charts)'; }, 2500); return; }
+      btn.dataset.armed = '0';
+      for (const l of shared.layers) if (l.items.length) { l.snapshot(); l.items = []; l.sel = null; l.save(); l.update(); }
+    }
+  });
+  container.prepend(rail);
+}
+
 export class DrawingLayer {
   constructor(view) {
     this.view = view; this.chart = view.chart; this.series = view.candles; this.host = view.host;
-    this.items = []; this.sel = null; this.tool = 'cursor'; this.creating = null; this.drag = null; this.history = [];
+    this.items = []; this.sel = null; this.creating = null; this.drag = null; this.history = [];
     this.times = []; this.step = 60; this.key = null;
-    this.magnet = pref('tradelock.scalper.draw.magnet', false); this.hidden = false;
     this.paneView = { zOrder: () => 'top', renderer: () => ({ draw: target => this.draw(target) }) };
     this.series.attachPrimitive(this);
-    this.buildBar(); this.bind();
+    shared.layers.add(this);
+    this.buildBar(); this.bind(); this.applyTool();
+  }
+  get tool() { return shared.tool; }
+  get magnet() { return shared.magnet; }
+  get hidden() { return shared.hidden; }
+  setTool(tool) { setDrawTool(tool); }
+  /** The shared tool changed: drop a half-made drawing, show the crosshair, pause scrolling while a tool is armed. */
+  applyTool() {
+    if (this.creating && this.creating.tool !== shared.tool) this.cancelCreate();
+    this.host.classList.toggle('sc-drawing', shared.tool !== 'cursor');
+    if (shared.tool === 'cursor') this.unlock(); else { this.lock(); if (this.sel) { this.sel = null; this.update(); } }
   }
   // ---- lightweight-charts primitive ----
   attached({ requestUpdate }) { this.requestUpdate = requestUpdate; }
@@ -176,19 +242,8 @@ export class DrawingLayer {
     return { t: Math.round(timeOfLogical(this.times, this.step, l)), p };
   }
 
-  // ---- toolbar ----
+  // ---- the selected drawing's bar (colour, width, delete), top-right of its chart ----
   buildBar() {
-    const bar = this.bar = document.createElement('div');
-    bar.className = 'sc-draw'; bar.dataset.open = pref('tradelock.scalper.draw.open', false) ? '1' : '0';
-    bar.innerHTML = `<button type="button" class="sc-draw-toggle" data-draw-toggle title="Drawing tools" aria-label="Drawing tools">${ICONS.pencil}</button>
-      <div class="sc-draw-tools" role="toolbar" aria-label="Drawing tools">
-        ${DRAW_TOOLS.map(([k, t]) => `<button type="button" data-draw-tool="${k}" title="${t}" aria-label="${t}" aria-pressed="${k === 'cursor'}">${ICONS[k]}</button>`).join('')}
-        <i class="sc-draw-sep"></i>
-        <button type="button" data-draw-act="magnet" title="Magnet: snap to open / high / low / close" aria-pressed="${this.magnet}">${ICONS.magnet}</button>
-        <button type="button" data-draw-act="hide" title="Hide drawings" aria-pressed="false">${ICONS.eye}</button>
-        <button type="button" data-draw-act="undo" title="Undo (Ctrl+Z)">${ICONS.undo}</button>
-        <button type="button" data-draw-act="clear" title="Remove all drawings on this chart">${ICONS.trash}</button>
-      </div>`;
     const sel = this.selBar = document.createElement('div');
     sel.className = 'sc-draw-sel'; sel.hidden = true;
     sel.innerHTML = `${DRAW_COLORS.map(c => `<button type="button" class="sc-draw-swatch" data-draw-color="${c}" style="--c:${c}" title="Colour" aria-label="Colour ${c}"></button>`).join('')}
@@ -196,14 +251,7 @@ export class DrawingLayer {
       ${[1, 2, 3].map(w => `<button type="button" class="sc-draw-width" data-draw-width="${w}" title="Line width ${w}" aria-label="Line width ${w}"><i style="height:${w + 0.5}px"></i></button>`).join('')}
       <i class="sc-draw-sep"></i>
       <button type="button" data-draw-act="delete" title="Delete (Del)" aria-label="Delete drawing">${ICONS.trash}</button>`;
-    this.host.append(bar, sel);
-  }
-  setTool(tool) {
-    this.cancelCreate();
-    this.tool = tool;
-    for (const b of this.bar.querySelectorAll('[data-draw-tool]')) b.setAttribute('aria-pressed', String(b.dataset.drawTool === tool));
-    this.host.classList.toggle('sc-drawing', tool !== 'cursor');
-    if (tool === 'cursor') this.unlock(); else { this.lock(); this.sel = null; this.update(); }
+    this.host.append(sel);
   }
   paintSelBar() {
     const d = this.sel;
@@ -236,6 +284,8 @@ export class DrawingLayer {
         const item = handle ? this.sel : this.hitItem(x, y);
         if (!item) { if (this.sel) { this.sel = null; this.update(); } return; }
         e.stopPropagation();
+        shared.last = this;
+        for (const l of shared.layers) if (l !== this && l.sel) { l.sel = null; l.update(); }   // one selection across the charts
         this.lock(); this.snapshot(); this.sel = item;
         this.drag = handle ? { handle } : { item, orig: clone(item), l0: this.chart.timeScale().coordinateToLogical(x), p0: this.series.coordinateToPrice(y) };
         try { host.setPointerCapture(e.pointerId); } catch { /* not all pointers */ }
@@ -268,22 +318,12 @@ export class DrawingLayer {
         else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && this.history.length && (this.sel || host.matches(':hover'))) { e.preventDefault(); this.undo(); }
       },
       click: e => {
-        const tool = e.target.closest('[data-draw-tool]'), act = e.target.closest('[data-draw-act]'), color = e.target.closest('[data-draw-color]'), width = e.target.closest('[data-draw-width]');
-        if (e.target.closest('[data-draw-toggle]')) { const open = this.bar.dataset.open !== '1'; this.bar.dataset.open = open ? '1' : '0'; savePref('tradelock.scalper.draw.open', open); if (!open) this.setTool('cursor'); return; }
-        if (tool) { this.setTool(tool.dataset.drawTool === this.tool ? 'cursor' : tool.dataset.drawTool); return; }
-        if (color && this.sel) { this.snapshot(); this.sel.color = color.dataset.drawColor; this.save(); this.update(); return; }
-        if (width && this.sel) { this.snapshot(); this.sel.width = Number(width.dataset.drawWidth); this.save(); this.update(); return; }
-        if (!act) return;
-        const a = act.dataset.drawAct;
-        if (a === 'magnet') { this.magnet = !this.magnet; savePref('tradelock.scalper.draw.magnet', this.magnet); act.setAttribute('aria-pressed', String(this.magnet)); }
-        else if (a === 'hide') { this.hidden = !this.hidden; act.setAttribute('aria-pressed', String(this.hidden)); act.innerHTML = this.hidden ? ICONS.eyeOff : ICONS.eye; act.title = this.hidden ? 'Show drawings' : 'Hide drawings'; if (this.hidden) this.setTool('cursor'); this.update(); }
-        else if (a === 'undo') this.undo();
-        else if (a === 'delete' && this.sel) this.remove(this.sel);
-        else if (a === 'clear' && this.items.length) {
-          // Two taps: the first arms it (red), the second removes everything on this chart.
-          if (act.dataset.armed !== '1') { act.dataset.armed = '1'; act.title = 'Tap again to remove all'; clearTimeout(this.armTimer); this.armTimer = setTimeout(() => { act.dataset.armed = '0'; act.title = 'Remove all drawings on this chart'; }, 2500); return; }
-          act.dataset.armed = '0'; this.snapshot(); this.items = []; this.sel = null; this.save(); this.update();
-        }
+        const color = e.target.closest('[data-draw-color]'), width = e.target.closest('[data-draw-width]'), act = e.target.closest('[data-draw-act]')?.dataset.drawAct;
+        if (!this.sel) return;
+        shared.last = this;
+        if (color) { this.snapshot(); this.sel.color = color.dataset.drawColor; this.save(); this.update(); }
+        else if (width) { this.snapshot(); this.sel.width = Number(width.dataset.drawWidth); this.save(); this.update(); }
+        else if (act === 'delete') this.remove(this.sel);
       },
     };
     host.addEventListener('pointerdown', this.on.down, true);
@@ -291,7 +331,6 @@ export class DrawingLayer {
     host.addEventListener('pointerup', this.on.up, true);
     host.addEventListener('pointercancel', this.on.up, true);
     host.addEventListener('dblclick', this.on.dbl, true);
-    this.bar.addEventListener('click', this.on.click);
     this.selBar.addEventListener('click', this.on.click);
     document.addEventListener('keydown', this.on.key);
   }
@@ -301,7 +340,9 @@ export class DrawingLayer {
     host.removeEventListener('pointerdown', this.on.down, true); host.removeEventListener('pointermove', this.on.move, true);
     host.removeEventListener('pointerup', this.on.up, true); host.removeEventListener('pointercancel', this.on.up, true);
     host.removeEventListener('dblclick', this.on.dbl, true); document.removeEventListener('keydown', this.on.key);
-    this.bar.remove(); this.selBar.remove(); this.edit?.remove(); this.on = null;
+    this.selBar.remove(); this.edit?.remove(); this.on = null;
+    shared.layers.delete(this);
+    if (shared.last === this) shared.last = null;
   }
   hover(e) {
     const r = this.host.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
@@ -314,9 +355,11 @@ export class DrawingLayer {
     const pt = this.fromXY(x, y);
     if (!pt) return;
     if (this.creating) { this.creating.item.pts[1] = pt; this.finish(); return; }   // second click of a two-point tool
+    for (const l of shared.layers) if (l !== this && l.creating) l.cancelCreate();      // a line started on another chart
+    shared.last = this;
     const type = this.tool, d = { id: uid(), type, color: DEFAULT_COLOR[type] || '#5AB8FF', width: 2, pts: [pt] };
     this.snapshot();
-    if (POINTS[type] === 2) { d.pts.push({ ...pt }); this.items.push(d); this.creating = { item: d, moved: false }; this.update(); return; }
+    if (POINTS[type] === 2) { d.pts.push({ ...pt }); this.items.push(d); this.creating = { item: d, moved: false, tool: type }; this.update(); return; }
     if (type === 'long' || type === 'short') {
       // Default box: risk 40 px of price below (long) / above (short) the entry, reward twice that, 15 bars wide.
       const risk = Math.abs((this.series.coordinateToPrice(y + 40) ?? pt.p * 0.99) - pt.p) || pt.p * 0.01, s = type === 'long' ? 1 : -1;

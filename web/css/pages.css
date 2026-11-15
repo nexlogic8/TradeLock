@@ -2168,3 +2168,28 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
   .sc-draw { max-width:calc(100% - 60px); }
   .sc-draw-sel { top:auto; bottom:34px; right:auto; left:6px; }
 }
+
+/* ===== Drawing-tool rail: one vertical strip on the left of the chart grid, shared by the three charts ===== */
+.scalper-chart-grid.has-draw-rail { position:relative; padding-left:46px; }
+.sc-draw-rail { position:absolute; left:0; top:0; bottom:0; z-index:8; width:40px; display:flex; flex-direction:column; align-items:center; gap:2px; padding:4px 0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none;
+  background:var(--panel, #0e1420); border:1px solid var(--line-2); border-radius:12px; }
+.sc-draw-rail::-webkit-scrollbar { display:none; }
+.sc-draw-rail button { flex:none; display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; padding:0; border:0; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:background .12s, color .12s; -webkit-tap-highlight-color:transparent; }
+.sc-draw-rail button:hover { background:color-mix(in srgb, var(--fg) 10%, transparent); color:var(--fg); }
+.sc-draw-rail button[aria-pressed="true"] { background:color-mix(in srgb, var(--mint) 20%, transparent); color:var(--mint); }
+.sc-draw-rail button:focus-visible { outline:2px solid var(--mint); outline-offset:1px; }
+.sc-draw-rail button[data-draw-act="clear"][data-armed="1"] { background:color-mix(in srgb, var(--red) 25%, transparent); color:var(--red); }
+.sc-draw-rail .sc-draw-sep { flex:none; width:20px; height:1px; margin:3px 0; background:var(--line-2); }
+.sc-draw-rail-tools { display:flex; flex-direction:column; align-items:center; gap:2px; }
+.sc-draw-rail[data-open="0"] .sc-draw-rail-tools { display:none; }
+.sc-draw-rail[data-open="0"] { bottom:auto; }
+.sc-draw-rail[data-open="1"] .sc-draw-rail-toggle { color:var(--mint); }
+/* The per-chart pencil from the first version is gone; only the selected drawing's colour / width bar sits on a chart. */
+.sc-chart-host > .sc-draw { display:none; }
+/* Phones / app: the charts need the full width: the rail is a floating pencil at the chart's top-left that opens a column of tools. */
+@media (max-width:760px) {
+  .scalper-chart-grid.has-draw-rail { padding-left:0; }
+  .sc-draw-rail { left:6px; top:auto; bottom:auto; width:40px; max-height:calc(100% - 12px); box-shadow:0 8px 24px rgba(0, 0, 0, .35); }
+  body.scalper-focus .sc-draw-rail { top:110px; }
+  .sc-draw-rail button { width:34px; height:34px; }
+}

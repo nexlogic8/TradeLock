@@ -9,7 +9,7 @@ import { chartPalette } from './chart-palette.js';
 import { STUDIES, computeStudy, newStudy, defaultStudies, sanitizeStudies } from './chart-studies.js';
 import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } from './scalper-chart-indicators.js';
 import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
-import { DrawingLayer } from './scalper-chart-draw.js';
+import { DrawingLayer, mountDrawRail } from './scalper-chart-draw.js';
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -390,6 +390,7 @@ export default {
       setPreviousDayRange(view, value.rows);
       if (view.oiProfile) { view.oiProfile.setData(d.strikes); showIndicators(view, ctx.ui.indicators); }
     }
+    mountDrawRail($('.scalper-chart-grid', ctx.el));   // one drawing-tool rail for the three charts
     refreshSignalMarkers(ctx);
   },
 
