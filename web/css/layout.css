@@ -252,7 +252,7 @@ html.pd-open { overflow: hidden; }
 .wallet-pop.wallet-sheet.closing { animation: ws-down .22s cubic-bezier(.4, 0, 1, 1) forwards; }
 .wallet-sheet .wp-sec { gap: 10px; padding-bottom: 16px; }
 .wallet-sheet .wp-row { font-size: 15px; align-items: baseline; }
-.wallet-sheet .wp-sec:first-child .wp-row:first-of-type b { font-size: 24px; letter-spacing: -.01em; }
+.wallet-sheet .wp-sec:first-child .wp-row:nth-child(2) b { font-size: 24px; letter-spacing: -.01em; }
 .wallet-sheet .wp-actions .btn { height: 46px; border-radius: 14px; }
 body.sheet-open { overflow: hidden; }
 @keyframes ws-up { from { transform: translateY(100%); } to { transform: translateY(0); } }

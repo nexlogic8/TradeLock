@@ -291,7 +291,13 @@ export function mountShell(root) {
   pop.addEventListener('touchend', () => {
     if (!drag) return;
     const dy = drag.dy; drag = null; pop.style.transition = '';
-    if (dy > 90) { pop.style.setProperty('--drag', `${dy}px`); pop.style.transform = ''; setOpen(false); }
+    if (dy > 90) {
+      pop.style.setProperty('--drag', `${dy}px`); pop.style.transform = ''; setOpen(false);
+      // The swipe must not also land as a tap on whatever is under the finger once the sheet is gone.
+      const eat = ev => { ev.preventDefault(); ev.stopPropagation(); };
+      document.addEventListener('click', eat, true);
+      setTimeout(() => document.removeEventListener('click', eat, true), 450);
+    }
     else pop.style.transform = '';
   }, { signal });
   wbtn.addEventListener('click', e => { e.stopPropagation(); setOpen(pop.hidden || !!closeTimer); }, { signal });
