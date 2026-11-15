@@ -9,6 +9,7 @@ const BUY = '#5AB8FF', SELL = '#FFBA52', ALERT = '#B48CFF', INK = '#05121a';
 const PLUS = '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>';
 const BELL = '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 14V9a5 5 0 0110 0v5l1.5 1.5h-13z"/><path d="M8.5 17.5a1.7 1.7 0 003 0"/></svg>';
 const UP = '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5"/></svg>';
+const HLINE = '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 10h16"/><circle cx="10" cy="10" r="2" fill="currentColor"/></svg>';
 const DOWN = '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4v12M5 11l5 5 5-5"/></svg>';
 
 /** Round to the contract's tick (0.05 by default). */
@@ -74,7 +75,8 @@ export class LevelOverlay {
     this.menu.innerHTML = `<div class="sc-lvl-head"><b>${fmt}</b>${rel ? `<small>${rel} LTP ${this.fmt(ltp)}</small>` : ''}</div>
       ${size ? `<button type="button" role="menuitem" data-lvl="buy" class="buy">${UP}<span>Buy limit</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} @ ${fmt}</em></button>
       <button type="button" role="menuitem" data-lvl="sell" class="sell">${DOWN}<span>Sell limit</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} @ ${fmt}</em></button>` : ''}
-      <button type="button" role="menuitem" data-lvl="alert" class="alert">${BELL}<span>Alert</span><em>when ${c?.ltp > 0 && p < c.ltp ? 'falls to' : 'reaches'} ${fmt}</em></button>`;
+      <button type="button" role="menuitem" data-lvl="alert" class="alert">${BELL}<span>Alert</span><em>when ${c?.ltp > 0 && p < c.ltp ? 'falls to' : 'reaches'} ${fmt}</em></button>
+      <button type="button" role="menuitem" data-lvl="hline" class="hline">${HLINE}<span>Horizontal line</span><em>draw at ${fmt}</em></button>`;
     const w = this.chart.timeScale().width(), top = Math.max(4, Math.min(this.plusY - 20, this.host.clientHeight - 170));
     this.menu.style.top = `${top}px`; this.menu.style.left = `${Math.max(4, w - 236)}px`;
     this.menu.hidden = false; this.plus.hidden = true;
@@ -103,7 +105,9 @@ export class LevelOverlay {
         if (!b) return;
         const kind = b.dataset.lvl, price = this.menuPrice;
         this.closeMenu();
-        this.run(kind, { price });
+        // A horizontal line is a drawing (the drawing layer), not an order or alert.
+        if (kind === 'hline') { this.view.draw?.addHorizontal(price); return; }
+        this.run(kind, { price }).catch(() => { /* the caller showed the error */ });
       },
       outside: e => { if (!this.menu.hidden && !this.menu.contains(e.target) && e.target !== this.plus && !this.plus.contains(e.target)) this.closeMenu(); },
       down: e => {
@@ -180,16 +184,26 @@ export class LevelOverlay {
       const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); };
       // A marker: dashed line across the pane, a pill on the LEFT (the right side belongs to positions / TP / SL),
       // with ✕ inside; the line thicker while it is being dragged.
-      const marker = (y, color, text, act, id, dragging, dash) => {
-        ctx.strokeStyle = color; ctx.lineWidth = dragging ? 2 : 1.2; ctx.setLineDash(dash);
+      // A bell drawn on the canvas (an emoji would depend on the device's fonts).
+      const bell = (cx, cy, color) => {
+        ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.moveTo(cx - 4.5, cy + 3); ctx.lineTo(cx - 4.5, cy - 1); ctx.arc(cx, cy - 1, 4.5, Math.PI, 0); ctx.lineTo(cx + 4.5, cy + 3);
+        ctx.lineTo(cx + 6, cy + 4.5); ctx.lineTo(cx - 6, cy + 4.5); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy + 6, 1.6, 0, Math.PI); ctx.fill();
+        ctx.restore();
+      };
+      const marker = (y, color, text, act, id, dragging, dash, withBell = false) => {
+        ctx.strokeStyle = color; ctx.lineWidth = dragging ? 2.2 : withBell ? 1.6 : 1.2; ctx.setLineDash(dash);
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); ctx.setLineDash([]);
-        const tw = ctx.measureText(text).width, xw = dragging ? 0 : 20, w = tw + 16 + xw, x = 30;
+        const iw = withBell ? 16 : 0, tw = ctx.measureText(text).width, xw = dragging ? 0 : 20, w = iw + tw + 16 + xw, x = 30;
         rr(x, y - 11, w, 22, 6); ctx.fillStyle = color; ctx.fill();
-        ctx.fillStyle = INK; ctx.fillText(text, x + 8, y);
+        if (withBell) bell(x + 13, y - 1, INK);
+        ctx.fillStyle = INK; ctx.fillText(text, x + 8 + iw, y);
         if (!dragging) {
-          ctx.fillStyle = 'rgba(5, 18, 26, 0.35)'; ctx.fillRect(x + tw + 12, y - 7, 1, 14);
-          ctx.fillStyle = INK; ctx.fillText('✕', x + tw + 17, y);
-          this.hits.push({ act, id, x0: x + tw + 10, x1: x + w + 2, y0: y - 13, y1: y + 13 });
+          const sx = x + iw + tw + 12;
+          ctx.fillStyle = 'rgba(5, 18, 26, 0.35)'; ctx.fillRect(sx, y - 7, 1, 14);
+          ctx.fillStyle = INK; ctx.fillText('✕', sx + 5, y);
+          this.hits.push({ act, id, x0: sx - 2, x1: x + w + 2, y0: y - 13, y1: y + 13 });
         }
         // Grip at the far left: drag handle.
         ctx.fillStyle = color; rr(6, y - 4, 18, 8, 4); ctx.fill();
@@ -205,7 +219,8 @@ export class LevelOverlay {
         const p = this.priceOf('alert', a), y = this.series.priceToCoordinate(p);
         if (y == null) continue;
         const dragging = this.drag?.kind === 'alert' && this.drag.id === a.id;
-        marker(y, ALERT, `🔔 ${a.dir === 'below' ? '≤' : '≥'} ${this.fmt(p)}${this.busy.has(`a${a.id}`) ? '  …' : ''}`, 'delete-alert', a.id, dragging, [2, 3]);
+        // Purple line with a bell: an alert is set here (✕ removes it).
+        marker(y, ALERT, `ALERT ${a.dir === 'below' ? '≤' : '≥'} ${this.fmt(p)}${this.busy.has(`a${a.id}`) ? '  …' : ''}`, 'delete-alert', a.id, dragging, [8, 4], true);
       }
     });
   }

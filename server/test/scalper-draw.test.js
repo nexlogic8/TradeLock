@@ -54,3 +54,11 @@ test('after drawing, the chart scrolls and zooms again (the settings are copied,
   resumeScroll(chart, saved);
   assert.deepEqual(live, { handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, handleScale: { mouseWheel: true, pinch: true } }, 'back exactly as it was');
 });
+
+test('chart "+" menu: a horizontal line at a price is an ordinary drawing (selectable, saved)', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../../web/js/pages/scalper-chart-draw.js', import.meta.url), 'utf8');
+  assert.match(src, /addHorizontal\(price\) \{/);
+  const lv = (await import('node:fs')).readFileSync(new URL('../../web/js/pages/scalper-chart-levels.js', import.meta.url), 'utf8');
+  assert.match(lv, /data-lvl="hline"/, 'the menu offers it');
+  assert.match(lv, /ALERT \$\{a\.dir === 'below' \? '≤' : '≥'\}/, 'alerts: a labelled purple line (bell drawn on the canvas)');
+});

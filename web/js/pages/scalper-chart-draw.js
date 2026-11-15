@@ -385,6 +385,15 @@ export class DrawingLayer {
     this.items = this.items.filter(i => i !== this.creating.item); this.creating = null; this.history.pop(); this.update();
   }
   remove(d) { this.snapshot(); this.items = this.items.filter(i => i !== d); if (this.sel === d) this.sel = null; this.save(); this.update(); }
+  /** A horizontal line at `price` (the chart's "+" menu): a normal drawing, selectable, draggable, saved. */
+  addHorizontal(price) {
+    if (!(price > 0)) return null;
+    shared.last = this;
+    this.snapshot();
+    const d = { id: uid(), type: 'hline', color: DEFAULT_COLOR.hline, width: 2, pts: [{ t: this.times.at(-1) ?? Math.round(Date.now() / 1000), p: price }] };
+    this.items.push(d); this.sel = d; this.save(); this.update();
+    return d;
+  }
   editText(d) {
     this.edit?.remove();
     const x = this.x(d.pts[0].t), y = this.y(d.pts[0].p);

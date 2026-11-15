@@ -2221,3 +2221,5 @@ body .sc-ticket .sc-lots .sc-lots-mode:focus-visible { outline:2px solid var(--m
 .sc-chart-host[data-lvl-cursor="ns-resize"], .sc-chart-host[data-lvl-cursor="ns-resize"] * { cursor:ns-resize !important; }
 .sc-chart-host[data-lvl-cursor="pointer"], .sc-chart-host[data-lvl-cursor="pointer"] * { cursor:pointer !important; }
 @media (max-width:760px) { .sc-lvl-plus { width:32px; height:32px; } .sc-lvl-menu button { padding:10px 8px; } }
+.sc-lvl-menu button.hline svg { color:#FFBA52; } .sc-lvl-menu button.hline:hover { background:rgba(255, 186, 82, .12); }
+.sc-lvl-menu button.hline { border-top:1px solid var(--line-2); border-radius:0 0 8px 8px; margin-top:2px; }

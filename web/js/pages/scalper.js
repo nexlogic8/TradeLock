@@ -1066,14 +1066,22 @@ function levelOptions(ctx, view) {
         } else if (kind === 'move-order') { await put(`/orders/${encodeURIComponent(id)}`, { price }); toast(`Limit order moved to ${price}.`, 'ok'); }
         else if (kind === 'cancel-order') { await del(`/orders/${encodeURIComponent(id)}`); toast('Order cancelled.', 'ok'); }
         else if (kind === 'alert') {
-          await post('/alerts', { segment: c.segment, securityId: c.securityId, symbol: c.symbol, price, ltp: c.ltp });
+          const { alert } = await post('/alerts', { segment: c.segment, securityId: c.securityId, symbol: c.symbol, price, ltp: c.ltp });
+          setLocalAlerts(ctx, list => [...list.filter(a => a.id !== alert.id), alert]);   // the purple line at once
           armAlertDelivery();
           toast(`Alert set: ${c.symbol} ${c.ltp > 0 && price < c.ltp ? '≤' : '≥'} ${price}. TradeLock rings when it gets there.`, 'ok');
-        } else if (kind === 'move-alert') { await put(`/alerts/${id}`, { price, ltp: c?.ltp }); toast(`Alert moved to ${price}.`, 'ok'); }
-        else if (kind === 'delete-alert') { await del(`/alerts/${id}`); toast('Alert removed.', 'ok'); }
+        } else if (kind === 'move-alert') { const { alert } = await put(`/alerts/${id}`, { price, ltp: c?.ltp }); setLocalAlerts(ctx, list => list.map(a => (a.id === id ? { ...a, ...alert } : a))); toast(`Alert moved to ${price}.`, 'ok'); }
+        else if (kind === 'delete-alert') { await del(`/alerts/${id}`); setLocalAlerts(ctx, list => list.filter(a => a.id !== id)); toast('Alert removed.', 'ok'); }
       } catch (e) { toastError(e); throw e; }
     },
   };
+}
+/** Change this screen's copy of the alerts now (the server's next push confirms it), and redraw the markers. */
+function setLocalAlerts(ctx, fn) {
+  const d = ctx.state?.dash;
+  if (!d) return;
+  d.alerts = fn(d.alerts || []).map(({ id, segment, securityId, price, dir }) => ({ id, segment, securityId: String(securityId), price, dir }));
+  refreshChartPositions(ctx);
 }
 /** First alert: ask for browser notifications, and wake the Android app's alarm service (it rings even when closed). */
 function armAlertDelivery() {
