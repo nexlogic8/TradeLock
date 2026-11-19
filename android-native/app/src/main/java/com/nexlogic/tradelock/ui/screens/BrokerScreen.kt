@@ -132,7 +132,8 @@ fun BrokerScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
     val a = data?.obj("account")
     val real = a?.takeIf { it.str("broker") != "paper" }
     val link = data?.obj("links")?.obj("stoxkart")
-    val catalog = listOf("paper" to "Paper") + (data?.arr("catalog")?.mapNotNull { (it as? JsonObject)?.let { c -> (c.str("id") ?: "") to (c.str("name") ?: "") } }.orEmpty())
+    // The brokers first (Dhan on the left), Paper last on the right.
+    val catalog = (data?.arr("catalog")?.mapNotNull { (it as? JsonObject)?.let { c -> (c.str("id") ?: "") to (c.str("name") ?: "") } }.orEmpty()).filter { it.first != "paper" } + ("paper" to "Paper")
     val current = tab ?: when { real == null || a.bool("paperMode") == true -> "paper"; real.str("tradeVia") == "stoxkart" -> "stoxkart"; else -> real.str("broker") ?: "dhan" }
     val soon = data?.arr("catalog")?.mapNotNull { it as? JsonObject }?.firstOrNull { it.str("id") == current && it.str("status") != "available" }
 
@@ -149,14 +150,29 @@ fun BrokerScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
         if (data == null) { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { if (error != null) Text(error!!, color = Tl.red) else CircularProgressIndicator(color = Tl.mint) }; return@Column }
 
         // ---- broker tabs ----
-        Row(Modifier.horizontalScroll(rememberScrollState()).clip(RoundedCornerShape(16.dp)).background(Tl.surface).border(1.dp, Tl.line, RoundedCornerShape(16.dp)).padding(4.dp),
+        // A few tabs (Dhan + Paper) share the full width equally; many (administrators) scroll sideways.
+        val fill = catalog.size <= 3
+        Row((if (fill) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState())).clip(RoundedCornerShape(16.dp)).background(Tl.surface).border(1.dp, Tl.line, RoundedCornerShape(16.dp)).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             catalog.forEach { (id, name) ->
                 val on = id == current
                 val bg by animateColorAsState(if (on) Tl.raised else Color.Transparent, tween(200), label = "tab")
                 val inUse = (id == "paper" && (real == null || a.bool("paperMode") == true)) || (id == real?.str("broker") && real?.bool("paperMode") != true && real?.str("tradeVia") != "stoxkart") ||
                     (id == "stoxkart" && link?.bool("trading") == true)
-                Row(Modifier.tactile({ tab = id; switching = false }).clip(RoundedCornerShape(12.dp)).background(bg).padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.tactile({
+                    tab = id; switching = false
+                    // Choosing a tab is the decision: Paper turns paper trading on, the broker's tab real money. If it
+                    // cannot switch now (something still open), the tab returns to the mode in use (tab = null).
+                    val onPaper = real == null || a?.bool("paperMode") == true
+                    val toPaper = id == "paper" && (a == null || !onPaper)
+                    val toReal = real != null && id == real.str("broker") && onPaper
+                    if (toPaper) act("paper", "Paper trading is on: no orders go to your broker.") {
+                        try { if (real != null) Api.post("/brokers/${real.str("id")}/paper", buildJsonObject { put("on", true) }) else Api.post("/paper/account") } catch (e: ApiError) { tab = null; throw e }
+                    } else if (toReal) act("real", "Real trading is on: your ${real.str("label")?.takeIf { it != "Paper" } ?: "Dhan"} account, real money.") {
+                        try { Api.post("/brokers/${real.str("id")}/paper", buildJsonObject { put("on", false) }) } catch (e: ApiError) { tab = null; throw e }
+                    }
+                }).then(if (fill) Modifier.weight(1f) else Modifier).clip(RoundedCornerShape(12.dp)).background(bg).padding(horizontal = 12.dp, vertical = if (fill) 12.dp else 9.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                     BrokerMark(id, name, 22)
                     Spacer(Modifier.width(7.dp))
                     Text(name, style = TlType.label.copy(fontSize = 14.sp), color = if (on) Tl.text else Tl.muted, maxLines = 1)
@@ -311,11 +327,12 @@ private fun PaperPane(a: JsonObject?, real: JsonObject?, wallet: JsonObject?, bu
         Cap("Algo Trading and risk rules", "Available", Tl.mint, "Strategies, stop-loss, exits, your Risk rules and the day lock run exactly as with real money.")
     }
     Spacer(Modifier.height(14.dp))
-    when {
-        !inUse -> PrimaryButton(if (busy == "paper") "Switching…" else "Use paper trading") { usePaper() }
-        real != null -> PrimaryButton(if (busy == "real") "Switching…" else "Switch to real money (${real.str("label")?.takeIf { it != "Paper" } ?: "Dhan"})") { useReal() }
-        else -> Text("To trade with real money, open the Dhan tab and connect your account. It starts on Paper, and Real is one switch away.", style = TlType.small, color = Tl.muted)
-    }
+    // Choosing a tab switches (no button): this says which tab is which.
+    Text(when {
+        busy == "paper" || busy == "real" -> "Switching…"
+        real != null -> "Choosing a tab switches: Paper trades the paper wallet, ${real.str("label")?.takeIf { it != "Paper" } ?: "Dhan"} trades real money."
+        else -> "To trade with real money, open the Dhan tab and connect your account."
+    }, style = TlType.small, color = Tl.muted)
     Spacer(Modifier.height(10.dp))
     GhostButton("Set paper balance", Modifier.fillMaxWidth()) { onOpen("wallet?web=1") }
 }

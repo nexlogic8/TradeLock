@@ -120,96 +120,105 @@ const brokerCall = async fn => {
 // Users with a new entry being placed right now (one trade at a time). Shared with the ORB auto-trader.
 export const entriesInFlight = new Set();
 
+/**
+ * Place an order for a user, as the Power Scalper ticket does: validated, checked by the risk gate (kill switch, pause,
+ * one trade at a time, capital per trade...), placed (a Dhan Super Order when it can), synced and followed. Used by
+ * POST /api/orders and by index alerts that carry an order. Throws HttpError when refused.
+ */
+export async function placeOrderFor(userId, b = {}, ip = null) {
+  const order = {
+    symbol: v.str(b.symbol, 'Instrument', { min: 2, max: 60 }).toUpperCase(),
+    side: v.oneOf(b.side, 'Side', ['BUY', 'SELL']),
+    qty: v.num(b.qty, 'Quantity', { min: 1, max: 100_000, int: true }),
+    type: v.oneOf(b.type || 'MARKET', 'Order type', ['MARKET', 'LIMIT', 'STOP_LOSS']),
+    securityId: b.securityId ? String(b.securityId) : undefined,
+    exchangeSegment: b.exchangeSegment,
+    productType: b.productType,
+  };
+  if (order.type === 'LIMIT') order.price = v.num(b.price, 'Limit price', { min: 0.05, max: 1_000_000 });
+  // A stop entry (chart "+" above the market for a buy, below for a sell): rests until the price crosses the trigger,
+  // then works as a limit a little past it (5%), so it fills on a breakout without chasing a runaway price.
+  if (order.type === 'STOP_LOSS') {
+    order.triggerPrice = v.num(b.triggerPrice ?? b.price, 'Trigger price', { min: 0.05, max: 1_000_000 });
+    order.price = stopLimitPrice(order.side, order.triggerPrice);
+  }
+  // MCX: Dhan's quantity is in lots, so a lot's rupee value is premium × the contract multiplier (CRUDEOILM / GOLDM 10).
+  if (/^MCX/.test(String(order.exchangeSegment || ''))) order.multiplier = mcxMultiplier(order.symbol) ?? 1;
+  // The live premium the ticket was sized at (market orders): checked against Capital per trade, not sent to the broker.
+  const sizedAt = b.ltp != null ? v.num(b.ltp, 'Price', { min: 0.05, max: 1_000_000 }) : null;
+  // A stop on the wrong side of the market would trigger at once: that is a limit (or market) order instead.
+  if (order.type === 'STOP_LOSS' && sizedAt && (order.side === 'BUY' ? order.triggerPrice <= sizedAt : order.triggerPrice >= sizedAt))
+    throw bad('VALIDATION', order.side === 'BUY' ? `A buy stop goes above the current price (${sizedAt}). At or below it, use a buy limit.`
+      : `A sell stop goes below the current price (${sizedAt}). At or above it, use a sell limit.`);
+
+  const acct = requireAccount(userId);
+  const t = ist();
+  const s = dayState(userId, t.day);
+  // A stop entry is checked (Capital per trade) at its trigger, the price it is meant to fill near.
+  const verdict = checkOrder(order.type === 'STOP_LOSS' ? { ...order, price: order.triggerPrice } : order, {
+    rules: getRules(userId).active,
+    positions: getBook(userId).positions,
+    orders: getBook(userId).orders || [],
+    entryInFlight: entriesInFlight.has(userId),
+    entries: s.entries,
+    pnl: s.realized + s.unrealized,
+    minutes: marketOpen() ? t.minutes : null,
+    capital: capitalFor(userId, s),
+    price: sizedAt,
+    paused: !!s.paused,
+    killSwitchActive: !!killSwitchLock(userId, s), killSwitchLabel: killSwitchLock(userId, s),
+    pauseReason: s.pause_reason,
+    subscriptionActive: getSubscription(userId).active,
+    algoOnly: false,   // manual trading is always allowed, also while Algo Trading runs
+  });
+  if (!verdict.ok) {
+    patchDay(userId, t.day, { blocked: s.blocked + 1 });
+    audit(userId, 'order.blocked', { order, code: verdict.code }, ip);
+    throw forbidden('ORDER_BLOCKED', verdict.reason, { rule: verdict.code });
+  }
+  // Hold the one-trade lock while this entry is placed and the book is refreshed, so a second
+  // request arriving meanwhile cannot slip through before the position shows up.
+  if (!verdict.reducing) entriesInFlight.add(userId);
+  let result, sup = null, superNote = null;
+  try {
+    // A new option entry at market goes to Dhan as a Super Order when it can (see superLevels): its stop-loss at the
+    // Option SL room and its target at 1:2 are legs at Dhan from the start.
+    const adapter = adapterFor(acct), levels = verdict.reducing ? null : superLevels(userId, acct, adapter, order, sizedAt);
+    if (levels) {
+      try {
+        result = await adapter.placeSuperOrder({ ...order, targetPrice: levels.tp, stopLossPrice: levels.sl });
+        sup = levels;
+      } catch (e) {
+        // Dhan refused the super order outright: no order exists, so a plain order is safe now. A refusal that is about
+        // funds would refuse the plain order too: reported as it is. A network failure may have placed it: never resent.
+        if (['NETWORK', 'TOKEN_EXPIRED'].includes(e?.code) || /fund|margin|insufficient/i.test(e?.message || '')) throw e;
+        superOff.add(acct.id);
+        superNote = `Dhan did not accept a Super Order (${e.message}). Placed a normal order instead: set TP / SL by dragging. Activate Super Order on your Dhan account to have them at Dhan.`;
+        audit(userId, 'order.super_refused', { symbol: order.symbol, reason: e.message }, ip);
+        notify(userId, { kind: 'risk', level: 'warn', title: 'Super Order not available: normal order placed', body: superNote });
+      }
+    }
+    if (!result) result = await adapter.placeOrder(order);
+    if (sup) saveSuperBracket(userId, { securityId: order.securityId, segment: order.exchangeSegment, symbol: order.symbol,
+      side: order.side === 'BUY' ? 1 : -1, qty: order.qty, tp: sup.tp, sl: sup.sl, superId: result.id });
+    audit(userId, 'order.placed', { order, result, ...(sup && { super: sup }) }, ip);
+    // Forced: after the NSE close the account sync is otherwise skipped for 5 minutes (an MCX fill would not show).
+    await syncAccount(acct, { force: !marketOpen() });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(502, 'BROKER_REJECTED', `Broker rejected the request: ${e.message}`);
+  } finally { if (!verdict.reducing) entriesInFlight.delete(userId); }
+  // A market order's rejection comes after "pending" (a limit can rest, or be cancelled by the user: not followed).
+  if (order.type === 'MARKET') followEntry(userId, acct, order, result?.id, !!sup).catch(() => {});
+  return { order: { ...order, ...result }, reducing: verdict.reducing, ...(sup && { super: sup }), ...(superNote && { note: superNote }) };
+}
+
 export function ordersRoutes(r) {
   r.post('/api/orders', async ctx => {
     limit(`order:${ctx.user.id}`, 30, 60e3);
-    const b = ctx.body;
-    const order = {
-      symbol: v.str(b.symbol, 'Instrument', { min: 2, max: 60 }).toUpperCase(),
-      side: v.oneOf(b.side, 'Side', ['BUY', 'SELL']),
-      qty: v.num(b.qty, 'Quantity', { min: 1, max: 100_000, int: true }),
-      type: v.oneOf(b.type || 'MARKET', 'Order type', ['MARKET', 'LIMIT', 'STOP_LOSS']),
-      securityId: b.securityId ? String(b.securityId) : undefined,
-      exchangeSegment: b.exchangeSegment,
-      productType: b.productType,
-    };
-    if (order.type === 'LIMIT') order.price = v.num(b.price, 'Limit price', { min: 0.05, max: 1_000_000 });
-    // A stop entry (chart "+" above the market for a buy, below for a sell): rests until the price crosses the trigger,
-    // then works as a limit a little past it (5%), so it fills on a breakout without chasing a runaway price.
-    if (order.type === 'STOP_LOSS') {
-      order.triggerPrice = v.num(b.triggerPrice ?? b.price, 'Trigger price', { min: 0.05, max: 1_000_000 });
-      order.price = stopLimitPrice(order.side, order.triggerPrice);
-    }
-    // MCX: Dhan's quantity is in lots, so a lot's rupee value is premium × the contract multiplier (CRUDEOILM / GOLDM 10).
-    if (/^MCX/.test(String(order.exchangeSegment || ''))) order.multiplier = mcxMultiplier(order.symbol) ?? 1;
-    // The live premium the ticket was sized at (market orders): checked against Capital per trade, not sent to the broker.
-    const sizedAt = b.ltp != null ? v.num(b.ltp, 'Price', { min: 0.05, max: 1_000_000 }) : null;
-    // A stop on the wrong side of the market would trigger at once: that is a limit (or market) order instead.
-    if (order.type === 'STOP_LOSS' && sizedAt && (order.side === 'BUY' ? order.triggerPrice <= sizedAt : order.triggerPrice >= sizedAt))
-      throw bad('VALIDATION', order.side === 'BUY' ? `A buy stop goes above the current price (${sizedAt}). At or below it, use a buy limit.`
-        : `A sell stop goes below the current price (${sizedAt}). At or above it, use a sell limit.`);
-
-    const acct = requireAccount(ctx.user.id);
-    const t = ist();
-    const s = dayState(ctx.user.id, t.day);
-    // A stop entry is checked (Capital per trade) at its trigger, the price it is meant to fill near.
-    const verdict = checkOrder(order.type === 'STOP_LOSS' ? { ...order, price: order.triggerPrice } : order, {
-      rules: getRules(ctx.user.id).active,
-      positions: getBook(ctx.user.id).positions,
-      orders: getBook(ctx.user.id).orders || [],
-      entryInFlight: entriesInFlight.has(ctx.user.id),
-      entries: s.entries,
-      pnl: s.realized + s.unrealized,
-      minutes: marketOpen() ? t.minutes : null,
-      capital: capitalFor(ctx.user.id, s),
-      price: sizedAt,
-      paused: !!s.paused,
-      killSwitchActive: !!killSwitchLock(ctx.user.id, s), killSwitchLabel: killSwitchLock(ctx.user.id, s),
-      pauseReason: s.pause_reason,
-      subscriptionActive: getSubscription(ctx.user.id).active,
-      algoOnly: false,   // manual trading is always allowed, also while Algo Trading runs
-    });
-    if (!verdict.ok) {
-      patchDay(ctx.user.id, t.day, { blocked: s.blocked + 1 });
-      audit(ctx.user.id, 'order.blocked', { order, code: verdict.code }, ctx.ip);
-      throw forbidden('ORDER_BLOCKED', verdict.reason, { rule: verdict.code });
-    }
-    // Hold the one-trade lock while this entry is placed and the book is refreshed, so a second
-    // request arriving meanwhile cannot slip through before the position shows up.
-    if (!verdict.reducing) entriesInFlight.add(ctx.user.id);
-    let result, sup = null, superNote = null;
-    try {
-      // A new option entry at market goes to Dhan as a Super Order when it can (see superLevels): its stop-loss at the
-      // Option SL room and its target at 1:2 are legs at Dhan from the start.
-      const adapter = adapterFor(acct), levels = verdict.reducing ? null : superLevels(ctx.user.id, acct, adapter, order, sizedAt);
-      if (levels) {
-        try {
-          result = await adapter.placeSuperOrder({ ...order, targetPrice: levels.tp, stopLossPrice: levels.sl });
-          sup = levels;
-        } catch (e) {
-          // Dhan refused the super order outright: no order exists, so a plain order is safe now. A refusal that is about
-          // funds would refuse the plain order too: reported as it is. A network failure may have placed it: never resent.
-          if (['NETWORK', 'TOKEN_EXPIRED'].includes(e?.code) || /fund|margin|insufficient/i.test(e?.message || '')) throw e;
-          superOff.add(acct.id);
-          superNote = `Dhan did not accept a Super Order (${e.message}). Placed a normal order instead: set TP / SL by dragging. Activate Super Order on your Dhan account to have them at Dhan.`;
-          audit(ctx.user.id, 'order.super_refused', { symbol: order.symbol, reason: e.message }, ctx.ip);
-          notify(ctx.user.id, { kind: 'risk', level: 'warn', title: 'Super Order not available: normal order placed', body: superNote });
-        }
-      }
-      if (!result) result = await adapter.placeOrder(order);
-      if (sup) saveSuperBracket(ctx.user.id, { securityId: order.securityId, segment: order.exchangeSegment, symbol: order.symbol,
-        side: order.side === 'BUY' ? 1 : -1, qty: order.qty, tp: sup.tp, sl: sup.sl, superId: result.id });
-      audit(ctx.user.id, 'order.placed', { order, result, ...(sup && { super: sup }) }, ctx.ip);
-      // Forced: after the NSE close the account sync is otherwise skipped for 5 minutes (an MCX fill would not show).
-      await syncAccount(acct, { force: !marketOpen() });
-    } catch (e) {
-      if (e instanceof HttpError) throw e;
-      throw new HttpError(502, 'BROKER_REJECTED', `Broker rejected the request: ${e.message}`);
-    } finally { if (!verdict.reducing) entriesInFlight.delete(ctx.user.id); }
-    // A market order's rejection comes after "pending" (a limit can rest, or be cancelled by the user: not followed).
-    if (order.type === 'MARKET') followEntry(ctx.user.id, acct, order, result?.id, !!sup).catch(() => {});
+    const res = await placeOrderFor(ctx.user.id, ctx.body, ctx.ip);
     ctx.status = 201;
-    return { order: { ...order, ...result }, reducing: verdict.reducing, ...(sup && { super: sup }), ...(superNote && { note: superNote }) };
+    return res;
   });
 
   // Move a pending LIMIT order to a new price (dragging its line on the Power Scalper chart). Same order, same quantity.

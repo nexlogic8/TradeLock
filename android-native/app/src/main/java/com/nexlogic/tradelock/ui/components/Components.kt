@@ -1,5 +1,8 @@
 package com.nexlogic.tradelock.ui.components
 
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
@@ -342,3 +345,33 @@ fun Row2(left: @Composable (Modifier) -> Unit, right: @Composable (Modifier) -> 
 
 @Composable
 fun Padded(content: @Composable ColumnScope.() -> Unit) = Column(Modifier.padding(horizontal = 16.dp), content = content)
+
+/**
+ * The protection emblem (as on the website): a radar sweep turning around a mint shield and two rings pulsing out in
+ * turn while protection watches the account; a dim, still shield when it is off. [locked]: a lock instead of the shield.
+ */
+@Composable
+fun ShieldCore(on: Boolean, size: Dp = 64.dp, locked: Boolean = false) {
+    val t = rememberInfiniteTransition(label = "shield")
+    val sweep by t.animateFloat(0f, 360f, infiniteRepeatable(tween(3200, easing = LinearEasing)), label = "sweep")
+    val ping by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "ping")
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        if (on) Canvas(Modifier.fillMaxSize()) {
+            val r = this.size.minDimension / 2f
+            rotate(sweep) {
+                drawCircle(Brush.sweepGradient(0f to Color.Transparent, 0.62f to Color.Transparent, 0.7f to Tl.mint.copy(alpha = 0.05f), 1f to Tl.mint.copy(alpha = 0.55f)), radius = r)
+            }
+            for (k in 0..1) {
+                val p = (ping + k * 0.5f) % 1f
+                drawCircle(Tl.mint.copy(alpha = 0.65f * (1f - p)), radius = r * (0.52f + 0.48f * p), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+            }
+        }
+        val badge = size * 0.56f
+        Box(Modifier.size(badge).shadow(if (on) 14.dp else 0.dp, CircleShape, spotColor = Tl.mint, ambientColor = Tl.mint).clip(CircleShape)
+            .background(if (on) Tl.mintBrush else Brush.linearGradient(listOf(Tl.raised, Tl.raised)))
+            .border(1.dp, if (on) Color(0x33FFFFFF) else Tl.lineHi, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(if (locked) androidx.compose.material.icons.Icons.Rounded.Lock else androidx.compose.material.icons.Icons.Rounded.Shield, null,
+                tint = if (on) Color(0xFF04261F) else Tl.dim, modifier = Modifier.size(badge * 0.5f))
+        }
+    }
+}

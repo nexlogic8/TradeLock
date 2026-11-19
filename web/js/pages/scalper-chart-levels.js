@@ -129,12 +129,13 @@ export class LevelOverlay {
     this.plusHover = false; if (this.hoverLine) this.hoverLine.hidden = true;
     const price = this.series.coordinateToPrice(this.plusY);
     if (price == null) return;
-    const p = toTick(price), size = this.opts.size?.(), c = this.opts.contract?.(), fmt = this.fmt(p);
+    const p = toTick(price), size = this.opts.size?.(), c = this.opts.contract?.(), fmt = this.fmt(p), legs = this.opts.indexOrders?.() || [];
     const ltp = c?.ltp, rel = ltp > 0 ? (p > ltp ? 'above' : p < ltp ? 'below' : 'at') : '';
     this.menuPrice = p;
     this.menu.innerHTML = `<div class="sc-lvl-head"><b>${fmt}</b>${rel ? `<small>${rel} LTP ${this.fmt(ltp)}</small>` : ''}</div>
       ${size ? `<button type="button" role="menuitem" data-lvl="buy" class="buy">${UP}<span>Buy ${rel === 'above' ? 'stop' : 'limit'}</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} ${rel === 'above' ? 'when it rises to' : '@'} ${fmt}</em></button>
       <button type="button" role="menuitem" data-lvl="sell" class="sell">${DOWN}<span>Sell ${rel === 'below' ? 'stop' : 'limit'}</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} ${rel === 'below' ? 'when it falls to' : '@'} ${fmt}</em></button>` : ''}
+      ${legs.map(l => `<button type="button" role="menuitem" data-lvl="index-${l.leg}" class="buy index-buy">${UP}<span>Buy ${l.leg.toUpperCase()} ${l.lots} lot${l.lots === 1 ? '' : 's'}</span><em>${l.label} when the index ${rel === 'below' ? 'falls to' : 'rises to'} ${fmt}</em></button>`).join('')}
       <button type="button" role="menuitem" data-lvl="alert" class="alert">${BELL}<span>Alert</span><em>when ${c?.ltp > 0 && p < c.ltp ? 'falls to' : 'reaches'} ${fmt}</em></button>
       <button type="button" role="menuitem" data-lvl="hline" class="hline">${HLINE}<span>Horizontal line</span><em>draw at ${fmt}</em></button>`;
     const box = this.host.getBoundingClientRect(), screenHeight = window.innerHeight;
@@ -413,7 +414,8 @@ export class LevelOverlay {
         if (y == null) continue;
         const dragging = this.drag?.kind === 'alert' && this.drag.id === a.id;
         // Purple line with a bell: an alert is set here (✕ removes it).
-        marker(y, ALERT, `ALERT ${a.dir === 'below' ? '≤' : '≥'} ${this.fmt(p)}${this.busy.has(`a${a.id}`) ? '  …' : ''}`, 'delete-alert', a.id, dragging, [8, 4], true);
+        const buys = a.order ? ` → BUY ${(a.order.leg || '').toUpperCase() || a.order.symbol} ${a.order.lots ? `${a.order.lots} lot${a.order.lots === 1 ? '' : 's'}` : `${a.order.qty} qty`}` : '';
+        marker(y, a.order ? BUY : ALERT, `${a.order ? '' : 'ALERT '}${a.dir === 'below' ? '≤' : '≥'} ${this.fmt(p)}${buys}${this.busy.has(`a${a.id}`) ? '  …' : ''}`, 'delete-alert', a.id, dragging, [8, 4], true);
       }
     });
   }

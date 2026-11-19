@@ -41,3 +41,30 @@ test('moving an alert re-reads its side from the current price; removing it stop
 test('chart: the menu price snaps to the tick', () => {
   assert.deepEqual([toTick(2843.07), toTick(180.024), toTick(136788.4, 1)], [2843.05, 180, 136788]);
 });
+
+test('an index alert can carry an order: the CE / PE shown is bought at market once when the index reaches the level', async () => {
+  const { stmt } = await import('../src/db/index.js');
+  const uid = createUser({ email: 'index-order@alerts.test', password: null, name: 'I' });
+  const placed = [], realPlace = al.ALERT_ORDER.place;
+  al.ALERT_ORDER.place = async (u, body) => { placed.push({ u, body }); return { order: { id: 'X1' } }; };
+  try {
+    const order = { securityId: '51334', segment: 'NSE_FNO', symbol: 'NIFTY 2026-11-24 25400 CE', side: 'BUY', qty: 325, lots: 5, leg: 'ce' };
+    const a = al.createAlert(uid, { segment: 'IDX_I', securityId: '13', symbol: 'NIFTY 50', price: 25450, ltp: 25400, order });
+    assert.equal(a.dir, 'above');
+    assert.deepEqual(a.order, order, 'kept with the alert');
+    assert.equal(al.checkAlerts(uid, 'IDX_I:13', 25440).length, 0, 'below the level: nothing');
+    assert.equal(al.checkAlerts(uid, 'IDX_I:13', 25451).length, 1, 'the index reached it');
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(placed.length, 1);
+    assert.deepEqual(placed[0].body, { symbol: order.symbol, securityId: '51334', exchangeSegment: 'NSE_FNO', side: 'BUY', qty: 325, type: 'MARKET', productType: 'INTRADAY' });
+    assert.equal(al.checkAlerts(uid, 'IDX_I:13', 25460).length, 0, 'fires once');
+    // Refused by the gate: reported, not retried.
+    al.ALERT_ORDER.place = async () => { throw new Error('Your Paper kill switch is on'); };
+    assert.deepEqual(await al.placeFromAlert(uid, { ...a, triggeredPrice: 25451 }), { placed: false, reason: 'Your Paper kill switch is on' });
+    // An order alert set yesterday never buys today.
+    const old = al.createAlert(uid, { segment: 'IDX_I', securityId: '13', symbol: 'NIFTY 50', price: 25500, ltp: 25400, order });
+    stmt('UPDATE price_alerts SET created_at = ? WHERE id = ?').run(Date.now() - 2 * 86_400_000, old.id);
+    assert.ok(!al.activeAlerts(uid).some(x => x.id === old.id), 'dropped from the list');
+    assert.equal(al.checkAlerts(uid, 'IDX_I:13', 25600).length, 0, 'and never fires');
+  } finally { al.ALERT_ORDER.place = realPlace; }
+});

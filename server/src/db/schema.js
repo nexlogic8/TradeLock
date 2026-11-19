@@ -884,4 +884,7 @@ export const MIGRATIONS = [
   // A manual entry placed as a Dhan Super Order (entry + target + stop-loss legs held at Dhan, one cancels the other):
   // its order id. Dragging TP / SL then moves the legs at Dhan; closing the position cancels what is left of it.
   `ALTER TABLE position_brackets ADD COLUMN super_id TEXT;`,
+  // An index alert can carry an order (chart "+" on the index: buy the CE / PE shown when the index reaches a level):
+  // { securityId, segment, symbol, side, qty, lots, leg }. Placed through the order route when the alert fires; for the day only.
+  `ALTER TABLE price_alerts ADD COLUMN order_json TEXT;`,
 ];

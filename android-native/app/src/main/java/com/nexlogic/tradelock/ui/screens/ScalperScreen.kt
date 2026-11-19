@@ -1,5 +1,9 @@
 package com.nexlogic.tradelock.ui.screens
 
+import androidx.compose.ui.draw.shadow
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.animation.animateColorAsState
@@ -195,7 +199,7 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues, onClose: () -> Uni
     }
     val spotLevels = (s.alerts ?: dash?.alerts).orEmpty().filter { it.securityId == s.spotId }.map { a ->
         val v = at("a:${a.id}", a.price)
-        ChartLevel(v, Tl.violet, "🔔 ${if (a.dir == "below") "≤" else "≥"} ${"%.2f".format(v)}", id = "a:${a.id}", draggable = true, removable = true)
+        ChartLevel(v, if (a.buys != null) ORDER_BLUE else Tl.violet, "${if (a.buys != null) "" else "🔔 "}${if (a.dir == "below") "≤" else "≥"} ${"%.2f".format(v)}${a.buys?.let { " → $it" } ?: ""}", id = "a:${a.id}", draggable = true, removable = true)
     }
     fun onMove(id: String, price: Double) {
         held[id] = com.nexlogic.tradelock.data.tick(price)
@@ -269,6 +273,36 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues, onClose: () -> Uni
     val spotMarks = remember(s.spotCandles.size, s.spotCandles.lastOrNull()?.time, strategies, minute) { strategyMarkers(strategies, s.spotCandles, spotSec, now, "spot") }
     val optMarks = remember(s.spotCandles.size, s.spotCandles.lastOrNull()?.time, s.side, strategies, minute) { strategyMarkers(strategies, s.spotCandles, spotSec, now, s.side) }
 
+
+    // The chart's "+" menu (as the website): at a price on the index or the option chart, the orders and alerts that fit.
+    val levelMenu: @Composable (Boolean, Double, () -> Unit) -> Unit = { onIndex, raw, dismiss ->
+        val p = com.nexlogic.tradelock.data.tick(raw)
+        val ref = if (onIndex) s.spot else c?.ltp ?: 0.0
+        val rel = if (ref > 0) (if (p > ref) "above" else if (p < ref) "below" else "at") else ""
+        val lotTxt = "${size.lots} lot${if (size.lots == 1) "" else "s"}"
+        LevelMenu("%.2f".format(p), if (rel.isNotEmpty()) "$rel LTP ${"%.2f".format(ref)}" else null) {
+            // On the index: buy the option shown when the index reaches this level (today only).
+            if (onIndex && c != null && size.lots > 0) {
+                val way = if (rel == "below") "falls to" else "rises to"
+                MenuRow(Icons.Rounded.ArrowUpward, ORDER_BLUE, "Buy ${s.side} $lotTxt", "${c.symbol} when the index $way ${"%.2f".format(p)}") {
+                    dismiss(); scope.launch { done(sc.createIndexOrder(p, c, size.lots), "Set: buy $lotTxt ${c.symbol} when ${s.label} $way ${"%.2f".format(p)} (today only).") }
+                }
+            }
+            if (!onIndex && c != null && size.lots > 0) {
+                val buyStop = com.nexlogic.tradelock.data.isStop("BUY", p, ref); val sellStop = com.nexlogic.tradelock.data.isStop("SELL", p, ref)
+                val at = dash?.broker?.label ?: "Dhan"
+                MenuRow(Icons.Rounded.ArrowUpward, ORDER_BLUE, if (buyStop) "Buy stop" else "Buy limit", "$lotTxt ${if (buyStop) "when it rises to" else "@"} ${"%.2f".format(p)}") {
+                    dismiss(); scope.launch { done(sc.placeLimit("BUY", p, ref), "${if (buyStop) "Buy stop" else "Buy limit"} @ ${"%.2f".format(p)} placed at $at.") }
+                }
+                MenuRow(Icons.Rounded.ArrowDownward, Tl.amber, if (sellStop) "Sell stop" else "Sell limit", "$lotTxt ${if (sellStop) "when it falls to" else "@"} ${"%.2f".format(p)}") {
+                    dismiss(); scope.launch { done(sc.placeLimit("SELL", p, ref), "${if (sellStop) "Sell stop" else "Sell limit"} @ ${"%.2f".format(p)} placed at $at.") }
+                }
+            }
+            MenuRow(Icons.Rounded.NotificationsActive, Tl.violet, "Alert", "when it ${if (ref > 0 && p < ref) "falls to" else "reaches"} ${"%.2f".format(p)}") {
+                dismiss(); scope.launch { done(sc.createAlert(p, if (onIndex) null else c), "Alert set: TradeLock rings at ${"%.2f".format(p)}.") }
+            }
+        }
+    }
     // imePadding: while the lots are typed, the screen shrinks so the ticket stays above the keyboard.
     Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().imePadding()) {
         // ---- top pill bar: clock · P&L · Positions · Orders · Chain · feed ----
@@ -305,7 +339,7 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues, onClose: () -> Uni
                     price = s.spot, change = spotMove, base = dayOpen, interval = ivLabel(s.interval), onInterval = { studiesSpot = true; ask = ScAsk.Interval },
                     onStudies = { studiesSpot = true; ask = ScAsk.Studies }) {
                     CandleChart(s.spotCandles, fill = true, levels = spotLevels + (if ("oi" in overlays) oi.levels else emptyList()) + spotDay, onMove = ::onMove, onRemove = ::onRemove,
-                        onLongPress = { p -> levelAt = p to true; ask = ScAsk.Level }, oiBars = if ("oi" in overlays) oi.bars else emptyList(),
+                        menu = { p, dismiss -> levelMenu(true, p, dismiss) }, oiBars = if ("oi" in overlays) oi.bars else emptyList(),
                         intervalSec = spotSec.toInt(), nowMs = now, studies = spotStudies, markers = spotMarks)
                 }
                 // drag handle: pull up or down to give either chart more room
@@ -322,7 +356,7 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues, onClose: () -> Uni
                     onStudies = { studiesSpot = false; ask = ScAsk.Studies }) {
                     Box(Modifier.fillMaxSize()) {
                         CandleChart(s.optionCandles, fill = true, levels = levels + optDay, onMove = ::onMove, onRemove = ::onRemove,
-                            onLongPress = { p -> levelAt = p to false; ask = ScAsk.Level }, intervalSec = optSec.toInt(), nowMs = now, studies = optStudies, markers = optMarks,
+                            menu = { p, dismiss -> levelMenu(false, p, dismiss) }, intervalSec = optSec.toInt(), nowMs = now, studies = optStudies, markers = optMarks,
                             onAction = { act ->
                                 val p = pos ?: return@CandleChart
                                 val long = p.qty > 0; val ref = c?.ltp?.takeIf { it > 0 } ?: p.avg
@@ -439,39 +473,7 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues, onClose: () -> Uni
                 GhostButton("Cancel", Modifier.fillMaxWidth()) { ask = ScAsk.None }
             }
         }
-        ScAsk.Level -> {
-            val (raw, onIndex) = levelAt ?: (0.0 to false)
-            val p = com.nexlogic.tradelock.data.tick(raw)
-            val ref = if (onIndex) s.spot else c?.ltp ?: 0.0
-            val rel = if (ref > 0) (if (p > ref) "above" else if (p < ref) "below" else "at") else ""
-            TlSheet({ ask = ScAsk.None }) {
-                Eyebrow(if (onIndex) s.label else c?.symbol ?: "")
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text("%.2f".format(p), style = TlType.hero, color = Tl.text)
-                    Spacer(Modifier.width(10.dp))
-                    if (rel.isNotEmpty()) Text("$rel LTP ${"%.2f".format(ref)}", style = TlType.small, color = Tl.muted, modifier = Modifier.padding(bottom = 6.dp))
-                }
-                Spacer(Modifier.height(16.dp))
-                if (!onIndex && c != null && size.lots > 0) {
-                    val lotTxt = "${size.lots} lot${if (size.lots == 1) "" else "s"}"
-                    val buyStop = com.nexlogic.tradelock.data.isStop("BUY", p, ref); val sellStop = com.nexlogic.tradelock.data.isStop("SELL", p, ref)
-                    val at = dash?.broker?.label ?: "Dhan"
-                    ActionRow(if (buyStop) "Buy stop" else "Buy limit", "$lotTxt ${if (buyStop) "when it rises to" else "@"} ${"%.2f".format(p)}", ORDER_BLUE) {
-                        ask = ScAsk.None; scope.launch { done(sc.placeLimit("BUY", p, ref), "${if (buyStop) "Buy stop" else "Buy limit"} @ ${"%.2f".format(p)} placed at $at.") }
-                    }
-                    ActionRow(if (sellStop) "Sell stop" else "Sell limit", "$lotTxt ${if (sellStop) "when it falls to" else "@"} ${"%.2f".format(p)}", Tl.amber) {
-                        ask = ScAsk.None; scope.launch { done(sc.placeLimit("SELL", p, ref), "${if (sellStop) "Sell stop" else "Sell limit"} @ ${"%.2f".format(p)} placed at $at.") }
-                    }
-                }
-                ActionRow("Price alert", "rings when it ${if (ref > 0 && p < ref) "falls to" else "reaches"} ${"%.2f".format(p)}", Tl.violet) {
-                    ask = ScAsk.None
-                    scope.launch { done(sc.createAlert(p, if (onIndex) null else c), "Alert set: TradeLock rings at ${"%.2f".format(p)}.") }
-                }
-                Spacer(Modifier.height(6.dp))
-                GhostButton("Cancel", Modifier.fillMaxWidth()) { ask = ScAsk.None }
-            }
-        }
+        ScAsk.Level -> Unit   // the level actions are the chart's "+" menu now (levelMenu)
         ScAsk.Chain -> TlSheet({ ask = ScAsk.None }) {
             // The option chain: tap a call or a put premium to trade that contract.
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -775,3 +777,31 @@ private fun LotsField(lots: Int, onSet: (Int) -> Unit) {
         },
     )
 }
+
+/** The "+" menu card: the price (and where it is against the LTP), then the actions. */
+@Composable
+private fun LevelMenu(price: String, sub: String?, rows: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(Modifier.width(256.dp).shadow(24.dp, shape).clip(shape).background(Color(0xFF111824)).border(1.dp, Tl.lineHi, shape).padding(6.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+            Text(price, style = TlType.num.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), color = Tl.text, modifier = Modifier.weight(1f))
+            sub?.let { Text(it, style = TlType.small.copy(fontSize = 11.sp), color = Tl.muted) }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tl.line))
+        Spacer(Modifier.height(4.dp))
+        rows()
+    }
+}
+
+@Composable
+private fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color, title: String, sub: String, onClick: () -> Unit) =
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).tactile(onClick).padding(horizontal = 8.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(30.dp).clip(RoundedCornerShape(9.dp)).background(tint.copy(alpha = 0.16f)).border(1.dp, tint.copy(alpha = 0.4f), RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(icon, null, tint = tint, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TlType.label.copy(fontSize = 14.sp), color = Tl.text, maxLines = 1)
+            Text(sub, style = TlType.small.copy(fontSize = 11.sp), color = Tl.muted, maxLines = 2)
+        }
+    }

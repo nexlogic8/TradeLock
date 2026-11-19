@@ -6,6 +6,7 @@ import { formError } from '../ui/parts.js';
 import { ruleTip, tipValues } from '../ui/ruletips.js';
 import { toast } from '../ui/toast.js';
 import { store } from '../core/store.js';
+import { shieldCore } from '../ui/cores.js';
 import { ksOn } from '../ui/killswitch.js';
 
 const DEFAULT_PCT = { maxLoss: 5, profitLock: 10, capitalUse: 80 };
@@ -47,6 +48,7 @@ function protCard(d, f, set = 'manual') {
     : html`<b>Your rules are not enforced.</b> Trades are not watched and nothing is exited automatically.`;
   return html`
     <section class="panel pad algo-control prot-control ${running ? 'running' : ''}" id="prot-card">
+      ${shieldCore(running)}
       <div class="algo-control-copy">
         <span class="pill ${state[1]}"><span class="dot ${running && d?.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
         <h2>Protection</h2>

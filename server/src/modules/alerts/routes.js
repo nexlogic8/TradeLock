@@ -7,6 +7,18 @@ import { trackPositions } from '../risk/live-pnl.js';
 import { liveTick, broadcastScalperUser } from '../scalper/live.js';
 
 const SEGMENTS = ['NSE_FNO', 'BSE_FNO', 'MCX_COMM', 'IDX_I', 'NSE_EQ', 'BSE_EQ'];
+/**
+ * An order carried by an index alert (chart "+" on the index → buy the CE / PE shown): the option contract and its size.
+ * Bought at market when the index reaches the level; for today only.
+ */
+function orderFrom(o) {
+  if (o == null) return null;
+  if (!['NSE_FNO', 'BSE_FNO', 'MCX_COMM'].includes(o.segment)) throw bad('ALERT_ORDER', 'Only an option contract can be bought from an index alert.');
+  const side = o.side == null ? 'BUY' : v.oneOf(o.side, 'Side', ['BUY']);
+  return { securityId: v.str(String(o.securityId ?? ''), 'Contract', { min: 1, max: 30 }), segment: o.segment, symbol: v.str(String(o.symbol ?? ''), 'Contract', { min: 1, max: 80 }),
+    side, qty: v.num(o.qty, 'Quantity', { min: 1, max: 100_000, int: true }), lots: o.lots == null ? null : v.num(o.lots, 'Lots', { min: 1, max: 5000, int: true }),
+    leg: o.leg === 'pe' ? 'pe' : o.leg === 'ce' ? 'ce' : null };
+}
 const priceOf = (x, name) => v.num(x, name, { min: 0.05, max: 10_000_000 });
 // The current price that decides the alert's side (≥ above it, ≤ below it): Dhan's latest live tick when fresh,
 // else the price the screen showed.
@@ -20,7 +32,8 @@ export function alertRoutes(r) {
     const b = ctx.body || {};
     if (!SEGMENTS.includes(b.segment)) throw bad('ALERT_SEGMENT', 'This chart cannot take an alert.');
     const alert = createAlert(ctx.user.id, { segment: b.segment, securityId: v.str(String(b.securityId ?? ''), 'Contract', { min: 1, max: 30 }),
-      symbol: v.str(String(b.symbol ?? ''), 'Symbol', { min: 1, max: 80 }), price: priceOf(b.price, 'Alert price'), ltp: ltpOf(b.ltp, ctx.user.id, b.segment, b.securityId) });
+      symbol: v.str(String(b.symbol ?? ''), 'Symbol', { min: 1, max: 80 }), price: priceOf(b.price, 'Alert price'), ltp: ltpOf(b.ltp, ctx.user.id, b.segment, b.securityId),
+      order: orderFrom(b.order) });
     trackPositions(ctx.user.id);   // the feed now follows this contract
     publish(ctx.user.id);
     ctx.status = 201;

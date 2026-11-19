@@ -6,6 +6,7 @@ import { pill, meter, empty, statusOf, toneClass } from '../ui/parts.js';
 import { lineChart, ring, niceScale } from '../ui/charts.js';
 import { toast, toastError } from '../ui/toast.js';
 import { mountKillSwitch, ksOn } from '../ui/killswitch.js';
+import { shieldCore } from '../ui/cores.js';
 import { otherSl, otherTarget, pnlSplit } from './overview-sl.js';
 
 const OPEN = 555, CLOSE = 930; // 09:15 – 15:30 IST
@@ -162,7 +163,7 @@ export default {
           <svg class="chart" id="intraday" role="img" aria-label="Intraday P&L, now ${inr(d.pnl, { sign: true })}, low ${inr(d.worst)}"></svg>
         </div>
         <div class="panel pad">
-          <div class="panel-head"><h3 class="panel-title">Risk protection</h3>${protectionPill(d, st)}</div>
+          <div class="panel-head"><h3 class="panel-title prot-title">${shieldCore(!!d.broker?.agentOn, 'sm')}Risk protection</h3>${protectionPill(d, st)}</div>
           <div class="prot">
             <div class="prot-ring">
               <div class="ring" id="trade-ring"><svg viewBox="0 0 100 100"></svg><div class="ring-label"><div><b>${capOn ? `${d.entries}/${r.maxTrades.value}` : d.entries}</b><small>Entries</small></div></div></div>

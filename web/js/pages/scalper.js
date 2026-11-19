@@ -1123,6 +1123,17 @@ function levelOptions(ctx, view) {
       const s = sizeOf(ctx, view.key, c.item);
       return s.lots > 0 ? { lots: s.lots, qty: s.lots * (ctx.data.qtyPerLot ?? ctx.data.lotSize) } : null;
     },
+    // On the index chart: buy the CE / PE shown on the option charts when the index reaches the level, each with its
+    // own ticket's lots (an alert on the index that carries the order; for today only).
+    indexOrders: () => {
+      if (view.key !== 'spot') return [];
+      return ['ce', 'pe'].map(leg => {
+        const v = ctx.ui.chartViews?.[leg], oc = v && chartContract(ctx, v);
+        if (!oc?.tradable) return null;
+        const s = sizeOf(ctx, leg, oc.item), qpl = ctx.data.qtyPerLot ?? ctx.data.lotSize;
+        return s.lots > 0 ? { leg, lots: s.lots, qty: s.lots * qpl, label: oc.symbol, contract: oc } : null;
+      }).filter(Boolean);
+    },
     act: async (kind, { id, price }) => {
       const c = chartContract(ctx, view);
       try {
@@ -1138,6 +1149,15 @@ function levelOptions(ctx, view) {
           toast(`${side} ${stop ? 'stop' : 'limit'} ${lotsOf(qty)} lot${lotsOf(qty) === 1 ? '' : 's'} ${stop ? (side === 'BUY' ? 'when it rises to' : 'when it falls to') : '@'} ${price} placed at ${where} (${r.order?.id || 'pending'}).`, 'ok');
         } else if (kind === 'move-order') { await put(`/orders/${encodeURIComponent(id)}`, { price }); toast(`Order moved to ${price}.`, 'ok'); }
         else if (kind === 'cancel-order') { await del(`/orders/${encodeURIComponent(id)}`); toast('Order cancelled.', 'ok'); }
+        else if (kind === 'index-ce' || kind === 'index-pe') {
+          const leg = kind.slice(6), l = levelOptions(ctx, view).indexOrders().find(x => x.leg === leg);
+          if (!l) throw new Error(`No ${leg.toUpperCase()} contract on the chart, or no lots on its ticket.`);
+          const { alert } = await post('/alerts', { segment: c.segment, securityId: c.securityId, symbol: c.symbol, price, ltp: c.ltp,
+            order: { securityId: l.contract.securityId, segment: l.contract.segment, symbol: l.contract.symbol, side: 'BUY', qty: l.qty, lots: l.lots, leg } });
+          setLocalAlerts(ctx, list => [...list.filter(a => a.id !== alert.id), alert]);
+          const way = c.ltp > 0 && price < c.ltp ? 'falls to' : 'rises to';
+          toast(`Set: buy ${l.lots} lot${l.lots === 1 ? '' : 's'} ${l.contract.symbol} at market when ${c.symbol} ${way} ${price} (today only).`, 'ok');
+        }
         else if (kind === 'alert') {
           const { alert } = await post('/alerts', { segment: c.segment, securityId: c.securityId, symbol: c.symbol, price, ltp: c.ltp });
           setLocalAlerts(ctx, list => [...list.filter(a => a.id !== alert.id), alert]);   // the purple line at once
@@ -1153,7 +1173,7 @@ function levelOptions(ctx, view) {
 function setLocalAlerts(ctx, fn) {
   const d = ctx.state?.dash;
   if (!d) return;
-  d.alerts = fn(d.alerts || []).map(({ id, segment, securityId, price, dir }) => ({ id, segment, securityId: String(securityId), price, dir }));
+  d.alerts = fn(d.alerts || []).map(({ id, segment, securityId, price, dir, order }) => ({ id, segment, securityId: String(securityId), price, dir, ...(order && { order }) }));
   refreshChartPositions(ctx);
 }
 /** First alert: ask for browser notifications, and wake the Android app's alarm service (it rings even when closed). */

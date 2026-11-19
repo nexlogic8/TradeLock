@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ShieldCore
 import com.nexlogic.tradelock.ui.components.ambient
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -276,9 +277,8 @@ private fun ProtectionHero(d: Dash?, on: Int, total: Int, onToggle: () -> Unit) 
     val tint = if (running) Tl.mint else Tl.amber
     TlCard(Modifier.fillMaxWidth(), padding = 20.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(tint.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Icon(if (locked) Icons.Rounded.Lock else Icons.Rounded.Shield, null, tint = tint, modifier = Modifier.size(26.dp))
-            }
+            // The animated protection emblem: sweeping and pulsing while protection watches the account.
+            ShieldCore(on = running, size = 64.dp, locked = locked)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text("Protection", style = TlType.title, color = Tl.text)

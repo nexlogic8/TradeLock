@@ -49,7 +49,8 @@ function lockRow(a) {
 
 // Paper trading as the first broker tab, with the paper wallet's balance.
 async function withPaper(d) {
-  d.catalog = [{ id: 'paper', name: 'Paper', status: 'available' }, ...d.catalog.filter(b => b.id !== 'paper')];
+  // The brokers first (Dhan on the left), Paper last on the right.
+  d.catalog = [...d.catalog.filter(b => b.id !== 'paper'), { id: 'paper', name: 'Paper', status: 'available' }];
   d.paper = await get('/paper/wallet').catch(() => null);
   return d;
 }
@@ -74,12 +75,10 @@ function paperView(ctx, a, real) {
           <div class="cap"><b>Algo Trading and risk rules</b>${pill('Available')}<p>Strategies, stop-loss, exits, your Risk rules and the day lock run exactly as with real money; Overview and P&amp;L show the paper account.</p></div>
         </div>
         <div class="row mt">
-          ${!inUse ? html`<button class="btn btn-primary" id="paper-use">${icon('play')}Use paper trading</button>`
-            : real ? html`<button class="btn" id="paper-real">${icon('link')}Switch to real money (${name})</button>` : ''}
           <a class="btn btn-ghost" href="/wallet" data-nav="wallet">${icon('wallet')}Set paper balance</a>
           <a class="btn btn-ghost" href="/algo" data-nav="algo">AI Algo Trading</a>
         </div>
-        ${!real ? html`<p class="muted small mt">To trade with real money, open the <b>Dhan</b> tab and connect your account. It starts on Paper, and Real is one switch away.</p>` : ''}
+        <p class="muted small mt">${real ? html`Choosing a tab switches: <b>Paper</b> trades the paper wallet, <b>${name}</b> trades real money.` : html`To trade with real money, open the <b>Dhan</b> tab and connect your account.`}</p>
       </div></div>
     </div>`;
 }
@@ -93,7 +92,7 @@ export default {
   layout: 'app',
   auth: true,
 
-  // Paper trading is the first tab: the paper wallet at live prices (no broker needed), and the default.
+  // Paper trading is the last tab (right of the brokers): the paper wallet at live prices, no broker needed.
   async load() { return withPaper(await get('/brokers')); },
 
   view(ctx) {

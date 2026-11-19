@@ -60,5 +60,6 @@ test('chart "+" menu: a horizontal line at a price is an ordinary drawing (selec
   assert.match(src, /addHorizontal\(price\) \{/);
   const lv = (await import('node:fs')).readFileSync(new URL('../../web/js/pages/scalper-chart-levels.js', import.meta.url), 'utf8');
   assert.match(lv, /data-lvl="hline"/, 'the menu offers it');
-  assert.match(lv, /ALERT \$\{a\.dir === 'below' \? '≤' : '≥'\}/, 'alerts: a labelled purple line (bell drawn on the canvas)');
+  assert.match(lv, /\$\{a\.order \? '' : 'ALERT '\}\$\{a\.dir === 'below' \? '≤' : '≥'\}/, 'alerts: a labelled purple line (bell drawn on the canvas); an index order alert says what it buys');
+  assert.match(lv, /→ BUY \$\{/, 'an index order alert is labelled with the contract side and lots it buys');
 });

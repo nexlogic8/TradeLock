@@ -72,9 +72,10 @@ async function verifyCreds(broker, clientId, accessToken) {
 
 export function brokerRoutes(r) {
   // A Paper account (no broker) is not a broker connection: the page offers Connect, which replaces it.
-  // StoxKart (beta) is linkable for administrators only: everyone else gets it as a coming-soon broker.
+  // Administrators see every broker (StoxKart beta, planned ones). Everyone else only what they can connect today
+  // (Dhan): the website and the app add the Paper tab themselves, so their tabs are Paper and Dhan.
   r.get('/api/brokers', ctx => ({
-    catalog: stoxkartAllowed(ctx.user) ? CATALOG : CATALOG.map(b => (b.id === 'stoxkart' ? { ...b, link: false } : b)),
+    catalog: stoxkartAllowed(ctx.user) ? CATALOG : CATALOG.filter(b => b.status === 'available'),
     account: accountSummary(accountFor(ctx.user.id)),
     links: { stoxkart: stoxkartAllowed(ctx.user) ? stoxkartLink(ctx.user.id) : { linked: false } },
     staticIp: staticIpView(ctx.user.id),

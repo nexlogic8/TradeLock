@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +83,9 @@ private class ChartGeometry {
     val dragHits = mutableListOf<Pair<String, androidx.compose.ui.geometry.Rect>>()
     /** Tappable cells of broker-style labels (add TP / SL, exit). */
     val actionHits = mutableListOf<Pair<String, androidx.compose.ui.geometry.Rect>>()
+    /** The "+" at the crosshair's price (tap: the level menu), and that price. */
+    var plusHit: androidx.compose.ui.geometry.Rect? = null
+    var plusPrice = 0.0
     fun price(y: Float) = if (plotBottom > top) hi - (y - top) / (plotBottom - top) * (hi - lo) else 0.0
     fun y(p: Double) = (top + (hi - p) / (hi - lo) * (plotBottom - top)).toFloat()
 }
@@ -107,6 +111,11 @@ fun CandleChart(
     studies: List<Study> = Study.DEFAULT,
     /** Strategy signals: arrows and dots on their candles (a marker between candles goes on the next one). */
     markers: List<ChartMarker> = emptyList(),
+    /**
+     * The level menu (as the website's "+"): tap the chart for a crosshair with a "+" at its price on the axis; tapping it
+     * (or a long press) opens this menu in a popup next to that price. dismiss() closes it.
+     */
+    menu: (@Composable (price: Double, dismiss: () -> Unit) -> Unit)? = null,
 ) {
     val measurer = rememberTextMeasurer()
     var visible by remember { mutableFloatStateOf(60f) }      // bars across the width
@@ -116,6 +125,8 @@ fun CandleChart(
     var manual by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var cross by remember { mutableStateOf<Offset?>(null) }
     var drag by remember { mutableStateOf<Pair<String, Double>?>(null) }   // level being dragged → its price now
+    var menuAt by remember { mutableStateOf<Pair<Double, Offset>?>(null) }   // the open level menu: its price, where ("+")
+    val menuContent by androidx.compose.runtime.rememberUpdatedState(menu)
     val geo = remember { ChartGeometry() }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val currentLevels by androidx.compose.runtime.rememberUpdatedState(levels)
@@ -130,8 +141,9 @@ fun CandleChart(
     val lines = remember(candles, studies) { studies.flatMap { computeStudy(it, candles) } }
     val tagged = lines.filter { it.tag }.take(4)
 
+    androidx.compose.foundation.layout.Box(modifier.fillMaxWidth().then(if (fill) Modifier.fillMaxHeight() else Modifier.height(height))) {
     Canvas(
-        modifier.fillMaxWidth().then(if (fill) Modifier.fillMaxHeight() else Modifier.height(height))
+        Modifier.fillMaxSize()
             // Two fingers zoom; one finger sideways scrolls the bars, up / down moves the prices, and up / down on the price
             // axis stretches the price scale.
             // (The tap detector consumes every touch-down, so this one does not require an unconsumed down; a level being
@@ -194,6 +206,13 @@ fun CandleChart(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { p ->
+                        // The "+" at the crosshair's price: the level menu there.
+                        val plus = geo.plusHit
+                        if (menuContent != null && cross != null && plus != null && plus.inflate(10.dp.toPx()).contains(p)) {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            menuAt = geo.plusPrice to plus.center
+                            return@detectTapGestures
+                        }
                         val hit = geo.removeHits.firstOrNull { it.second.inflate(8.dp.toPx()).contains(p) }
                         val act = if (hit == null) geo.actionHits.firstOrNull { it.second.inflate(4.dp.toPx()).contains(p) } else null
                         if (hit != null) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); remove(hit.first) }
@@ -202,7 +221,10 @@ fun CandleChart(
                     },
                     // double tap: back to the live bar (with its gap) at the normal zoom
                     onDoubleTap = { cross = null; scrollBack = LIVE_GAP; visible = 60f; manual = null },
-                    onLongPress = { p -> longPress?.let { cb -> haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); cb(geo.price(p.y)) } },
+                    onLongPress = { p ->
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        if (menuContent != null) { cross = p; menuAt = geo.price(p.y) to p } else longPress?.let { cb -> cb(geo.price(p.y)) }
+                    },
                 )
             }
             // Inner-most handler: claims a touch that starts on a draggable level before zoom / scroll see it.
@@ -467,7 +489,35 @@ fun CandleChart(
             val t = measurer.measure(info, axis.copy(color = Tl.text))
             drawRoundRect(Tl.raised, Offset(6.dp.toPx(), top), Size(t.size.width + 12.dp.toPx(), t.size.height + 8f), CornerRadius(8f))
             drawText(t, topLeft = Offset(12.dp.toPx(), top + 4f))
+            if (menu != null) {
+                // the crosshair's price on the axis, and the "+" beside it (as on the website)
+                val py = p.y.coerceIn(top, volTop - 6.dp.toPx())
+                val price = geo.price(py)
+                val pt = measurer.measure("%.${decimals}f".format(price), axis.copy(color = Color(0xFF04261F), fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                drawRoundRect(Tl.mint, Offset(right + 2.dp.toPx(), py - pt.size.height / 2f - 3), Size(size.width - right - 2.dp.toPx(), pt.size.height + 6f), CornerRadius(5f))
+                drawText(pt, topLeft = Offset(right + 6.dp.toPx(), py - pt.size.height / 2f))
+                val r = 13.dp.toPx(); val c0 = Offset(right - r - 4.dp.toPx(), py)
+                drawCircle(Color.Black.copy(alpha = 0.35f), r + 3.dp.toPx(), c0)
+                drawCircle(Tl.mint, r, c0)
+                val a = 5.5.dp.toPx(); val w = 2.2.dp.toPx()
+                drawLine(Color(0xFF04261F), Offset(c0.x - a, c0.y), Offset(c0.x + a, c0.y), w, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawLine(Color(0xFF04261F), Offset(c0.x, c0.y - a), Offset(c0.x, c0.y + a), w, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                geo.plusHit = androidx.compose.ui.geometry.Rect(c0.x - r, c0.y - r, c0.x + r, c0.y + r); geo.plusPrice = price
+            }
         }
+        if (cross == null) geo.plusHit = null
+    }
+    // The level menu: a popup beside the "+" (left of it, kept on the screen), closed by a tap outside or an action.
+    menuAt?.let { (price, at) ->
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val menuW = with(density) { 256.dp.roundToPx() }
+        androidx.compose.ui.window.Popup(
+            offset = androidx.compose.ui.unit.IntOffset((at.x.roundToInt() - menuW - with(density) { 12.dp.roundToPx() }).coerceAtLeast(with(density) { 4.dp.roundToPx() }),
+                (at.y.roundToInt() - with(density) { 28.dp.roundToPx() }).coerceAtLeast(0)),
+            onDismissRequest = { menuAt = null },
+            properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+        ) { menuContent?.invoke(price) { menuAt = null; cross = null } }
+    }
     }
 }
 

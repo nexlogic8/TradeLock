@@ -8,6 +8,7 @@ import { toast, toastError } from '../ui/toast.js';
 import { builtInFor, sharedRulesFor } from './strategy-library.js';
 import { artInfo } from './strategy-art.js';
 import { confirmAlgoStart, noticeDialog } from '../ui/dialog.js';
+import { aiCore } from '../ui/cores.js';
 import { raw } from '../core/dom.js';
 
 const inr = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
@@ -255,6 +256,7 @@ export default {
     const gridStrats = STRATEGIES.filter(s => GRID_KEY[s.key]), otherStrats = STRATEGIES.filter(s => !GRID_KEY[s.key]);
     return html`
       <section class="panel pad algo-control ${running ? 'running' : ''}">
+        ${aiCore(running, running && d.marketOpen)}
         <div class="algo-control-copy">
           <span class="pill ${running ? '' : 'ice'}"><span class="dot ${running && d.marketOpen ? 'pulse' : ''}"></span>${state[0]}</span>
           <h2>Algo Trading${a?.paperMode ? html` <span class="pill ice">Paper</span>` : ''}</h2>

@@ -308,3 +308,45 @@ html, body { overscroll-behavior-y: contain; }
 .chart .chart-tip text { fill: var(--muted); font-size: 11px; }
 .chart .chart-tip .chart-tip-value { font-size: 14px; letter-spacing: .2px; }
 @media (prefers-reduced-motion: reduce) { .chart .chart-tip, .chart .chart-hover circle { transition: none; } }
+
+/* ---- Animated emblems (ui/cores.js), as in the Android app: phases come from the clock, so redraws never jump ---- */
+@keyframes tl-spin { to { transform: rotate(360deg); } }
+@keyframes tl-spin-rev { to { transform: rotate(-360deg); } }
+@keyframes tl-breathe { from { opacity: .55; transform: scale(.94); } to { opacity: 1; transform: scale(1.04); } }
+@keyframes tl-ping { 0% { transform: scale(.62); opacity: .65; } 100% { transform: scale(1.28); opacity: 0; } }
+/* AI core */
+.ai-core { position: relative; width: 84px; height: 84px; flex: none; display: grid; place-items: center; }
+.ai-core > span { position: absolute; border-radius: 50%; }
+.ai-core-glow { inset: 0; background: radial-gradient(closest-side, rgba(255, 186, 82, .38), transparent); opacity: 0; }
+.ai-core-ring { inset: 4px; border: 4px solid rgba(255, 255, 255, .12); }
+.ai-core-b { inset: 15px; border-width: 2px; border-color: transparent; }
+.ai-core-center { inset: 21px; display: grid; place-items: center; background: radial-gradient(circle, var(--surface-hover, #172234), var(--panel-2)); color: var(--dim); box-shadow: inset 0 0 0 1px var(--line-2); }
+.ai-core-center svg { width: 22px; height: 22px; }
+.ai-core.on .ai-core-glow { animation: tl-breathe 1.4s ease-in-out infinite alternate; animation-delay: var(--breathe); }
+.ai-core.on .ai-core-ring { border: 0; -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px)); mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px)); }
+.ai-core.on .ai-core-a { background: conic-gradient(from 0deg, transparent 0 16%, #FFBA52 46%, #A78BFA 68%, #2DE0C0 83%, transparent 83%); animation: tl-spin 6s linear infinite; animation-delay: var(--spin-a); }
+.ai-core.on .ai-core-b { -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  background: conic-gradient(from 0deg, transparent 0, rgba(45, 224, 192, .75) 30%, rgba(167, 139, 250, 0) 56%, transparent 56%); animation: tl-spin-rev 3.75s linear infinite; animation-delay: var(--spin-b); }
+.ai-core.live .ai-core-a { animation-duration: 2.4s; }
+.ai-core.live .ai-core-b { animation-duration: 1.5s; }
+.ai-core.on .ai-core-center { background: radial-gradient(circle, #3A2A10, var(--panel-2)); color: var(--amber); box-shadow: 0 0 18px rgba(255, 186, 82, .25), inset 0 0 0 1px rgba(255, 186, 82, .35); }
+/* Protection shield */
+.shield-core { position: relative; width: 84px; height: 84px; flex: none; display: grid; place-items: center; }
+.shield-core.sm { width: 30px; height: 30px; }
+.shield-core > span { position: absolute; border-radius: 50%; }
+.shield-core-sweep { inset: 0; opacity: 0; }
+.shield-core-ping { inset: 8px; border: 2px solid var(--mint); opacity: 0; }
+.shield-core-badge { inset: 18px; display: grid; place-items: center; color: var(--dim); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.shield-core.sm .shield-core-badge { inset: 3px; }
+.shield-core-badge svg { width: 24px; height: 24px; }
+.shield-core.sm .shield-core-badge svg { width: 14px; height: 14px; }
+.shield-core.on .shield-core-sweep { opacity: 1; background: conic-gradient(from 0deg, transparent 0 62%, rgba(56, 235, 180, .05) 70%, rgba(56, 235, 180, .55) 100%);
+  -webkit-mask: radial-gradient(closest-side, #000 98%, transparent); mask: radial-gradient(closest-side, #000 98%, transparent); animation: tl-spin 3.2s linear infinite; animation-delay: var(--sweep); }
+.shield-core.on .shield-core-ping { animation: tl-ping 2.4s ease-out infinite; animation-delay: var(--ping); }
+.shield-core.on .shield-core-ping.p2 { animation-delay: calc(var(--ping) - 1200ms); }
+.shield-core.on .shield-core-badge { color: #04261F; background: linear-gradient(180deg, #4BF0D2, #1FC7A8); box-shadow: 0 0 22px var(--mint-glow); }
+.shield-core.sm.on .shield-core-ping, .shield-core.sm.on .shield-core-sweep { inset: -4px; }
+@media (prefers-reduced-motion: reduce) { .ai-core *, .shield-core * { animation: none !important; } }
+.panel-title.prot-title { display: inline-flex; align-items: center; gap: 10px; }
+/* The emblems keep their own icon colour (titles colour their icons mint, which hid the shield on the mint badge). */
+.shield-core .shield-core-badge svg, .ai-core .ai-core-center svg { stroke: currentColor; color: inherit; }

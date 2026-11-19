@@ -195,7 +195,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     // super: TP / SL are legs of a Dhan Super Order (both at the broker; a removed leg cannot be set again).
     brackets: bracketsFor(userId).map(({ securityId, tp, sl, slOrderId, superId }) => ({ securityId, tp, sl, slAtBroker: !!slOrderId || !!superId, super: !!superId, slOrderId: slOrderId ?? null })),
     // Price alerts waiting on Power Scalper charts (drawn as level markers).
-    alerts: activeAlerts(userId).map(({ id, segment, securityId, price, dir }) => ({ id, segment, securityId, price, dir })),
+    // order: an index alert that buys an option when the level is reached (its marker shows what it buys).
+    alerts: activeAlerts(userId).map(({ id, segment, securityId, price, dir, order }) => ({ id, segment, securityId, price, dir, ...(order && { order: { symbol: order.symbol, lots: order.lots, qty: order.qty, leg: order.leg } }) })),
     orders: book.orders,
     funds: book.funds,
     syncedAt: book.at,

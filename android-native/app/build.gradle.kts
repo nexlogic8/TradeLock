@@ -18,8 +18,8 @@ android {
         applicationId = "in.tradelock.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 108
-        versionName = "2.1.7"
+        versionCode = 114
+        versionName = "2.2.3"
         buildConfigField("String", "BASE_URL", "\"https://tradelock.in\"")
         buildConfigField("String", "HOST", "\"tradelock.in\"")
     }

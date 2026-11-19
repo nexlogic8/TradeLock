@@ -144,12 +144,12 @@ before(async () => {
 });
 after(() => server.close());
 
-test('StoxKart (beta) is for administrators: other users see it coming soon and cannot link or trade through it', async () => {
+test('StoxKart (beta) and planned brokers are for administrators: other users see Paper and Dhan, and cannot link StoxKart', async () => {
   const res = await fetch(base + '/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'regular@example.com', password: 'longpassword' }) });
   const theirs = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
   const as = async (method, path, body) => { const r = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', cookie: theirs }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
   const list = await as('GET', '/api/brokers');
-  assert.equal(list.body.catalog.find(b => b.id === 'stoxkart').link, false, 'a coming-soon broker for them');
+  assert.deepEqual(list.body.catalog.map(b => b.id).filter(id => id !== 'mock'), ['dhan'], 'their broker tabs: Paper (added by the page) and Dhan only');
   assert.deepEqual(list.body.links.stoxkart, { linked: false });
   for (const [m, path, body] of [['GET', '/api/brokers/links/stoxkart'], ['PUT', '/api/brokers/links/stoxkart', { clientId: 'SV1' }], ['POST', '/api/brokers/links/stoxkart/test'],
     ['DELETE', '/api/brokers/links/stoxkart'], ['POST', '/api/brokers/links/stoxkart/trade-via', { on: true }]]) {
@@ -159,6 +159,7 @@ test('StoxKart (beta) is for administrators: other users see it coming soon and 
   }
   const mine = await call('GET', '/api/brokers');
   assert.equal(mine.body.catalog.find(b => b.id === 'stoxkart').link, true, 'administrators can link it');
+  assert.ok(['zerodha', 'upstox', 'angelone'].every(id => mine.body.catalog.some(b => b.id === id)), 'administrators also see the planned brokers');
 });
 
 test('trade through StoxKart: needs a verified link and nothing open; then orders go to StoxKart, data stays on Dhan', async () => {

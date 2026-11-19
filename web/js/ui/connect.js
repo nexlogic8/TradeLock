@@ -1,6 +1,7 @@
 // Broker connection flow (choose broker, static IP step, access token, live checks). Shown on Broker accounts.
 import { html, $, $$, on } from '../core/dom.js';
-import { post } from '../core/api.js';
+import { get, post } from '../core/api.js';
+import { store } from '../core/store.js';
 import { refreshUser } from '../core/session.js';
 import { icon } from './icons.js';
 import { pill, formError, brokerLogo } from './parts.js';
@@ -108,6 +109,24 @@ export function bindConnect(ctx, onDone) {
       if (id !== ui.broker) {
         ui.tabFrom = ui.tabAt || null;   // slide from where the highlight is now
         keep(); ui.broker = id; ui.error = null; ctx.paint();
+      }
+      // Choosing a tab is the decision: Paper turns paper trading on, the broker's tab turns real money back on.
+      // No second button. If it cannot switch now (something still open), the tab returns to the mode in use.
+      const cur = ctx.state?.dash?.broker ?? ctx.data.account, real = cur && cur.broker !== 'paper' ? cur : null;
+      const onPaper = !cur || cur.broker === 'paper' || !!cur.paperMode;
+      if ((id === 'paper' && !onPaper) || (id === 'paper' && !cur) || (real && id === real.broker && onPaper)) {
+        const toPaper = id === 'paper';
+        ui.viaBusy = true; ctx.paint();
+        try {
+          await (real ? post(`/brokers/${real.id}/paper`, { on: toPaper }) : post('/paper/account'));
+          toast(toPaper ? 'Paper trading on: the paper wallet at live prices, no orders to any broker.' : `Real trading on: your ${real.label === 'Paper' ? 'broker' : real.label} account, real money.`, toPaper ? 'ok' : 'warn');
+          store.set({ dash: await get('/dashboard') });
+          if (ctx.reload) await ctx.reload();
+        } catch (err) {
+          toastError(err);
+          ui.broker = onPaper ? 'paper' : real?.broker;   // stays on the mode actually in use
+        } finally { ui.viaBusy = false; ctx.paint(); }
+        return;
       }
       // Choosing Dhan or a verified StoxKart link also makes it the broker the orders go to.
       const a = account(ctx), link = ctx.data.links?.stoxkart;
