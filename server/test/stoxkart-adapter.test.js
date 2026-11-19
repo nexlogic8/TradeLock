@@ -2,6 +2,8 @@
 // "trade through StoxKart" switch: Dhan keeps the market data, StoxKart gets every order.
 process.env.DB_PATH = ':memory:';
 process.env.MONITOR = '0';
+// StoxKart is in beta for administrators only: the route tests' user is one.
+process.env.ADMIN_EMAILS = 'skt@example.com';
 const { test, before, after } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
 const { createServer } = await import('node:http');
@@ -141,6 +143,23 @@ before(async () => {
   upsertAccount(uid, { broker: 'dhan', clientId: 'C777', accessToken: 'test-token-not-real-0123456789' });
 });
 after(() => server.close());
+
+test('StoxKart (beta) is for administrators: other users see it coming soon and cannot link or trade through it', async () => {
+  const res = await fetch(base + '/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'regular@example.com', password: 'longpassword' }) });
+  const theirs = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+  const as = async (method, path, body) => { const r = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', cookie: theirs }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  const list = await as('GET', '/api/brokers');
+  assert.equal(list.body.catalog.find(b => b.id === 'stoxkart').link, false, 'a coming-soon broker for them');
+  assert.deepEqual(list.body.links.stoxkart, { linked: false });
+  for (const [m, path, body] of [['GET', '/api/brokers/links/stoxkart'], ['PUT', '/api/brokers/links/stoxkart', { clientId: 'SV1' }], ['POST', '/api/brokers/links/stoxkart/test'],
+    ['DELETE', '/api/brokers/links/stoxkart'], ['POST', '/api/brokers/links/stoxkart/trade-via', { on: true }]]) {
+    const r = await as(m, path, body);
+    assert.equal(r.status, 403, `${m} ${path}`);
+    assert.equal(r.body.code, 'STOXKART_BETA');
+  }
+  const mine = await call('GET', '/api/brokers');
+  assert.equal(mine.body.catalog.find(b => b.id === 'stoxkart').link, true, 'administrators can link it');
+});
 
 test('trade through StoxKart: needs a verified link and nothing open; then orders go to StoxKart, data stays on Dhan', async () => {
   setBook(uid, { positions: [], orders: [], at: Date.now() });

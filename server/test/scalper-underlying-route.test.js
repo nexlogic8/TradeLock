@@ -21,7 +21,9 @@ test('index definitions and default expiry per index',()=>{
   assert.equal(resolveNiftyExpiry(undefined,list,monday,'nearest'),'2026-10-20','BANKNIFTY/SENSEX: nearest');
 });
 
-test('SENSEX chain loads from Dhan index 51 with BSE contracts and the BSE lot size',async()=>{
+test('SENSEX chain loads from Dhan index 51 with BSE contracts and the BSE lot size',async t=>{
+  // The fixtures' expiries are in late October 2026: the clock is that Monday, so they are still upcoming.
+  const realNow=Date.now; t.mock.method(Date,'now',()=>Date.parse('2026-10-19T10:00:00+05:30')+(realNow()%1000));
   const calls=[];
   const adapter={
     async optionExpiries(args){ calls.push(['expiries',args.underlyingScrip]); return ['2026-10-22','2026-10-29']; },
@@ -52,7 +54,9 @@ test('SENSEX chain loads from Dhan index 51 with BSE contracts and the BSE lot s
   } finally { delete globalThis.__underlyingRouteTest; }
 });
 
-test('a Dhan 5xx outage serves the last good chain (marked stale) instead of failing the page',async()=>{
+test('a Dhan 5xx outage serves the last good chain (marked stale) instead of failing the page',async t=>{
+  // The fixtures' expiries are in late October 2026: the clock is that Monday, so they are still upcoming.
+  const realNow=Date.now; t.mock.method(Date,'now',()=>Date.parse('2026-10-19T10:00:00+05:30')+(realNow()%1000));
   let down=false, chainCalls=0;
   const fail=()=>Object.assign(new Error('Dhan returned HTTP 500'),{code:'BROKER'});
   const adapter={
@@ -81,7 +85,9 @@ test('a Dhan 5xx outage serves the last good chain (marked stale) instead of fai
   } finally { delete globalThis.__underlyingRouteTest; }
 });
 
-test('preloaded indices stay valid together; the named index picks NSE or BSE for a shared id',async()=>{
+test('preloaded indices stay valid together; the named index picks NSE or BSE for a shared id',async t=>{
+  // The fixtures' expiries are in late October 2026: the clock is that Monday, so they are still upcoming.
+  const realNow=Date.now; t.mock.method(Date,'now',()=>Date.parse('2026-10-19T10:00:00+05:30')+(realNow()%1000));
   const calls=[];
   const adapter={
     async optionExpiries({underlyingScrip}){ return underlyingScrip===51?['2026-10-22']:['2026-10-20','2026-10-27']; },

@@ -1,6 +1,7 @@
 // Power Scalper: price levels on a chart, TradingView style.
 //   Hover the chart: a round "+" follows the cursor at the right edge, at the crosshair's price. Click it for
-//   Buy limit / Sell limit (this ticket's lots) or Alert at that price.
+//   Buy / Sell (this ticket's lots) or Alert at that price. Below the price a buy is a limit (waits for the dip) and a
+//   sell a stop; above it a buy is a stop (waits for the breakout) and a sell a limit, as on any broker terminal.
 //   Pending limit orders and price alerts of this contract are drawn as level markers: a dashed line and a pill
 //   ("BUY LMT 7 @ 2,750.00 │ ✕", "🔔 2,750.00 │ ✕"). Drag a marker to move the order / alert; ✕ cancels it.
 import { pauseScroll, resumeScroll } from './scalper-chart-draw.js';
@@ -132,8 +133,8 @@ export class LevelOverlay {
     const ltp = c?.ltp, rel = ltp > 0 ? (p > ltp ? 'above' : p < ltp ? 'below' : 'at') : '';
     this.menuPrice = p;
     this.menu.innerHTML = `<div class="sc-lvl-head"><b>${fmt}</b>${rel ? `<small>${rel} LTP ${this.fmt(ltp)}</small>` : ''}</div>
-      ${size ? `<button type="button" role="menuitem" data-lvl="buy" class="buy">${UP}<span>Buy limit</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} @ ${fmt}</em></button>
-      <button type="button" role="menuitem" data-lvl="sell" class="sell">${DOWN}<span>Sell limit</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} @ ${fmt}</em></button>` : ''}
+      ${size ? `<button type="button" role="menuitem" data-lvl="buy" class="buy">${UP}<span>Buy ${rel === 'above' ? 'stop' : 'limit'}</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} ${rel === 'above' ? 'when it rises to' : '@'} ${fmt}</em></button>
+      <button type="button" role="menuitem" data-lvl="sell" class="sell">${DOWN}<span>Sell ${rel === 'below' ? 'stop' : 'limit'}</span><em>${size.lots} lot${size.lots === 1 ? '' : 's'} ${rel === 'below' ? 'when it falls to' : '@'} ${fmt}</em></button>` : ''}
       <button type="button" role="menuitem" data-lvl="alert" class="alert">${BELL}<span>Alert</span><em>when ${c?.ltp > 0 && p < c.ltp ? 'falls to' : 'reaches'} ${fmt}</em></button>
       <button type="button" role="menuitem" data-lvl="hline" class="hline">${HLINE}<span>Horizontal line</span><em>draw at ${fmt}</em></button>`;
     const box = this.host.getBoundingClientRect(), screenHeight = window.innerHeight;
@@ -400,7 +401,7 @@ export class LevelOverlay {
         const p = this.priceOf('order', o), y = this.series.priceToCoordinate(p);
         if (y == null) continue;
         const dragging = this.drag?.kind === 'order' && this.drag.id === o.id;
-        marker(y, o.side === 'BUY' ? BUY : SELL, `${o.side} LMT ${o.lots ?? o.qty}${o.lots != null ? (o.lots === 1 ? ' lot' : ' lots') : ''} @ ${this.fmt(p)}${this.busy.has(`o${o.id}`) ? '  …' : ''}`, 'cancel-order', o.id, dragging, [6, 4]);
+        marker(y, o.side === 'BUY' ? BUY : SELL, `${o.side} ${o.stop ? 'STOP' : 'LMT'} ${o.lots ?? o.qty}${o.lots != null ? (o.lots === 1 ? ' lot' : ' lots') : ''} @ ${this.fmt(p)}${this.busy.has(`o${o.id}`) ? '  …' : ''}`, 'cancel-order', o.id, dragging, [6, 4]);
       }
       for (const a of this.alerts) {
         const p = this.priceOf('alert', a), y = this.series.priceToCoordinate(p);

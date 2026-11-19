@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -95,13 +96,13 @@ fun JournalScreen(vm: AppViewModel, onBack: () -> Unit) {
     val entries = data?.arr("entries")?.mapNotNull { (it as? JsonObject)?.let(::entryOf) }.orEmpty()
     val st = data?.obj("stats")
 
-    Box(Modifier.fillMaxSize().background(Tl.bg)) {
+    Box(Modifier.fillMaxSize().ambient()) {
         LazyColumn(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
+                    Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
                     Spacer(Modifier.width(12.dp))
-                    Text("Journal", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+                    Text("Journal", style = TlType.page)
                 }
             }
             item {

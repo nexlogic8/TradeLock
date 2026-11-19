@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.alarm;
 
+import android.annotation.SuppressLint;
 import com.nexlogic.tradelock.BuildConfig;
 import com.nexlogic.tradelock.MainActivity;
 import com.nexlogic.tradelock.R;
@@ -15,6 +16,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.window.OnBackInvokedDispatcher;
+import androidx.core.content.ContextCompat;
 import android.view.Gravity;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -95,12 +98,15 @@ public class AlarmActivity extends Activity {
     col.addView(open);
     setContentView(col);
 
-    IntentFilter f = new IntentFilter(ACTION_CLOSE);
-    if (Build.VERSION.SDK_INT >= 33) registerReceiver(close, f, Context.RECEIVER_NOT_EXPORTED);
-    else registerReceiver(close, f);
+    // Not exported: only TradeLock's own alarm service closes this screen.
+    ContextCompat.registerReceiver(this, close, new IntentFilter(ACTION_CLOSE), ContextCompat.RECEIVER_NOT_EXPORTED);
+    // Back does not dismiss the alarm (only the Stop buttons do). From Android 13 a back gesture skips onBackPressed.
+    if (Build.VERSION.SDK_INT >= 33) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_OVERLAY, () -> { });
   }
 
-  // Back does not dismiss the alarm: only the Stop buttons do.
+  // Back does not dismiss the alarm: only the Stop buttons do (Android 12 and older; newer: the callback above).
+  @SuppressWarnings("deprecation")
+  @SuppressLint("GestureBackNavigation")   // Android 13+ is handled by the OnBackInvokedCallback in onCreate
   @Override public void onBackPressed() { }
 
   @Override protected void onDestroy() { unregisterReceiver(close); super.onDestroy(); }

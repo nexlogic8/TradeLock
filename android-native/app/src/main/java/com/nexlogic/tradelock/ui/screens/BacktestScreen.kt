@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -141,12 +142,12 @@ fun BacktestScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) -> Uni
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
+                Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
                 Spacer(Modifier.width(12.dp))
-                Text("Backtest", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text, modifier = Modifier.weight(1f))
+                Text("Backtest", style = TlType.page, modifier = Modifier.weight(1f))
                 Text("All settings", style = TlType.label, color = Tl.mint, modifier = Modifier.tactile({ onOpen("backtest?web=1") }).padding(6.dp))
             }
         }

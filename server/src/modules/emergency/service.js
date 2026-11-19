@@ -8,6 +8,9 @@ import { dayState, patchDay } from '../risk/service.js';
 import { notify } from '../notifications/service.js';
 import { audit } from '../audit/service.js';
 import { RULE_NAMES } from '../rules/service.js';
+import { releaseSuper, releaseForExit } from '../brackets/service.js';
+import { exitAutoTrade } from '../scalper/autotrade.js';
+import { bracketsFor } from '../brackets/store.js';
 
 export const ACTIONS = ['pause', 'cancel', 'exit', 'killswitch'];
 const LABEL = {
@@ -65,6 +68,8 @@ async function execute(rec, acct) {
         patchDay(rec.userId, day, { paused: 1, pause_reason: reason });
         set(i, 'done', 'Orders placed in TradeLock are blocked. Exits are still allowed.');
       } else if (r.action === 'cancel') {
+        // Super Order legs (target / stop at Dhan) are cancelled through their own endpoint.
+        await Promise.all(bracketsFor(rec.userId).filter(b => b.superId).map(b => releaseSuper(rec.userId, acct, b.securityId)));
         const orders = getBook(rec.userId).orders;
         if (!orders.length) { set(i, 'done', 'No open orders to cancel.'); continue; }
         set(i, 'pending', `Cancelling ${orders.length} order(s)…`);
@@ -81,7 +86,18 @@ async function execute(rec, acct) {
         const positions = getBook(rec.userId).positions.filter(p => p.qty !== 0);
         if (!positions.length) { set(i, 'done', 'No open positions.'); continue; }
         set(i, 'pending', `Exit orders sent for ${positions.length} position(s). Waiting for broker confirmation…`);
-        const lines = await Promise.all(positions.map(p => exitOne(adapter, p)));
+        // Each position's target / stop at the broker first (Super Order legs or the stop-loss order): none trades after the
+        // exit, and the broker does not take the exit for a new short. A stop that already traded leaves nothing to exit.
+        const lines = await Promise.all(positions.map(async p => {
+          // An Algo Trading position: its own exit (stop-loss cancelled and confirmed first, then the sell).
+          if (exitAutoTrade(rec.userId, p.securityId, `Closed by ${rec.source.startsWith('rule:') ? `your ${RULE_NAMES[rec.source.slice(5)]}` : 'your emergency stop'}`))
+            return { ok: true, text: `${p.symbol}: closing through Algo Trading (its stop-loss is cancelled first)` };
+          const rel = await releaseForExit(rec.userId, acct, p.securityId).catch(() => ({ unknown: true }));
+          if (rel.closed) return { ok: true, text: `${p.symbol} already closed by its stop-loss` };
+          if (rel.unknown) return { ok: false, text: `${p.symbol}: its stop-loss order could not be confirmed cancelled, so no exit was sent (it could sell twice)` };
+          const left = Math.abs(p.qty) - (rel.filledQty || 0);
+          return left > 0 ? exitOne(adapter, { ...p, qty: Math.sign(p.qty) * left }) : { ok: true, text: `${p.symbol} closed by its stop-loss` };
+        }));
         const failed = lines.some(l => !l.ok);
         set(i, failed ? 'failed' : 'done', lines.map(l => l.text).join(' · ') + (failed ? '. Exit the rest manually in your broker app.' : '.'));
       }
@@ -115,7 +131,7 @@ export async function tryKillSwitch(userId, acct, reason, adapter = acct && adap
   try {
     // The broker's own reading decides: a lock TradeLock recorded while the broker's switch is OFF is switched on again.
     const brokerOn = adapter.getKillSwitch ? await adapter.getKillSwitch() : null;
-    if (brokerOn === true || brokerOn === false) setKillStatus(userId, { active: brokerOn, checkedAt: Date.now() });
+    if (brokerOn === true || brokerOn === false) setKillStatus(userId, { active: brokerOn, label: adapter.label, checkedAt: Date.now() });
     if (brokerOn === true || (s.ks_active_at && brokerOn !== false)) {
       if (!s.ks_active_at) patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
       return { status: 'active', text: `${adapter.label} kill switch is already ON.` };
@@ -128,7 +144,7 @@ export async function tryKillSwitch(userId, acct, reason, adapter = acct && adap
     }
     for (const o of snap.orders) await adapter.cancelOrder(o.id).catch(() => {});
     const { message } = await adapter.activateKillSwitch();
-    setKillStatus(userId, { active: true, checkedAt: Date.now() });
+    setKillStatus(userId, { active: true, label: adapter.label, checkedAt: Date.now() });
     patchDay(userId, day, { ks_armed: s.ks_armed || reason, ks_active_at: Date.now() });
     audit(userId, 'killswitch.activated', { reason });
     notify(userId, { kind: 'risk', level: 'critical', title: `${adapter.label} kill switch activated`,
@@ -155,7 +171,7 @@ export async function releaseKillSwitch(userId) {
   let message;
   try { ({ message } = await adapter.deactivateKillSwitch()); }
   catch (e) { throw bad('KILL_SWITCH', `${adapter.label} did not switch the kill switch off: ${e.message}`); }
-  setKillStatus(userId, { active: false, checkedAt: Date.now() });
+  setKillStatus(userId, { active: false, label: adapter.label, checkedAt: Date.now() });
   const day = ist().day, s = dayState(userId, day);
   patchDay(userId, day, { ks_armed: null, ks_active_at: null, ...(s.paused ? { paused: 0, pause_reason: null } : {}) });
   markDirty(userId);

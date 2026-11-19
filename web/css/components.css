@@ -176,6 +176,10 @@ table.tbl { width: 100%; border-collapse: collapse; min-width: 620px; }
 
 /* Inline broker logo (top-bar chip, card titles) */
 .b-mark { width: 18px; height: 18px; border-radius: 5px; background: #fff; padding: 1.5px; object-fit: contain; flex: none; }
+/* TradeLock's Paper mark is a full tile of its own (no white broker plate). */
+.b-mark.paper { background: none; padding: 0; }
+.b-logo.img.paper { background: none; padding: 0; border-color: transparent; }
+.b-logo.img.paper img { width: 100%; height: 100%; }
 .kpi .lbl.lbl-start { justify-content: flex-start; }
 /* KPI value with a leading icon (wallet amounts) */
 .val.val-ic { display: flex; align-items: center; gap: 12px; }
@@ -293,3 +297,14 @@ html, body { overscroll-behavior-y: contain; }
 @media (prefers-reduced-motion: reduce) { .tl-modal, .tl-dialog, .ks-modal, .ks-modal .ks-dialog { transition: none; animation: none; } }
 /* Rules: a locked Protection button reads as information, not an action */
 .prot-locked { color: var(--amber); border-color: rgba(245, 185, 66, .35); }
+
+/* Chart crosshair (lineChart hover): vertical line, glowing dot and a card that glides with the pointer. */
+.chart .chart-hit { cursor: crosshair; touch-action: pan-y; }
+.chart .chart-hover { opacity: 0; pointer-events: none; transition: opacity .18s ease; }
+.chart .chart-hover.on { opacity: 1; }
+.chart .chart-hover line { stroke-opacity: .7; }
+.chart .chart-hover circle { transition: cx .12s ease-out, cy .12s ease-out; }
+.chart .chart-tip { transition: transform .12s ease-out; filter: drop-shadow(0 8px 18px rgba(0, 0, 0, .35)); }
+.chart .chart-tip text { fill: var(--muted); font-size: 11px; }
+.chart .chart-tip .chart-tip-value { font-size: 14px; letter-spacing: .2px; }
+@media (prefers-reduced-motion: reduce) { .chart .chart-tip, .chart .chart-hover circle { transition: none; } }

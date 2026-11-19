@@ -881,4 +881,7 @@ export const MIGRATIONS = [
     triggered_price REAL
   );
   CREATE INDEX price_alerts_user ON price_alerts(user_id, triggered_at);`,
+  // A manual entry placed as a Dhan Super Order (entry + target + stop-loss legs held at Dhan, one cancels the other):
+  // its order id. Dragging TP / SL then moves the legs at Dhan; closing the position cancels what is left of it.
+  `ALTER TABLE position_brackets ADD COLUMN super_id TEXT;`,
 ];

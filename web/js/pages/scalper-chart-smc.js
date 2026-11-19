@@ -155,13 +155,20 @@ export class SmcPrimitive {
   constructor() { this.bars = []; this.show = { smc:true, fvg:true, ict:true, fib:true }; this.paneView = { zOrder: () => 'bottom', renderer: () => ({ draw: target => this.draw(target) }) }; }
   attached({ chart, series, requestUpdate }) { this.chart = chart; this.series = series; this.requestUpdate = requestUpdate; }
   detached() { this.chart = this.series = this.requestUpdate = null; }
-  setData(bars) { this.bars = bars || []; this.cache = null; this.requestUpdate?.(); }
+  // The live update passes the same (growing) array each time: keep the analysis, compute() decides when to redo it.
+  setData(bars) { if (bars !== this.bars) this.cache = null; this.bars = bars || []; this.requestUpdate?.(); }
   setVisible({ smc, fvg, ict, fib }) { this.show = { smc:!!smc, fvg:!!fvg, ict:!!ict, fib:!!fib }; this.requestUpdate?.(); }
   updateAllViews() {}
   paneViews() { return [this.paneView]; }
   compute(from, to) {
-    const key = `${from}:${to}:${this.bars.length}:${this.bars.at(-1)?.close}`;
-    if (this.cache?.key !== key) this.cache = { key, fvg:fairValueGaps(this.bars, from, to), smc:marketStructure(this.bars, from, to), ict:ictLevels(this.bars, from, to), fib:fibLevels(this.bars, from, to) };
+    // Smooth panning and live ticks: the range is widened to steps of 100 bars (a drag no longer re-analyses
+    // every frame; what lies off screen is simply clipped), and a tick that only moves the forming bar's close
+    // re-analyses at most twice a second. A new bar or a different range always does.
+    const last = this.bars.length - 1, step = 100;
+    from = Math.max(0, Math.floor(from / step) * step); to = Math.min(last, Math.ceil((to + 1) / step) * step);
+    const shape = `${from}:${to}:${this.bars.length}:${this.bars[0]?.time}`, close = this.bars.at(-1)?.close, now = Date.now();
+    if (this.cache?.shape === shape && (this.cache.close === close || now - this.cache.at < 500)) return this.cache;
+    this.cache = { shape, close, at: now, fvg:fairValueGaps(this.bars, from, to), smc:marketStructure(this.bars, from, to), ict:ictLevels(this.bars, from, to), fib:fibLevels(this.bars, from, to) };
     return this.cache;
   }
   draw(target) {

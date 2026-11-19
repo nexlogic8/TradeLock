@@ -1,6 +1,5 @@
 package com.nexlogic.tradelock.ui.screens
 
-import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,6 +39,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,7 +69,7 @@ fun LoginScreen(vm: AppViewModel) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val activity = LocalContext.current as Activity
+    val activity = LocalActivity.current
 
     fun signIn() {
         if (busy) return
@@ -92,9 +92,10 @@ fun LoginScreen(vm: AppViewModel) {
             try {
                 // "Sign in with Google" opens Google's own account sheet. (The generic Android credential picker
                 // fails to start on some Samsung phones and never returns.)
+                val act = activity ?: error("Google sign-in needs the app window. Try again.")
                 val option = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
                 val res = withTimeout(45_000) {
-                    CredentialManager.create(activity).getCredential(activity, GetCredentialRequest.Builder().addCredentialOption(option).build())
+                    CredentialManager.create(act).getCredential(act, GetCredentialRequest.Builder().addCredentialOption(option).build())
                 }
                 val token = GoogleIdTokenCredential.createFrom(res.credential.data).idToken
                 when (val r = vm.googleLogin(token)) {

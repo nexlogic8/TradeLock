@@ -1,5 +1,7 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
+import androidx.compose.foundation.border
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -76,12 +78,12 @@ fun StrategyScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) -> Uni
     val list = if (admin) BUILT_IN else PUBLIC_BUILT_IN
     val a = live?.obj("account")
 
-    LazyColumn(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
+                Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
                 Spacer(Modifier.width(12.dp))
-                Text("Strategy", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+                Text("Strategy", style = TlType.page)
             }
         }
         item { Eyebrow("Built-in · how TradeLock runs them", Modifier.padding(start = 4.dp, top = 4.dp)) }

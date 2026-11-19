@@ -35,9 +35,9 @@ export function broadcastScalperUser(userId, data) {
 
 export function allowScalperContracts(userId, expiry, strikes, underlying = { securityId:'13', optionSegment:'NSE_FNO' }) {
   const ids = new Set(strikes.flatMap(row => [row.ce?.securityId, row.pe?.securityId]).filter(Boolean).map(String));
-  // One entry per index, so loading (or preloading) another index keeps this one's contracts valid.
+  // One entry per index and expiry: loading another index or expiry (the app and the website at once) keeps these valid.
   const byIndex = allowedByUser.get(userId) || new Map();
-  byIndex.set(String(underlying.securityId), { expiry, ids, indexId:underlying.securityId, segment:underlying.optionSegment, spotSegment:underlying.spotSegment || 'IDX_I', at: Date.now() });
+  byIndex.set(`${underlying.securityId}:${expiry}`, { expiry, ids, indexId:underlying.securityId, segment:underlying.optionSegment, spotSegment:underlying.spotSegment || 'IDX_I', at: Date.now() });
   allowedByUser.set(userId, byIndex);
 }
 

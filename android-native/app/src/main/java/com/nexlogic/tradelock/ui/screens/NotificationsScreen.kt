@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -99,13 +100,13 @@ fun NotificationsScreen(vm: AppViewModel, onBack: () -> Unit) {
         items.replaceAll { if (ids == null || it.id in ids) it.copy(read = true) else it }
     }
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text)
             }
             Spacer(Modifier.width(12.dp))
-            Text("Notifications", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text, modifier = Modifier.weight(1f))
+            Text("Notifications", style = TlType.page, modifier = Modifier.weight(1f))
             if (items.any { !it.read }) Text("Read all", style = TlType.label, color = Tl.mint, modifier = Modifier.tactile({ markRead(null) }).padding(8.dp))
         }
         Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

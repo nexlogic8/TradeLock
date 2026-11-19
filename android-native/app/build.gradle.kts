@@ -18,8 +18,8 @@ android {
         applicationId = "in.tradelock.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 100
-        versionName = "2.0.0"
+        versionCode = 108
+        versionName = "2.1.7"
         buildConfigField("String", "BASE_URL", "\"https://tradelock.in\"")
         buildConfigField("String", "HOST", "\"tradelock.in\"")
     }
@@ -87,6 +87,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Razorpay Checkout (native): wallet top-ups open straight into Razorpay with UPI apps, cards and netbanking.
+    implementation("com.razorpay:checkout:1.6.41")
 
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")

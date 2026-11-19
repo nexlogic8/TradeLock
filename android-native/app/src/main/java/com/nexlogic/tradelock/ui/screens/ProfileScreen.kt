@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -82,11 +83,11 @@ fun ProfileScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) -> Unit
     LaunchedEffect(Unit) { runCatching { Api.get("/settings").obj("user") }.getOrNull()?.let { user = it } }
     val mfaOn = user?.bool("mfaEnabled") == true
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
+            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
             Spacer(Modifier.width(12.dp))
-            Text("Profile", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+            Text("Profile", style = TlType.page)
         }
         TlCard(Modifier.fillMaxWidth(), padding = 20.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {

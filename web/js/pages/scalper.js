@@ -1,5 +1,5 @@
 ﻿import { html, $, on, $$ } from '../core/dom.js';
-import { get, post, put, del } from '../core/api.js';
+import { get as apiGet, post, put, del } from '../core/api.js';
 import { icon } from '../ui/icons.js';
 import { toast, toastError } from '../ui/toast.js';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, CrosshairMode, createSeriesMarkers } from '../vendor/lightweight-charts.standalone.production.mjs';
@@ -11,7 +11,19 @@ import { VolumeProfilePrimitive, OiProfilePrimitive, oiSummary, putCallRatio } f
 import { SmcPrimitive, gapSignals, gapByDay, regroup, GAP_SIGNAL } from './scalper-chart-smc.js';
 import { DrawingLayer, mountDrawRail } from './scalper-chart-draw.js';
 import { PositionOverlay } from './scalper-chart-position.js';
-import { LevelOverlay } from './scalper-chart-levels.js?v=20261115-plus-hover1';
+import { LevelOverlay } from './scalper-chart-levels.js';
+
+// The server keeps, per user, the contracts of the chains loaded lately; it forgets them on a restart. A chart or margin
+// request it no longer recognises (INVALID_INSTRUMENT) re-registers the chain on screen once, then asks again.
+let currentChain = () => null;
+async function get(url) {
+  try { return await apiGet(url); } catch (e) {
+    const chain = currentChain();
+    if (e?.code !== 'INVALID_INSTRUMENT' || !chain?.expiry || !/^\/scalper\/(candles|margin)/.test(url)) throw e;
+    await apiGet(`/scalper?expiry=${encodeURIComponent(chain.expiry)}&underlying=${encodeURIComponent(chain.underlying)}&charts=0`);
+    return apiGet(url);
+  }
+}
 
 const money = n => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // EMA pair by chart interval: 1-minute charts use 45/105 (the EMA45 hammer strategy), every other
@@ -278,7 +290,8 @@ export default {
     const d = ctx.data, ce = d.strikes.find(x => String(x.ce?.securityId) === String(ctx.ui.ceId))?.ce || null;
     const pe = d.strikes.find(x => String(x.pe?.securityId) === String(ctx.ui.peId))?.pe || null;
     const atmStrike = d.strikes.reduce((best, row) => !best || Math.abs(row.strike - d.underlying.ltp) < Math.abs(best.strike - d.underlying.ltp) ? row : best, null)?.strike;
-    const optionRows = d.strikes.filter(row => Math.abs(row.strike - Number(atmStrike)) <= 12 * strikeStep(d.strikes, Number(atmStrike)));
+    // Every strike Dhan returns for this expiry (the list opens centred on the ATM and scrolls to the far strikes).
+    const optionRows = d.strikes;
     const indexName = d.underlying.symbol || 'NIFTY 50', focus = isFocus();
     const current = ctx.ui.underlying || d.underlyingKey || 'NIFTY', sidePanel = ctx.ui.sidePanel || 'chain';
     lotsEditable = !!ctx.ui.manualMode;
@@ -423,6 +436,7 @@ export default {
   },
 
   mount(ctx) {
+    currentChain = () => ({ expiry: ctx.data?.expiry, underlying: ctx.ui.underlying || ctx.data?.underlyingKey || 'NIFTY' });
     const { el, signal, ui } = ctx;
     // Per-trade risk budget for sizing the order tickets (daily stop-loss ÷ trades per day).
     const refreshRisk = async () => {
@@ -536,7 +550,10 @@ export default {
     flushTimer = setInterval(() => {
       if (Date.now() - lastTickPaint < 180) return;
       if (!ui.tickDirty) return;
-      ui.tickDirty = false; lastTickPaint = Date.now(); updateLiveCharts(ctx); updateLiveLabels(ctx); updateTickets(ctx); refreshChartPositions(ctx);
+      ui.tickDirty = false; lastTickPaint = Date.now(); updateLiveCharts(ctx); updateLiveLabels(ctx); updateTickets(ctx);
+      // Positions, orders and alerts on the charts change with the broker sync, not each tick (the open P&L follows
+      // every tick through setLtp): once a second keeps them current without redrawing on every flush.
+      if (lastTickPaint - (ui.positionsPaintAt || 0) > 1000) { ui.positionsPaintAt = lastTickPaint; refreshChartPositions(ctx); }
     }, 200);
     const refreshStaleCandles = async () => {
       const now = Date.now(), market = isMarketSession(now, ctx.data?.session);
@@ -896,6 +913,34 @@ export default {
       el.querySelectorAll('[data-rail]').forEach(b => b.setAttribute('aria-pressed', String(ui.panelOpen !== false && b.dataset.rail === mode)));
       ui.chainScroll = null; ui.chainKey = null; keepChainCentred(ctx);
     }, signal);
+    // A position in the panel: open its contract in the CE / PE chart. Another index or expiry is loaded first.
+    on(el, 'click', '[data-sc-open]', async (_, row) => {
+      const id = String(row.dataset.scOpen);
+      // Its index and expiry from the instrument list (Dhan's symbol has no expiry day); the symbol is the fallback.
+      const parsed = await get(`/scalper/contract?securityId=${encodeURIComponent(id)}&segment=${encodeURIComponent(row.dataset.segment || '')}`)
+        .then(c => ({ underlying: c.underlying, expiry: c.expiry })).catch(() => parsePositionSymbol(row.dataset.symbol));
+      const pick = () => {
+        const r = ctx.data.strikes.find(x => String(x.ce?.securityId) === id || String(x.pe?.securityId) === id);
+        if (!r) return false;
+        $(`[data-select-contract="${String(r.ce?.securityId) === id ? 'ce' : 'pe'}"][data-strike="${r.strike}"]`, el)?.click();
+        return true;
+      };
+      if (pick() || !parsed) { if (!pick() && !parsed) toast('That contract is not in the loaded option chain.', 'warn'); return; }
+      const waitFor = async test => { for (let i = 0; i < 40 && !signal.aborted; i++) { if (test()) return true; await new Promise(r => setTimeout(r, 250)); } return false; };
+      if (parsed.underlying !== ui.underlying) {
+        const b = $(`.sc-underlyings [data-underlying="${parsed.underlying}"]`, el) || $(`.sc-market [data-underlying]${isMcxKey(parsed.underlying) ? '.sc-mcx' : ':not(.sc-mcx)'}`, el);
+        if (!b) return toast(`${parsed.underlying} is not available in Power Scalper.`, 'warn');
+        b.dataset.underlying = parsed.underlying; b.click();
+        await waitFor(() => ui.underlying === parsed.underlying && !ui.switching && ctx.data.underlyingKey === parsed.underlying);
+      }
+      if (pick()) return;
+      const sel = $('#sc-expiry, [data-scm-expiry]', el);
+      if (parsed.expiry && sel && ctx.data.expiry !== parsed.expiry && ctx.data.expiries?.includes(parsed.expiry)) {
+        sel.value = parsed.expiry; sel.dispatchEvent(new Event('change', { bubbles: true }));
+        await waitFor(() => ctx.data.expiry === parsed.expiry && !ui.loadingExpiry);
+      }
+      if (!pick()) toast('That contract is not in the loaded option chain.', 'warn');
+    }, signal);
     // Exit from the positions panel: first click arms, second click (within 5 s) sends the market exit.
     on(el, 'click', '[data-sc-exit]', async (_, button) => {
       const symbol = button.dataset.scExit;
@@ -999,6 +1044,21 @@ export default {
   },
 };
 
+const MONTHS = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+/**
+ * Index and expiry of a position's contract from its symbol: Dhan's "CRUDEOILM-17Nov2026-8100-PE" or TradeLock's
+ * "NIFTY 2026-11-23 24100 PE". { underlying, expiry: 'YYYY-MM-DD' | null } or null.
+ */
+export function parsePositionSymbol(symbol) {
+  const s = String(symbol || '').trim().toUpperCase();
+  let m = /^([A-Z]+)[-\s](\d{1,2})([A-Z]{3})(\d{4})[-\s]/.exec(s);
+  if (m && MONTHS[m[3]]) return { underlying: m[1], expiry: `${m[4]}-${MONTHS[m[3]]}-${m[2].padStart(2, '0')}` };
+  m = /^([A-Z]+)\s+(\d{4}-\d{2}-\d{2})\s/.exec(s);
+  if (m) return { underlying: m[1], expiry: m[2] };
+  m = /^([A-Z]+)[-\s]/.exec(s);
+  return m ? { underlying: m[1], expiry: null } : null;
+}
+
 // Open positions from the live broker sync (the same feed as the Positions page), with a two-click Exit.
 function positionsBlock(ctx) {
   const dash = ctx.state?.dash;
@@ -1007,7 +1067,7 @@ function positionsBlock(ctx) {
   const total = open.reduce((sum, p) => sum + (Number(p.unrealized) || 0), 0), exiting = ctx.ui.exiting || {};
   return html`<div class="sc-pos-head"><span>Open positions <b>${open.length}</b></span>${open.length ? html`<span>Open P&amp;L <b class="${total >= 0 ? 'pos' : 'neg'}">${signedInr(total)}</b></span>` : ''}</div>
     ${open.length ? html`<div class="sc-pos-list">${open.map(p => html`<div class="sc-pos-row">
-      <div class="sc-pos-name"><b>${p.symbol}</b><small><span class="${p.qty > 0 ? 'pos' : 'neg'}">${p.qty > 0 ? 'LONG' : 'SHORT'}</span> ${Math.abs(p.qty)} @ ${money(p.avg)}</small></div>
+      <div class="sc-pos-name" data-sc-open="${p.securityId}" data-symbol="${p.symbol}" data-segment="${p.exchangeSegment || ''}" role="button" tabindex="0" title="Open this contract's chart" style="cursor:pointer"><b>${p.symbol}</b><small><span class="${p.qty > 0 ? 'pos' : 'neg'}">${p.qty > 0 ? 'LONG' : 'SHORT'}</span> ${Math.abs(p.qty)} @ ${money(p.avg)}</small></div>
       <b class="sc-pos-pnl ${(p.unrealized || 0) >= 0 ? 'pos' : 'neg'}">${signedInr(p.unrealized)}</b>
       <button type="button" class="btn btn-sm sc-pos-exit ${ctx.ui.exitArmed === p.symbol ? 'armed' : ''}" data-sc-exit="${p.symbol}" ${exiting[p.symbol] ? 'disabled' : ''} title="Market exit for the full quantity">${exiting[p.symbol] ? 'Exiting…' : ctx.ui.exitArmed === p.symbol ? 'Confirm exit' : 'Exit'}</button>
     </div>`)}</div>` : html`<div class="sc-pos-empty">No open positions.</div>`}
@@ -1070,9 +1130,13 @@ function levelOptions(ctx, view) {
           const s = sizeOf(ctx, view.key, c?.item), qty = s.lots * (ctx.data.qtyPerLot ?? ctx.data.lotSize);
           if (!c?.tradable || !(qty > 0)) throw new Error(s.reason || 'No lots to order: set lots on the ticket first.');
           const side = kind.toUpperCase();
-          const r = await post('/orders', { symbol: c.symbol, securityId: c.securityId, exchangeSegment: c.segment, side, qty, type: 'LIMIT', price, productType: 'INTRADAY' });
-          toast(`${side} limit ${lotsOf(qty)} lot${lotsOf(qty) === 1 ? '' : 's'} @ ${price} placed at Dhan (${r.order?.id || 'pending'}).`, 'ok');
-        } else if (kind === 'move-order') { await put(`/orders/${encodeURIComponent(id)}`, { price }); toast(`Limit order moved to ${price}.`, 'ok'); }
+          // A buy above the price (a sell below) is a stop entry that waits for the move; a limit there would fill at once.
+          const stop = c.ltp > 0 && (side === 'BUY' ? price > c.ltp : price < c.ltp);
+          const r = await post('/orders', { symbol: c.symbol, securityId: c.securityId, exchangeSegment: c.segment, side, qty, productType: 'INTRADAY', ltp: c.ltp || undefined,
+            ...(stop ? { type: 'STOP_LOSS', triggerPrice: price } : { type: 'LIMIT', price }) });
+          const where = ctx.state?.dash?.broker?.label || 'your broker';
+          toast(`${side} ${stop ? 'stop' : 'limit'} ${lotsOf(qty)} lot${lotsOf(qty) === 1 ? '' : 's'} ${stop ? (side === 'BUY' ? 'when it rises to' : 'when it falls to') : '@'} ${price} placed at ${where} (${r.order?.id || 'pending'}).`, 'ok');
+        } else if (kind === 'move-order') { await put(`/orders/${encodeURIComponent(id)}`, { price }); toast(`Order moved to ${price}.`, 'ok'); }
         else if (kind === 'cancel-order') { await del(`/orders/${encodeURIComponent(id)}`); toast('Order cancelled.', 'ok'); }
         else if (kind === 'alert') {
           const { alert } = await post('/alerts', { segment: c.segment, securityId: c.securityId, symbol: c.symbol, price, ltp: c.ltp });
@@ -1107,11 +1171,13 @@ function refreshChartPositions(ctx) {
     const id = view.instrumentId;
     const pos = id && (dash?.positions || []).find(p => String(p.securityId) === id && Number(p.qty) !== 0);
     const ltp = byId.get(id)?.ltp;
-    view.pos.set({ pos: pos ? { securityId: id, qty: Number(pos.qty), avg: Number(pos.avg) } : null, bracket: (dash?.brackets || []).find(b => b.securityId === id) || null, ltp, pointValue });
+    view.pos.set({ pos: pos ? { securityId: id, symbol: pos.symbol, qty: Number(pos.qty), avg: Number(pos.avg) } : null, bracket: (dash?.brackets || []).find(b => b.securityId === id) || null, ltp, pointValue });
     // Level markers: this contract's pending limit orders (not the stop-loss orders) and price alerts.
-    const perLot = d.qtyPerLot ?? d.lotSize ?? 1;
+    const perLot = d.qtyPerLot ?? d.lotSize ?? 1, slIds = new Set((dash?.brackets || []).map(b => String(b.slOrderId)).filter(x => x && x !== 'null'));
     view.levels?.set({
-      orders: (dash?.orders || []).filter(o => String(o.securityId) === id && o.type === 'LIMIT').map(o => ({ id: o.id, side: o.side, qty: o.qty, lots: perLot > 0 ? Math.round(o.qty / perLot) : null, price: Number(o.price) })),
+      // Pending entries: limits at their price, stop entries at their trigger (a position's own stop-loss is its SL line).
+      orders: (dash?.orders || []).filter(o => String(o.securityId) === id && (o.type === 'LIMIT' || ((o.type === 'STOP_LOSS' || o.type === 'SL') && !slIds.has(String(o.id)))))
+        .map(o => ({ id: o.id, side: o.side, qty: o.qty, lots: perLot > 0 ? Math.round(o.qty / perLot) : null, stop: o.type !== 'LIMIT', price: Number(o.type === 'LIMIT' ? o.price : (o.triggerPrice ?? o.price)) })),
       alerts: (dash?.alerts || []).filter(a => String(a.securityId) === id),
     });
   }
@@ -1418,6 +1484,8 @@ function createChartView(host, rows, indicators, key, interval = '1', ctx = null
   view.pos = new PositionOverlay(view, {
     onSave: async b => { await put('/brackets', b); toast(b.tp == null && b.sl == null ? 'Target and stop-loss removed.' : `Saved${b.sl != null ? ` · stop-loss ${b.sl} placed at your broker` : ''}${b.tp != null ? ` · target ${b.tp}` : ''}.`, 'ok'); },
     onError: e => toastError(e),
+    // ✕ on the entry label (tapped twice): close the whole position at market.
+    onExit: async p => { if (!p?.symbol) return; await post('/positions/exit', { symbol: p.symbol }); toast(`Exit order sent for ${p.symbol}.`, 'ok'); },
   });
   // Hover "+" (limit order / alert at a price) and the pending orders' and alerts' level markers.
   if (ctx) view.levels = new LevelOverlay(view, levelOptions(ctx, view));
@@ -1477,7 +1545,7 @@ function renderStudies(view, rebuild = false) {
   }
   const data = view.data || [];
   for (const entry of view.studySeries) {
-    const lines = computeStudy(entry.study, data), def = STUDIES[entry.study.type];
+    const lines = studyLines(view, entry.study, data), def = STUDIES[entry.study.type];
     def.lines.forEach(([line], i) => {
       const points = lines[line] || [];
       entry.series[i].setData(line === 'hist' ? points.map(pt => ({ ...pt, color:pt.value >= 0 ? chartPalette().up : chartPalette().down })) : points);
@@ -1489,7 +1557,7 @@ function renderStudies(view, rebuild = false) {
 function updateStudies(view) {
   const data = view.data || [];
   for (const entry of view.studySeries) {
-    const lines = computeStudy(entry.study, data), def = STUDIES[entry.study.type];
+    const lines = studyLines(view, entry.study, data), def = STUDIES[entry.study.type];
     def.lines.forEach(([line], i) => {
       const last = lines[line]?.at(-1);
       if (!last || last.time !== data.at(-1)?.time) return;
@@ -1498,16 +1566,31 @@ function updateStudies(view) {
   }
   paintLegend(view);
 }
+/**
+ * One study's lines for these bars, worked out once per change of the bars: the live update, the legend and a
+ * repaint share it (each used to recompute every indicator over thousands of bars, twice per update).
+ */
+function studyLines(view, st, data) {
+  const cache = (view.studyCache ||= new Map()), last = data.at(-1);
+  const key = `${st.type}|${JSON.stringify(st.params)}|${data.length}|${data[0]?.time}|${last?.time}|${last?.open}|${last?.high}|${last?.low}|${last?.close}|${last?.volume}`;
+  const hit = cache.get(st.id ?? st.type);
+  if (hit?.key === key) return hit.lines;
+  const lines = computeStudy(st, data);
+  cache.set(st.id ?? st.type, { key, lines });
+  return lines;
+}
 /** Legend in the chart's info row: each study's title and latest value(s); a click opens its settings. */
 function paintLegend(view) {
   const host = view.host?.closest('.sc-chart-panel')?.querySelector('[data-legend]');
   if (!host) return;
   const data = view.data || [];
-  host.innerHTML = (view.studies || []).map(st => {
-    const def = STUDIES[st.type], lines = st.visible && data.length ? computeStudy(st, data) : {};
+  const html = (view.studies || []).map(st => {
+    const def = STUDIES[st.type], lines = st.visible && data.length ? studyLines(view, st, data) : {};
     const values = def.lines.map(([line], i) => { const v = lines[line]?.at(-1)?.value; return Number.isFinite(v) ? `<b style="color:${studyColor(st, line, i)}">${v.toFixed(2)}</b>` : ''; }).filter(Boolean).join(' ');
     return `<button type="button" class="sc-legend-item ${st.visible ? '' : 'off'}" data-legend-study="${st.id}" title="Settings · ${studyTitle(st)}"><i style="background:${studyColor(st, def.lines[0][0], 0)}"></i>${studyTitle(st)} ${values}</button>`;
   }).join('');
+  // Live ticks repaint the legend several times a second: touch the DOM only when its text changed.
+  if (host.dataset.html !== html) { host.dataset.html = html; host.innerHTML = html; }
 }
 const escAttr = v => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 /** The Indicators panel for one chart: the list (show/hide, settings, remove), add, copy to all, reset. */
@@ -1587,6 +1670,26 @@ function setPreviousDayRange(view, rows) {
 function istDay(at) {
   return Number.isFinite(at) ? new Date(at + 330 * 60_000).toISOString().slice(0,10) : '';
 }
+/**
+ * A chart's bars for a live update: only the newest raw candles are converted and merged into the bars it already
+ * has. Converting and sorting every bar (thousands per chart, three charts, several times a second) was what made
+ * Power Scalper stutter. Falls back to a full conversion whenever the candles were replaced (new history, expiry).
+ */
+function liveRows(view, rows) {
+  const n = rows?.length || 0, data = view.liveData;
+  if (!n || !data?.length || view.data !== data || view.liveSource !== rows || n < view.liveCount || n - view.liveCount > 2) {
+    const out = chartRows(rows);
+    view.liveData = out; view.liveSource = rows; view.liveCount = n;
+    return out;
+  }
+  for (const c of chartRows(rows.slice(-3))) {
+    const last = data.at(-1);
+    if (c.time === last.time) data[data.length - 1] = c;
+    else if (c.time > last.time) data.push(c);
+  }
+  view.liveCount = n;
+  return data;
+}
 function updateLiveCharts(ctx) {
   const views = ctx.ui.chartViews || {};
   let markersDue = false;
@@ -1600,7 +1703,7 @@ function updateLiveCharts(ctx) {
   for (const [key,view] of Object.entries(views)) {
     const item = latest[key];
     if (!item || String(item.id || '') !== view.instrumentId) continue;
-    const data = chartRows(item.rows), candle = data.at(-1);
+    const data = liveRows(view, item.rows), candle = data.at(-1);
     if (!candle || candle.time < view.lastTime) continue;
     try {
       const newBar = candle.time !== view.lastTime;
@@ -1623,7 +1726,9 @@ function updateLiveCharts(ctx) {
       view.empty.hidden=true;
     } catch { /* a late tick can race with a route change and disposed chart */ }
   }
-  if (views.spot?.oiProfile) try {
+  // The OI profile re-sorts the whole chain: once a second is plenty (OI moves slowly).
+  const now = Date.now();
+  if (views.spot?.oiProfile && (markersDue || now - (ctx.ui.oiPaintAt || 0) > 1000) && (ctx.ui.oiPaintAt = now)) try {
     views.spot.oiProfile.setData(ctx.data.strikes);
     const label = views.spot.host.closest('.sc-chart-panel')?.querySelector('.oi-value');
     if (label && ctx.ui.indicators.oi !== false) label.textContent = putCallRatio(ctx.data.strikes);

@@ -172,10 +172,14 @@ function ruleSets(userId) {
   return sets;
 }
 
-/** { active, mode, manual, algo }: `active` is the set in force now (see RULE_SETS). */
+/**
+ * { active, mode, manual, algo }. One master set since 16 Nov 2026 (the owner's choice): the Risk rules page's rules
+ * apply to Manual and Algo trades alike, whatever the Algo Trading switch; the old Algo set (algo_config) is not used.
+ * `algo` and `mode` stay in the answer for older app / web builds, both pointing at the master set.
+ */
 export function getRules(userId) {
-  const sets = ruleSets(userId), mode = ruleMode(userId);
-  return { active: sets[mode], mode, manual: sets.manual, algo: sets.algo, pending: null, pendingFrom: null };
+  const sets = ruleSets(userId);
+  return { active: sets.manual, mode: 'manual', manual: sets.manual, algo: sets.manual, pending: null, pendingFrom: null };
 }
 
 function deepFreeze(o) {
@@ -188,8 +192,11 @@ function deepFreeze(o) {
  * (its trigger, the pause and any broker kill switch are kept until the next trading day).
  * Loosening mid-session is still recorded in the audit log.
  */
-export function saveRules(userId, input, ip, capital = null, set = ruleMode(userId)) {
+export function saveRules(userId, input, ip, capital = null, set = 'manual') {
   set = v.oneOf(set, 'set', RULE_SETS);
+  // One master set: an older AI Algo Trading page still sending its own set would overwrite the master with a partial
+  // copy, so it is refused with a pointer to the Risk rules page.
+  if (set !== 'manual') throw bad('RULES_MASTER', 'Algo Trading now follows your Risk rules. Change them on the Risk rules page.');
   const next = normalizeRules(input);
   const was = getRules(userId), before = was[set];
   stmt(`UPDATE risk_rules SET ${COLUMN[set]} = ?, pending = NULL, pending_from = NULL, updated_at = ? WHERE user_id = ?`).run(JSON.stringify(next), Date.now(), userId);

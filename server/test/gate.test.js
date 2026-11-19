@@ -31,6 +31,17 @@ test('blocks entries at the trade cap but always allows exits', () => {
   assert.deepEqual(checkOrder(exit, s), { ok: true, reducing: true });
 });
 
+test('MCX trades after the NSE cutoff: neither the cutoff time nor the cutoff pause holds a commodity order back', () => {
+  const crude = { symbol: 'CRUDEOILM 2026-11-17 8350 CE', side: 'BUY', qty: 1, exchangeSegment: 'MCX_COMM' };
+  const late = { ...flat, minutes: 15 * 60 + 29 };
+  assert.equal(checkOrder(buy, late).code, 'CUTOFF', 'an NSE option is still blocked');
+  assert.deepEqual(checkOrder(crude, late), { ok: true, reducing: false });
+  assert.deepEqual(checkOrder(crude, { ...late, paused: true, pauseReason: 'rule:cutoff' }), { ok: true, reducing: false });
+  assert.equal(checkOrder(buy, { ...late, paused: true, pauseReason: 'rule:cutoff' }).code, 'PAUSED');
+  assert.equal(checkOrder(crude, { ...late, paused: true, pauseReason: 'rule:maxLoss' }).code, 'PAUSED', 'other rules still apply to MCX');
+  assert.equal(checkOrder(crude, { ...late, pnl: -5000 }).code, 'LOSS_LIMIT');
+});
+
 test('paused, cutoff, loss limit and subscription each block entries', () => {
   assert.equal(checkOrder(buy, { ...base, paused: true, pauseReason: 'rule:maxLoss' }).code, 'PAUSED');
   assert.match(checkOrder(buy, { ...base, paused: true, pauseReason: 'rule:maxLoss' }).reason, /daily loss limit/);

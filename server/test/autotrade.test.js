@@ -95,7 +95,7 @@ before(async () => {
   uid = stmt('SELECT id FROM users WHERE email = ?').get('auto@example.com').id;
   // Cutoff off so the test does not depend on the wall clock; 5% daily loss ÷ 3 trades sizes each trade.
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');   // the Algo Trading rule set
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'manual');   // the Algo Trading rule set
   upsertAccount(uid, { broker: 'dhan', clientId: 'C123', accessToken: 'test-token-not-real-0123456789' });
   stmt('UPDATE broker_accounts SET agent_on = 1, algo_on = 1 WHERE user_id = ?').run(uid);
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);
@@ -167,6 +167,21 @@ test('square-off at the cutoff cancels the stop first, then exits', async () => 
   const order = dhan.calls.filter(c => c[0] === 'cancel' || c[0] === 'exit').map(c => c[0]);
   assert.deepEqual(order, ['cancel', 'exit'], '15:15 when the Risk rules cutoff is off');
   assert.equal(stmt('SELECT status FROM auto_trades WHERE user_id = ?').get(uid).status, 'closing');
+  stmt(`UPDATE auto_trades SET status = 'closed' WHERE user_id = ?`).run(uid);
+});
+
+test('your Exit on an Algo position goes through the trade\'s own exit: its stop is cancelled before the sell (17 Nov 2026)', async () => {
+  const { exitAutoTrade } = await import('../src/modules/scalper/autotrade.js');
+  stmt(`UPDATE auto_trades SET status = 'open', reason = NULL, seen_open = 1 WHERE user_id = ?`).run(uid);
+  setBook(uid, { positions: [{ securityId: 'C1', symbol: 'NIFTY-C1', qty: 975 }], orders: [{ id: 'S1', symbol: 'NIFTY-C1' }], funds: { available: 160000, used: 39000 }, at: Date.now() });
+  const dhan = fakeDhan({ slStatus: 'pending' });
+  let handed = null;
+  const t = exitAutoTrade(uid, 'C1', undefined, { manage: tr => { handed = tr; } });
+  assert.deepEqual([t.status, handed?.id], ['closing', t.id], 'marked closing and handed to the trade manager at once');
+  assert.equal(stmt('SELECT reason FROM auto_trades WHERE user_id = ?').get(uid).reason, 'Your exit from TradeLock');
+  await manageTrade(handed, { now: ms('10:40'), adapter: dhan });
+  assert.deepEqual(dhan.calls.filter(c => c[0] === 'cancel' || c[0] === 'exit').map(c => c[0]), ['cancel', 'exit'], 'stop cancelled (confirmed) first, then the market exit');
+  assert.equal(exitAutoTrade(uid, 'NOT-HELD', undefined, { manage: () => {} }), null, 'a contract no automatic trade holds: not handled here');
   stmt(`UPDATE auto_trades SET status = 'closed' WHERE user_id = ?`).run(uid);
 });
 

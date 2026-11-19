@@ -33,7 +33,8 @@ export function mcxLotValue(symbol) {
   return MCX_LOT_VALUE.find(([name]) => s.startsWith(name))?.[1] ?? 1;
 }
 /** Per fill: today's trades ("NAME-17Nov2026-…") count MCX lots; history rows ("NAME 17 NOV …") count units. */
-export const fillMultiplier = symbol => (exchangeOf(symbol) === 'MCX' && /^[A-Z]+-/i.test(String(symbol || '')) ? mcxLotValue(symbol) : 1);
+// TradeLock's own contract names ("GOLDM 2026-11-27 131000 PE", paper trades) count lots as well.
+export const fillMultiplier = symbol => (exchangeOf(symbol) === 'MCX' && /^[A-Z]+(-| \d{4}-\d{2}-\d{2} )/i.test(String(symbol || '')) ? mcxLotValue(symbol) : 1);
 
 const r2 = v => Math.round(v * 100) / 100;
 

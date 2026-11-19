@@ -4,8 +4,9 @@
 // add one; ✕ on a line removes it.
 import { pauseScroll, resumeScroll } from './scalper-chart-draw.js';
 
-const GREEN = '#38EBB4', RED = '#FF5E7B', INK = '#05121a';
-const inr = v => `${v < 0 ? '−' : '+'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`;
+const GREEN = '#38EBB4', RED = '#FF5E7B', INK = '#05121a', AMBER = '#F7A600', BLUE = '#2962FF';
+// P&L as on a broker's chart: "+9.75 INR" (two decimals, sign first).
+const inr = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} INR`;
 
 /** P&L of a position if the price were `price`: (price − avg) × qty × rupees per point (MCX minis 10). */
 export const pnlAt = (pos, price, pointValue = 1) => (price - pos.avg) * pos.qty * pointValue;
@@ -17,9 +18,9 @@ export function defaultLevel(kind, { long, ltp }) {
 }
 
 export class PositionOverlay {
-  constructor(view, { onSave, onError }) {
+  constructor(view, { onSave, onError, onExit }) {
     this.view = view; this.chart = view.chart; this.series = view.candles; this.host = view.host;
-    this.onSave = onSave; this.onError = onError;
+    this.onSave = onSave; this.onError = onError; this.onExit = onExit; this.exitArmed = 0;
     this.pos = null; this.bracket = null; this.ltp = null; this.pointValue = 1; this.drag = null; this.saving = null; this.hits = [];
     this.paneView = { zOrder: () => 'top', renderer: () => ({ draw: target => this.draw(target) }) };
     this.series.attachPrimitive(this);
@@ -29,11 +30,18 @@ export class PositionOverlay {
   detached() { this.requestUpdate = null; }
   updateAllViews() {}
   paneViews() { return [this.paneView]; }
+  // The price scale always takes in the position's entry, target and stop (a Super Order's legs are often well away
+  // from the candles in view): otherwise they would sit off the chart, out of sight and out of reach for dragging.
+  autoscaleInfo() {
+    if (!this.pos) return null;
+    const lv = this.levels(), prices = [this.pos.avg, lv.tp, lv.sl].filter(p => Number.isFinite(p) && p > 0);
+    return prices.length ? { priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) } } : null;
+  }
   priceAxisViews() {
     if (!this.pos) return [];
     const out = [], add = (p, bg, fg = INK) => p != null && out.push({ coordinate: () => this.series.priceToCoordinate(p) ?? -100, text: () => this.fmt(p), textColor: () => fg, backColor: () => bg, visible: () => true, tickVisible: () => true });
     const lv = this.levels();
-    add(this.pos.avg, '#94A3B8'); add(lv.tp, GREEN); add(lv.sl, RED);
+    add(this.pos.avg, BLUE, '#fff'); add(lv.tp, GREEN); add(lv.sl, AMBER);
     return out;
   }
   fmt(p) { try { return this.series.priceFormatter().format(p); } catch { return Number(p).toFixed(2); } }
@@ -83,6 +91,12 @@ export class PositionOverlay {
             this.save(kind === 'tp' ? lvl : lv.tp, kind === 'sl' ? lvl : lv.sl);
           } else if (hit.act === 'del-tp') this.save(null, lv.sl);
           else if (hit.act === 'del-sl') this.save(lv.tp, null);
+          else if (hit.act === 'exit') {
+            // ✕ on the entry closes the position at market: the first click arms it ("Exit?"), a second within 4 s sends it.
+            if (Date.now() - this.exitArmed > 4000) { this.exitArmed = Date.now(); setTimeout(() => this.requestUpdate?.(), 4100); }
+            else { this.exitArmed = 0; Promise.resolve(this.onExit?.(this.pos)).catch(err => this.onError?.(err)); }
+            this.requestUpdate?.();
+          }
           return;
         }
         const yt = lv.tp != null ? this.series.priceToCoordinate(lv.tp) : null, ys = lv.sl != null ? this.series.priceToCoordinate(lv.sl) : null;
@@ -174,30 +188,55 @@ export class PositionOverlay {
           tx += widths[i];
         });
       };
+      // A broker-style order label at the right of the pane: cells side by side in one bordered box, e.g.
+      // [TP][SL][ 65 ][ +9.75 INR ][ ✕ ]. Cells: { text, fg, bg?, act?, bold? }; drawn right to left from the pane edge.
+      const box = (y, cells, ring) => {
+        font(11, 700);
+        const pad = 7, h = 20, ws = cells.map(c => ctx.measureText(c.text).width + pad * 2);
+        let x = W - 8 - ws.reduce((a, w) => a + w, 0);
+        const x0 = x;
+        rr(x0, y - h / 2, W - 8 - x0, h, 4); ctx.fillStyle = 'rgb(8, 13, 21)'; ctx.fill();
+        cells.forEach((c, i) => {
+          const w = ws[i];
+          if (c.bg) { ctx.fillStyle = c.bg; ctx.fillRect(x, y - h / 2, w, h); }
+          if (i) { ctx.fillStyle = ring; ctx.globalAlpha = 0.45; ctx.fillRect(x, y - h / 2 + 3, 1, h - 6); ctx.globalAlpha = 1; }
+          ctx.fillStyle = c.fg; ctx.fillText(c.text, x + pad, y + 0.5);
+          if (c.act) this.hits.push({ act: c.act, x0: x, x1: x + w, y0: y - 13, y1: y + 13 });
+          x += w;
+        });
+        rr(x0, y - h / 2, W - 8 - x0, h, 4); ctx.strokeStyle = ring; ctx.lineWidth = 1; ctx.stroke();
+      };
       const long = pos.qty > 0, ltp = this.ltp, live = ltp ? pnlAt(pos, ltp, this.pointValue) : null, lv = this.levels();
-      // Entry with live P&L; "+ TP" / "+ SL" chips while one is not set.
+      const qtyText = String(Math.abs(pos.qty));
+      // Entry: TP / SL (tap to add one while it is not set) · quantity · live P&L · ✕ close the position.
       if (yE != null) {
-        line(yE, 'rgba(148, 163, 184, 0.9)', [5, 4], 1.2);
-        const parts = [{ text: `${long ? 'LONG' : 'SHORT'} ${Math.abs(pos.qty)}  `, color: '#E8EEF7' }, { text: live == null ? '—' : inr(live), color: live == null ? '#E8EEF7' : live >= 0 ? GREEN : RED }];
-        parts.bg = 'rgba(8, 13, 21, 0.88)'; parts.ring = live == null ? 'rgba(148,163,184,.6)' : live >= 0 ? 'rgba(56,235,180,.6)' : 'rgba(255,94,123,.6)';
-        const chips = [];
-        if (lv.tp == null) chips.push({ text: '+ TP', act: 'add-tp', bg: 'rgba(56, 235, 180, 0.18)', fg: GREEN });
-        if (lv.sl == null) chips.push({ text: '+ SL', act: 'add-sl', bg: 'rgba(255, 94, 123, 0.18)', fg: RED });
-        label(yE, parts, chips);
+        line(yE, BLUE, [5, 4], 1.2);
+        const armed = Date.now() - this.exitArmed <= 4000;
+        // A Dhan Super Order position: a leg removed at Dhan cannot be added back, so its chip stays dim.
+        // TP / SL buttons only while that level can still be added (a set level has its own line; dim chips read as extra orders).
+        const canAdd = k => lv[k] == null && !this.bracket?.super;
+        box(yE, [
+          ...(canAdd('tp') ? [{ text: 'TP', fg: GREEN, act: 'add-tp' }] : []),
+          ...(canAdd('sl') ? [{ text: 'SL', fg: AMBER, act: 'add-sl' }] : []),
+          { text: qtyText, fg: '#fff', bg: BLUE },
+          { text: live == null ? '—' : inr(live), fg: live == null ? '#E8EEF7' : live >= 0 ? GREEN : RED },
+          armed ? { text: 'Exit?', fg: '#fff', bg: RED, act: 'exit' } : { text: '✕', fg: '#E8EEF7', act: 'exit' },
+        ], BLUE);
       }
       for (const kind of ['tp', 'sl']) {
         const price = lv[kind];
         if (price == null) continue;
         const y = this.series.priceToCoordinate(price);
         if (y == null) continue;
-        const color = kind === 'tp' ? GREEN : RED, dragging = this.drag?.kind === kind, pnl = pnlAt(pos, price, this.pointValue);
-        if (yE != null) { ctx.fillStyle = kind === 'tp' ? 'rgba(56, 235, 180, 0.07)' : 'rgba(255, 94, 123, 0.07)'; ctx.fillRect(0, Math.min(y, yE), W, Math.abs(y - yE)); }
-        line(y, color, dragging ? [] : [], dragging ? 2.2 : 1.6);
-        const pending = this.saving && !dragging, note = kind === 'sl' && this.bracket?.slAtBroker && !pending ? ' · at broker' : '';
-        const parts = [{ text: `${kind === 'tp' ? 'TP' : 'SL'} ${this.fmt(price)}  `, color: INK }, { text: inr(pnl), color: INK }, { text: pending ? '  saving…' : note, color: 'rgba(5,18,26,.75)' }];
-        if (!dragging) parts.push({ text: '✕', act: `del-${kind}`, color: INK });   // remove, inside the pill
-        parts.bg = color;
-        label(y, parts);
+        const color = kind === 'tp' ? GREEN : AMBER, dragging = this.drag?.kind === kind, pnl = pnlAt(pos, price, this.pointValue);
+        if (yE != null) { ctx.fillStyle = kind === 'tp' ? 'rgba(56, 235, 180, 0.07)' : 'rgba(247, 166, 0, 0.07)'; ctx.fillRect(0, Math.min(y, yE), W, Math.abs(y - yE)); }
+        line(y, color, [], dragging ? 2.2 : 1.4);
+        const pending = this.saving && !dragging;
+        // TP / SL: the kind (coloured cell) · quantity · P&L at that price · ✕ remove (not while dragging / saving).
+        const cells = [{ text: kind === 'tp' ? 'TP' : 'SL', fg: INK, bg: color }, { text: qtyText, fg: '#fff', bg: BLUE },
+          { text: pending ? 'saving…' : inr(pnl), fg: pnl >= 0 ? GREEN : RED }];
+        if (!dragging && !pending) cells.push({ text: '✕', fg: '#E8EEF7', act: `del-${kind}` });
+        box(y, cells, color);
         // Grip: a small handle at the left shows the line can be dragged.
         ctx.fillStyle = color; rr(6, y - 4, 18, 8, 4); ctx.fill();
         ctx.fillStyle = INK; for (const gx of [11, 15, 19]) { ctx.beginPath(); ctx.arc(gx, y, 1, 0, Math.PI * 2); ctx.fill(); }

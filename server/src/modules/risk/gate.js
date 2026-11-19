@@ -16,17 +16,25 @@ export function checkOrder(order, s) {
   if (pos && Math.sign(signed) !== Math.sign(pos.qty) && Math.abs(signed) <= Math.abs(pos.qty)) {
     return { ok: true, reducing: true };
   }
-  if (s.killSwitchActive) return block('KILL_SWITCH', 'Your broker kill switch is active. Trading is locked for the rest of the day.');
+  if (s.killSwitchActive) {
+    const label = s.killSwitchLabel || 'broker';
+    return block('KILL_SWITCH', label === 'Paper'
+      ? 'Your Paper kill switch is on, so paper trading is locked for today. Switch it off on the Overview page to paper trade again.'
+      : `Your ${label} kill switch is on, so trading is locked for today. Switch it off on the Overview page to trade again.`);
+  }
   if (!s.subscriptionActive) return block('SUBSCRIPTION_REQUIRED', 'Your trial has ended. Subscribe to place orders through TradeLock.');
   if (s.algoOnly) return block('ALGO_ONLY', 'Algo Trading is on, so only automatic entries are placed. Exits are allowed; to trade by hand, allow manual trades on the AI Algo Trading page.');
-  if (s.paused) {
+  // The trading cutoff is an NSE / BSE session time (it must fall within 09:15–15:30): MCX trades until 23:30, so a
+  // commodity order is not held back by the cutoff or by the pause the cutoff left. Every other rule still applies.
+  const mcx = /^MCX/.test(String(order.exchangeSegment || ''));
+  if (s.paused && !(mcx && s.pauseReason === 'rule:cutoff')) {
     const rule = s.pauseReason?.startsWith('rule:') ? RULE_NAMES[s.pauseReason.slice(5)] : null;
     return block('PAUSED', rule
       ? `New orders are paused by your ${rule} until the next session. Exits are still allowed.`
       : 'New orders are paused by the kill switch. Exits are still allowed.');
   }
   const { rules } = s;
-  if (rules.cutoff.on && s.minutes != null && s.minutes >= toMinutes(rules.cutoff.value)) {
+  if (!mcx && rules.cutoff.on && s.minutes != null && s.minutes >= toMinutes(rules.cutoff.value)) {
     return block('CUTOFF', `Your ${rules.cutoff.value} IST cutoff has passed. Only exits are allowed.`);
   }
   if (rules.maxTrades.on && s.entries >= rules.maxTrades.value) {

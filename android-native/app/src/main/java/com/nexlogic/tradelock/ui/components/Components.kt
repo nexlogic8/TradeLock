@@ -1,6 +1,17 @@
 package com.nexlogic.tradelock.ui.components
 
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
@@ -68,7 +79,10 @@ import com.nexlogic.tradelock.ui.theme.Tl
 import com.nexlogic.tradelock.ui.theme.TlType
 import kotlinx.coroutines.launch
 
-/** A raised card: soft top light, hairline edge, deep shadow. */
+/**
+ * A glass card (the AI Algo Trading look, on every screen): deep gradient fill, a soft light in the top corner and a
+ * light gradient edge. [accent] tints the corner light and adds a short bar at the left edge.
+ */
 @Composable
 fun TlCard(
     modifier: Modifier = Modifier,
@@ -81,15 +95,95 @@ fun TlCard(
         modifier
             .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .clip(shape)
-            .background(Tl.cardBrush)
-            .border(1.dp, Tl.edgeBrush, shape)
+            .background(Tl.glass)
             .drawBehind {
-                if (accent != null) drawRoundRect(accent, size = size.copy(width = 3.dp.toPx()), cornerRadius = CornerRadius(2.dp.toPx()),
-                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height * 0.18f).let { it }, alpha = 0.95f)
+                val glow = (accent ?: Tl.violet).copy(alpha = if (accent != null) 0.14f else 0.07f)
+                val r = size.width * 0.7f
+                drawCircle(Brush.radialGradient(listOf(glow, Color.Transparent), center = Offset(size.width * 0.15f, 0f), radius = r), radius = r, center = Offset(size.width * 0.15f, 0f))
+                if (accent != null) drawRoundRect(accent, size = size.copy(width = 3.dp.toPx(), height = size.height * 0.64f), cornerRadius = CornerRadius(2.dp.toPx()),
+                    topLeft = Offset(0f, size.height * 0.18f), alpha = 0.95f)
             }
+            .border(1.dp, Tl.edgeOff, shape)
             .padding(padding),
         content = content,
     )
+}
+
+/** The screen background: near-black with two faint aurora lights at the top (mint left, violet right). */
+fun Modifier.ambient(): Modifier = this.background(Tl.bg).drawBehind {
+    val r = size.width * 0.9f
+    drawCircle(Brush.radialGradient(listOf(Color(0x162DE0C0), Color.Transparent), center = Offset(0f, 0f), radius = r), radius = r, center = Offset(0f, 0f))
+    drawCircle(Brush.radialGradient(listOf(Color(0x12A78BFA), Color.Transparent), center = Offset(size.width, size.height * 0.08f), radius = r), radius = r, center = Offset(size.width, size.height * 0.08f))
+}
+
+/** The back key on a page header: a glass square with a gradient edge. */
+@Composable
+fun BackKey(onBack: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    Box(Modifier.size(44.dp).tactile(onBack).clip(shape).background(Tl.glass).border(1.dp, Tl.edgeOff, shape), contentAlignment = Alignment.Center) {
+        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = Tl.text)
+    }
+}
+
+/** Page header: back key (when [onBack]), the aurora title, an optional subtitle, and [trailing] actions on the right. */
+@Composable
+fun PageHeader(title: String, sub: String? = null, onBack: (() -> Unit)? = null, modifier: Modifier = Modifier, trailing: @Composable RowScope.() -> Unit = {}) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (onBack != null) { BackKey(onBack); Spacer(Modifier.width(12.dp)) }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TlType.page, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            sub?.let { Text(it, style = TlType.small, color = Tl.muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        }
+        trailing()
+    }
+}
+
+/** A section title with an optional note on the right. */
+@Composable
+fun SectionHeader(title: String, sub: String? = null, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.Bottom) {
+        Text(title, style = TlType.title.copy(fontSize = 18.sp), color = Tl.text, modifier = Modifier.weight(1f))
+        sub?.let { Text(it, style = TlType.small, color = Tl.dim) }
+    }
+}
+
+/** A tinted icon tile: gradient fill, tinted edge. */
+@Composable
+fun IconBadge(icon: ImageVector, c: Color, size: Dp = 42.dp) {
+    val shape = RoundedCornerShape(14.dp)
+    Box(Modifier.size(size).clip(shape).background(Brush.linearGradient(listOf(c.copy(alpha = 0.28f), c.copy(alpha = 0.06f)))).border(1.dp, c.copy(alpha = 0.35f), shape),
+        contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(size * 0.5f)) }
+}
+
+/** A small capsule label ("PAPER", "LIVE"). */
+@Composable
+fun TagChip(text: String, c: Color) =
+    Text(text, style = TlType.eyebrow.copy(fontSize = 9.sp), color = c, modifier = Modifier.clip(CircleShape).background(c.copy(alpha = 0.14f)).padding(horizontal = 8.dp, vertical = 3.dp))
+
+/** A live dot with an expanding ring while [active]. */
+@Composable
+fun LivePulse(c: Color, active: Boolean = true) {
+    val t = rememberInfiniteTransition(label = "pulse")
+    val r by t.animateFloat(1f, 2.4f, infiniteRepeatable(tween(1200), RepeatMode.Restart), label = "r")
+    Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+        if (active) Canvas(Modifier.fillMaxSize()) { drawCircle(c.copy(alpha = (2.4f - r) / 2.4f * 0.6f), radius = 3.5.dp.toPx() * r) }
+        Dot(c, 7.dp)
+    }
+}
+
+/** A KPI tile: icon + label, a big number, and a footnote. */
+@Composable
+fun StatTile(label: String, value: String, modifier: Modifier = Modifier, icon: ImageVector? = null, tint: Color = Tl.mint, foot: String? = null, valueColor: Color = Tl.text) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(modifier.clip(shape).background(Tl.glass).border(1.dp, Tl.edgeOff, shape).padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) { Icon(icon, null, tint = tint, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)) }
+            Text(label, style = TlType.small, color = Tl.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(value, style = TlType.num.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold), color = valueColor, maxLines = 1)
+        foot?.let { Spacer(Modifier.height(3.dp)); Text(it, style = TlType.small.copy(fontSize = 11.sp), color = Tl.dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    }
 }
 
 @Composable
@@ -121,7 +215,7 @@ fun PillSwitch(on: Boolean, tint: Color, modifier: Modifier = Modifier, compact:
     val x by animateDpAsState(if (on) w - h else 0.dp, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow), label = "knob")
     val track by animateColorAsState(if (on) tint else Tl.raised, tween(220), label = "track")
     Box(modifier.size(w, h).clip(CircleShape).background(track).border(1.dp, Color(0x22FFFFFF), CircleShape).padding(3.dp)) {
-        Box(Modifier.offset(x = x).size(knob).shadow(3.dp, CircleShape).clip(CircleShape).background(if (on) Color(0xFF0A1512) else Color(0xFFE8EDF2)))
+        Box(Modifier.offset { IntOffset(x.roundToPx(), 0) }.size(knob).shadow(3.dp, CircleShape).clip(CircleShape).background(if (on) Color(0xFF0A1512) else Color(0xFFE8EDF2)))
     }
 }
 

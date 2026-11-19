@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -218,14 +219,14 @@ fun RulesScreen(vm: AppViewModel, bottomPad: PaddingValues) {
     fun edit(key: String, r: Rule) = st.edit(key, r)
 
     LazyColumn(
-        Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding(),
+        Modifier.fillMaxSize().ambient().statusBarsPadding(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomPad.calculateBottomPadding() + 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) {
                 Column(Modifier.weight(1f)) {
-                    Text("Risk rules", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+                    Text("Risk rules", style = TlType.page)
                     Text("Clear limits before the session begins", style = TlType.body, color = Tl.muted)
                 }
                 AnimatedVisibility(saved != null, enter = fadeIn(), exit = fadeOut()) {
@@ -254,7 +255,7 @@ fun RulesScreen(vm: AppViewModel, bottomPad: PaddingValues) {
         DEFS.forEach { d ->
             val r = form[d.key] ?: return@forEach
             if (d.key == "maxLoss") item { Eyebrow("Whole account · Manual + Algo", Modifier.padding(start = 4.dp, top = 6.dp)) }
-            if (d.key == "capitalUse") item { Eyebrow("Manual trading", Modifier.padding(start = 4.dp, top = 10.dp)) }
+            if (d.key == "capitalUse") item { Eyebrow("Every trade · Manual + Algo", Modifier.padding(start = 4.dp, top = 10.dp)) }
             if (d.key == "killSwitch") item { Eyebrow("When a limit hits", Modifier.padding(start = 4.dp, top = 10.dp)) }
             item(key = d.key) {
                 RuleCard(d, r, line(d.key, r, capital, dash?.broker?.label ?: "broker"), if (d.key == "killSwitch") "${dash?.broker?.label ?: "Broker"} kill switch" else d.title) { edit(d.key, it) }

@@ -7,7 +7,7 @@ import { CATALOG, createAdapter, adapterFor, dropAdapter, accountFor, accountSum
 import { clearBook } from './book.js';
 import { syncAccount } from '../risk/monitor.js';
 import { dayState, getDashboard, agentLockReason, algoLocked, ALGO_LOCK_MESSAGE } from '../risk/service.js';
-import { getPermissions, getKillStatus } from './book.js';
+import { getPermissions, getKillStatus, setPermissions } from './book.js';
 import { notify } from '../notifications/service.js';
 import { emit } from '../../lib/bus.js';
 import { conflict } from '../../lib/errors.js';
@@ -15,7 +15,7 @@ import { audit } from '../audit/service.js';
 import { syncBrokerPnl } from '../analytics/brokerpnl.js';
 import { guardBroker } from '../billing/trialguard.js';
 import { algoReadiness } from '../scalper/algo-live.js';
-import { stoxkartLink } from './stoxkart.js';
+import { stoxkartLink, stoxkartAllowed, requireStoxkart } from './stoxkart.js';
 import { getBook } from './book.js';
 import { brokerBusy, switchTradeVia, switchPaper } from './switch.js';
 import { paperWallet, setPaperBalance, resetPaperWallet, PAPER_DEFAULT, PAPER_MIN, PAPER_MAX } from './adapters/paper.js';
@@ -49,6 +49,8 @@ function gapCfgFrom(c = {}, prev = {}) {
     decide: String(c.decide ?? 'premium'), lots: Math.floor(v.num(c.lots ?? 0, 'Fixed lots', { min: 0, max: 500 })) };
   if (!['amount', 'percent'].includes(cfg.capitalMode)) throw bad('VALIDATION', 'Capital: choose a ₹ amount or a % of the funds.');
   if (!['premium', 'preopen'].includes(cfg.decide)) throw bad('VALIDATION', 'Decide the side: the premium at 09:15 or the index pre-open.');
+  // The last fixed lots, kept while sizing is by capital, so choosing Fixed lots again brings them back (not 1).
+  cfg.lastLots = cfg.lots > 0 ? cfg.lots : Math.floor(Number(prev.lots) > 0 ? Number(prev.lots) : Number(prev.lastLots) > 0 ? Number(prev.lastLots) : 0);
   cfg.capitalSince = cfg.capital > 0 && prev.capital === cfg.capital && prev.compound === cfg.compound && prev.capitalSince ? prev.capitalSince : cfg.capital > 0 ? Date.now() : 0;
   return cfg;
 }
@@ -70,10 +72,11 @@ async function verifyCreds(broker, clientId, accessToken) {
 
 export function brokerRoutes(r) {
   // A Paper account (no broker) is not a broker connection: the page offers Connect, which replaces it.
+  // StoxKart (beta) is linkable for administrators only: everyone else gets it as a coming-soon broker.
   r.get('/api/brokers', ctx => ({
-    catalog: CATALOG,
+    catalog: stoxkartAllowed(ctx.user) ? CATALOG : CATALOG.map(b => (b.id === 'stoxkart' ? { ...b, link: false } : b)),
     account: accountSummary(accountFor(ctx.user.id)),
-    links: { stoxkart: stoxkartLink(ctx.user.id) },
+    links: { stoxkart: stoxkartAllowed(ctx.user) ? stoxkartLink(ctx.user.id) : { linked: false } },
     staticIp: staticIpView(ctx.user.id),
   }));
 
@@ -93,7 +96,13 @@ export function brokerRoutes(r) {
     // switched on; Real is one switch away on the AI Algo Trading page).
     if (isNew) stmt('UPDATE broker_accounts SET gap_on = 1, orb_on = 0, cross_on = 0, ema915_on = 0, paper_mode = 1 WHERE id = ?').run(acct.id);
     guardBroker(ctx.user.id, broker, clientId);   // one free trial per broker account
-    await syncAccount(acct, { force: true });
+    // Order access (the static IP) is the broker's own: read it from the broker itself (`acct` is the row from before a new
+    // account was put on Paper), so the connect checks report it even when trading starts on paper.
+    const own = adapterFor(acct);
+    if (own.permissions) { try { setPermissions(ctx.user.id, await own.permissions()); } catch { /* the sync below retries */ } }
+    // The first book is synced with the row as it is now: a new account on Paper starts with the paper book, not the
+    // broker's positions and fills (they would land in Paper's day and block switching to Real).
+    await syncAccount(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), { force: true });
     const fresh = stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id);
     audit(ctx.user.id, 'broker.connected', { broker }, ctx.ip);
     syncBrokerPnl(ctx.user.id).catch(() => {});   // backfill the P&L calendar in the background
@@ -260,6 +269,7 @@ export function brokerRoutes(r) {
   // Which broker places the orders: the account's own (Dhan) or the linked StoxKart account (Dhan keeps the market
   // data). Switched only with nothing open, so no position or stop-loss order is left behind at the other broker.
   r.post('/api/brokers/links/stoxkart/trade-via', async ctx => {
+    requireStoxkart(ctx.user);
     const on = v.bool(ctx.body.on, 'Trade through StoxKart');
     const acct = accountFor(ctx.user.id);
     if (!acct) throw bad('NO_BROKER', 'Connect Dhan first: it supplies the market data.');

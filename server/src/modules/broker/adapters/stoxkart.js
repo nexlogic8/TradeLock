@@ -124,7 +124,7 @@ export function createStoxkartAdapter({ creds, transport = request, freezeQty = 
       ]);
       const posSig = pos.map(p => `${p.token}:${p.net_quantity}:${p.buy_quantity}:${p.sell_quantity}`).join('|');
       const book = withOrders ? firstBook : prevPosSig === undefined || posSig !== prevPosSig ? await orderBook() : null;
-      const orderSig = book ? book.map(o => `${o.order_id}:${o.status}:${o.traded_quantity}`).join('|') : prevOrderSig;
+      const orderSig = book ? book.map(o => `${o.order_id}:${o.status}:${o.traded_quantity}:${o.price ?? ''}:${o.trigger_price ?? ''}`).join('|') : prevOrderSig;   // prices: a moved order is a change
       const trades = book && (prevOrderSig === undefined || orderSig !== prevOrderSig) ? await call('GET', '/reports/trade-book').then(r => r.data || []) : null;
       // Positions carry no trading symbol: take it from today's orders and fills for the same token.
       const symbolOf = new Map();

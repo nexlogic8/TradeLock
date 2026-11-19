@@ -25,7 +25,7 @@ object AlarmCenter {
         val sdk = Build.VERSION.SDK_INT
         return listOf(
             Need("notifications", "Notifications", "Shows the alarm and its Stop button", sdk < 33 || c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED),
-            Need("fullScreen", "Full-screen alert", "Opens the alarm over the lock screen", sdk < 34 || nm.canUseFullScreenIntent()),
+            Need("fullScreen", "Full-screen alert", "Opens the alarm over the lock screen", Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent()),
             Need("overlay", "Display over other apps", "Lets the alarm open from the background", Settings.canDrawOverlays(c)),
             Need("dnd", "Do Not Disturb access", "Rings even on silent and in DND", nm.isNotificationPolicyAccessGranted),
             Need("battery", "No battery limit", "Keeps watching while the phone sleeps", pm.isIgnoringBatteryOptimizations(c.packageName)),

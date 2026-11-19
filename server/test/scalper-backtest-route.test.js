@@ -39,7 +39,9 @@ test('backtest history rejects malformed, future, and over-one-year date ranges'
   const handler=routes.get('/api/scalper/backtest-candles'),ctx={user:{id:765433}};
   try {
     await assert.rejects(handler({...ctx,query:{startDate:'2026-02-30',endDate:'2026-03-01'}}),/valid start and end dates/);
-    await assert.rejects(handler({...ctx,query:{startDate:'2026-10-13',endDate:'2026-10-14'}}),/valid start and end dates/);
+    // A range in the future (relative to today, so the test does not go stale as the calendar moves on).
+    const day=n=>new Date(Date.now()+n*86400e3).toISOString().slice(0,10);
+    await assert.rejects(handler({...ctx,query:{startDate:day(30),endDate:day(31)}}),/valid start and end dates/);
     await assert.rejects(handler({...ctx,query:{startDate:'2021-01-01',endDate:'2026-10-13'}}),/last five years/);
   } finally { delete globalThis.__scalperBacktestRouteTest; }
 });

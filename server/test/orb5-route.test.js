@@ -1,4 +1,6 @@
 process.env.DB_PATH = ':memory:';
+// The ORB backtest is for administrators (users get the Gap open 09:15 one): the test users are administrators.
+process.env.ADMIN_EMAILS = 'orb1@test.local,orb2@test.local,orb3@test.local,orb4@test.local';
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
 const { readFileSync } = await import('node:fs');
@@ -28,7 +30,7 @@ const body={strategy:'orb5',startDate:'2026-10-13',endDate:'2026-10-13',mode:'di
 
 test('ORB settings are validated before any history is loaded',async()=>{
   const routes=await harness({async intradayCandles(){assert.fail('invalid settings must not fetch data');}});
-  const run=extra=>routes.get('POST /api/scalper/backtest-runs')({user:{id:userId},body:{...body,...extra}});
+  const run=extra=>routes.get('POST /api/scalper/backtest-runs')({user:{id:userId,email:'orb1@test.local'},body:{...body,...extra}});
   await assert.rejects(run({squareOff:'09:10'}),/Square-off time/);
   await assert.rejects(run({riskReward:0}),/Risk-reward/);
   await assert.rejects(run({maxEntriesPerDay:1.5}),/Maximum entries/);
@@ -40,7 +42,7 @@ test('ORB settings are validated before any history is loaded',async()=>{
 test('a directional ORB run is saved with its trades, days and chart candles',async()=>{
   const userId=newUser('orb2@test.local');
   const routes=await harness({async intradayCandles(){ return dhan(bars); }});
-  const run=await routes.get('POST /api/scalper/backtest-runs')({user:{id:userId},body});
+  const run=await routes.get('POST /api/scalper/backtest-runs')({user:{id:userId,email:'orb1@test.local'},body});
   assert.equal(run.strategy,'orb5');
   const {metrics}=run;
   assert.equal(metrics.mode,'directional');
@@ -48,7 +50,7 @@ test('a directional ORB run is saved with its trades, days and chart candles',as
   const [trade]=metrics.trades;
   assert.deepEqual([trade.direction,trade.entry,trade.stop,trade.target,trade.exit,trade.exitReason,trade.r],['CE',111,107,119,119,'Target',2]);
   assert.equal(metrics.summary.net,8);
-  const chart=await routes.get('GET /api/scalper/backtest-runs/:id/chart')({user:{id:userId},params:{id:String(run.id)},query:{tradeIndex:'0'}});
+  const chart=await routes.get('GET /api/scalper/backtest-runs/:id/chart')({user:{id:userId,email:'orb1@test.local'},params:{id:String(run.id)},query:{tradeIndex:'0'}});
   assert.equal(chart.day,'2026-10-13');
   assert.equal(chart.candles.length,bars.length);
   assert.equal(chart.trade.rangeHigh,110);
@@ -66,15 +68,15 @@ test('actual-options mode prices the NIFTY trade with the selected contract prem
     },
   };
   const routes=await harness(adapter);
-  const run=await routes.get('POST /api/scalper/backtest-runs')({user:{id:userId},body:{...body,mode:'options',options:{expiry:'W1',moneyness:0,lots:1,brokeragePerOrder:20,slippagePerUnit:0,statutoryCharges:false}}});
+  const run=await routes.get('POST /api/scalper/backtest-runs')({user:{id:userId,email:'orb1@test.local'},body:{...body,mode:'options',options:{expiry:'W1',moneyness:0,lots:1,brokeragePerOrder:20,slippagePerUnit:0,statutoryCharges:false}}});
   const o=run.metrics.trades[0].option;
   assert.deepEqual([o.strike,o.entry,o.exit,o.exitPriceFrom],[23500,102,121,'close'],'buy at the 09:21 open, sell at the 09:22 close when NIFTY hit the target');
   assert.equal(o.pnl,(121-102)*65-40);
   assert.equal(run.metrics.optionSummary.net,o.pnl);
-  const caps=await routes.get('GET /api/scalper/backtest-capabilities')({user:{id:userId}});
+  const caps=await routes.get('GET /api/scalper/backtest-capabilities')({user:{id:userId,email:'orb1@test.local'}});
   assert.equal(caps.optionsData.available,true,'option candles were returned');
   globalThis.__orbRouteTest.connected=false;
-  const offline=await routes.get('GET /api/scalper/backtest-capabilities')({user:{id:userId}});
+  const offline=await routes.get('GET /api/scalper/backtest-capabilities')({user:{id:userId,email:'orb1@test.local'}});
   assert.equal(offline.optionsData.available,false);
   assert.match(offline.optionsData.reason,/Connect or reconnect Dhan/);
   delete globalThis.__orbRouteTest;

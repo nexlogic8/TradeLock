@@ -86,7 +86,7 @@ before(async () => {
     body: JSON.stringify({ email: 'gap@example.com', password: 'longpassword' }) });
   uid = stmt('SELECT id FROM users WHERE email = ?').get('gap@example.com').id;
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');   // the Algo Trading rule set
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'manual');   // the Algo Trading rule set
   upsertAccount(uid, { broker: 'dhan', clientId: 'C777', accessToken: 'test-token-not-real-0123456789' });
   stmt('UPDATE broker_accounts SET agent_on = 1, algo_on = 1, orb_on = 0, cross_on = 0, gap_on = 1 WHERE user_id = ?').run(uid);
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);
@@ -665,7 +665,7 @@ test('live market: never filled → a market order every second until 09:15:30, 
   assert.equal(new Set(dhan.calls.filter(c => c[0] === 'cancel').map(c => c[1])).size, buys.length, 'every one cancelled');
 });
 
-test('Algo page history: earlier days only, newest first, with P&L and % when the trade has an entry and an exit', async () => {
+test('Algo page history: earlier days and today\'s finished trades, newest first, with P&L and % when the trade has an entry and an exit', async () => {
   const { autoTradeHistory } = await import('../src/modules/scalper/autotrade.js');
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
   const add = (day, key, status, entry, exit, qty) => stmt(`INSERT INTO auto_trades (user_id, day, signal_key, direction, status, symbol, lots, qty, entry_price, exit_price, created_at)
@@ -675,8 +675,13 @@ test('Algo page history: earlier days only, newest first, with P&L and % when th
   add('2026-11-04', 'c', 'skipped', null, null, 2535);
   add('2026-11-05', 'd', 'open', 200, null, 65);
   const h = autoTradeHistory(uid, '2026-11-05');
-  assert.deepEqual(h.map(t => t.day), ['2026-11-04', '2026-11-03', '2026-11-02'], 'today is in Today, not in History');
+  assert.deepEqual(h.map(t => t.day), ['2026-11-04', '2026-11-03', '2026-11-02'], 'today\'s open trade is in Today only');
   assert.deepEqual([h[2].pnl, h[2].pnlPct], [3935.75, 38.69]);
   assert.deepEqual([h[0].pnl, h[0].pnlPct], [null, null], 'no entry: no P&L');
+  // Closed today: in History at once, with its P&L (no waiting for the next day).
+  stmt("UPDATE auto_trades SET status = 'closed', exit_price = 250 WHERE user_id = ? AND day = '2026-11-05'").run(uid);
+  const h2 = autoTradeHistory(uid, '2026-11-05');
+  assert.equal(h2[0].day, '2026-11-05');
+  assert.deepEqual([h2[0].pnl, h2[0].pnlPct], [3250, 25]);
   stmt('DELETE FROM auto_trades WHERE user_id = ?').run(uid);
 });

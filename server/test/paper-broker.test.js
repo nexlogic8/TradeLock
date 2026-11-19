@@ -74,3 +74,75 @@ test('Real | Paper switch: the account trades the paper broker (label Paper), st
   assert.equal(acct.paper_mode, 0);
   assert.notEqual(adapterFor(acct).label, 'Paper');
 });
+
+test('a Dhan kill switch does not lock paper trading: the switch drops its reading, the paper broker\'s own lock decides', async () => {
+  const { upsertAccount } = await import('../src/modules/broker/registry.js');
+  const { switchPaper } = await import('../src/modules/broker/switch.js');
+  const { setKillStatus, getKillStatus, killSwitchLock } = await import('../src/modules/broker/book.js');
+  const { checkOrder } = await import('../src/modules/risk/gate.js');
+  const { DEFAULT_RULES } = await import('../src/modules/rules/service.js');
+  const uid = newUser('dhanlock@paper.test');
+  upsertAccount(uid, { broker: 'dhan', clientId: 'C6', accessToken: 'test-token-not-real-0123456789' });
+  let acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);
+  setKillStatus(uid, { active: true, label: 'Dhan', checkedAt: Date.now() });   // Dhan locked today
+  assert.equal(killSwitchLock(uid, { ks_active_at: Date.now() }), 'Dhan');
+  acct = await switchPaper(acct, true, { sync: async () => {} });
+  assert.equal(getKillStatus(uid), null, 'Dhan\'s reading is not carried to paper');
+  assert.equal(killSwitchLock(uid, {}), null, 'paper trades');
+  // TradeLock's record of a lock counts only until the trading broker is read; the broker's reading wins.
+  setKillStatus(uid, { active: false, label: 'Paper', checkedAt: Date.now() });
+  assert.equal(killSwitchLock(uid, { ks_active_at: Date.now() }), null);
+  // The paper day lock blocks entries with a message that names it (and how to switch it off).
+  setKillStatus(uid, { active: true, label: 'Paper', checkedAt: Date.now() });
+  const lock = killSwitchLock(uid, {});
+  const v = checkOrder(buy(65), { rules: structuredClone(DEFAULT_RULES), positions: [], orders: [], entries: 0, pnl: 0, minutes: 600,
+    subscriptionActive: true, killSwitchActive: !!lock, killSwitchLabel: lock });
+  assert.equal(v.code, 'KILL_SWITCH');
+  assert.match(v.reason, /Paper kill switch is on.*Switch it off on the Overview page/);
+});
+
+test('a buy stop above the market rests until the price rises to it (a buy limit above it would fill at once)', async () => {
+  const { stopLimitPrice } = await import('../src/modules/orders/routes.js');
+  assert.equal(stopLimitPrice('BUY', 289.9), 304.4, 'the stop works as a limit 5% above its trigger, on the tick');
+  assert.equal(stopLimitPrice('SELL', 100), 95);
+  const uid = newUser('stop@paper.test'), m = market(), p = createPaperAdapter({ userId: uid, data: m.data });
+  m.px = 195.55;
+  const lim = await p.placeOrder(buy(20, { type: 'LIMIT', price: 289.9 }));
+  assert.deepEqual([(await p.orderStatus(lim.id)).status, (await p.orderStatus(lim.id)).price], ['filled', 195.55], 'a buy limit above the market fills at the market');
+  await p.exitPosition({ symbol: 'NIFTY X CE', securityId: 'C1', exchangeSegment: 'NSE_FNO', qty: 20 });
+  const stop = await p.placeOrder(buy(20, { type: 'STOP_LOSS', triggerPrice: 289.9, price: stopLimitPrice('BUY', 289.9) }));
+  assert.equal((await p.orderStatus(stop.id)).status, 'pending', 'below the trigger: waits');
+  const row = (await p.snapshot()).orders.find(o => o.id === stop.id);
+  assert.deepEqual([row.type, row.triggerPrice, row.exchangeSegment], ['STOP_LOSS', 289.9, 'NSE_FNO'], 'the book carries the trigger and segment (chart marker, live feed)');
+  m.px = 290.1;
+  assert.deepEqual([(await p.orderStatus(stop.id)).status, (await p.orderStatus(stop.id)).price], ['filled', 290.1], 'rose to the trigger: bought');
+});
+
+test('moving a resting paper order changes the book signature, so the dashboard is pushed and the chart redraws it', async () => {
+  const uid = newUser('move@paper.test'), m = market(), p = createPaperAdapter({ userId: uid, data: m.data });
+  m.px = 183.3;
+  const stop = await p.placeOrder(buy(20, { type: 'STOP_LOSS', triggerPrice: 246.45, price: 258.75 }));
+  const before = (await p.snapshot()).orderSig;
+  await p.modifyStopLoss(stop.id, { triggerPrice: 232.3, price: 243.9 });
+  const after = await p.snapshot();
+  assert.notEqual(after.orderSig, before, 'a new trigger is a change (it was id + status only: the move never reached the screen)');
+  assert.equal(after.orders.find(o => o.id === stop.id).triggerPrice, 232.3);
+});
+
+test('MCX on paper counts lots: P&L, wallet and margin use the lot value (GOLDM ×10), as Dhan does', async () => {
+  const uid = newUser('mcx@paper.test'), m = market(), p = createPaperAdapter({ userId: uid, data: m.data });
+  setPaperBalance(uid, 10_000_000);
+  const gold = (side, qty) => ({ symbol: 'GOLDM 2026-11-27 131000 PE', side, qty, type: 'MARKET', securityId: 'G1', exchangeSegment: 'MCX_COMM', productType: 'INTRADAY' });
+  m.px = 2587.5;
+  await p.placeOrder(gold('BUY', 145));
+  let s = await p.snapshot();
+  assert.equal(s.funds.used, 3_751_875, '145 lots × 2,587.50 × 10 is the money in the trade');
+  m.px = 2600;
+  assert.equal((await p.snapshot()).positions[0].unrealized, 18_125, '(2,600 − 2,587.50) × 145 × 10');
+  m.px = 2720.5;
+  await p.placeOrder(gold('SELL', 145));
+  s = await p.snapshot();
+  assert.equal(s.positions[0].realized, 192_850, '(2,720.50 − 2,587.50) × 145 × 10, not ₹19,285');
+  const w = paperWallet(uid).balance;
+  assert.ok(w > 10_000_000 + 192_850 - 10_000 && w < 10_000_000 + 192_850, `wallet +₹1,92,850 less charges (on ≈₹77 lakh turnover): ${w}`);
+});

@@ -61,6 +61,10 @@ test('signup, connect demo broker, trade until the cap blocks', async () => {
   const conn = await call('POST', '/api/brokers/connect', { broker: 'mock' });
   assert.equal(conn.status, 200);
   assert.ok(conn.body.checks.every(c => c.ok));
+  // A new broker account starts on Paper (Paper first): these flows test the real (demo) broker.
+  assert.equal((await call('POST', `/api/brokers/${conn.body.account.id}/paper`, { on: false })).status, 200);
+  // Real starts fresh (Protection off until switched on, as for any newly used broker): switch it on.
+  assert.equal((await call('POST', `/api/brokers/${conn.body.account.id}/agent`, { on: true })).status, 200);
 
   const dash = await call('GET', '/api/dashboard');
   assert.equal(dash.body.entries, 2, 'demo morning has two entries');

@@ -13,6 +13,16 @@ export const setKillStatus = (userId, status) => {
   if (killSwitch.get(userId)?.active !== status.active) markDirty(userId);
   killSwitch.set(userId, status);
 };
+// Real ↔ Paper (or Dhan ↔ StoxKart): the reading belonged to the broker traded before; the next sync reads the new one.
+export const clearKillStatus = userId => { if (killSwitch.delete(userId)) markDirty(userId); };
+/**
+ * Is the trading broker locked? Its own reading wins (Paper's day lock, or Dhan's switch); TradeLock's record of a lock
+ * today (`ks_active_at`) counts only while that reading is unknown. Returns the lock's label ('Paper', 'Dhan', ...) or null.
+ */
+export function killSwitchLock(userId, s) {
+  const k = killSwitch.get(userId);
+  return k?.active === true || (k?.active !== false && !!s?.ks_active_at) ? k?.label || 'broker' : null;
+}
 
 // Broker-side permissions (static IP for orders, token validity), refreshed every few minutes.
 const permissions = new Map();

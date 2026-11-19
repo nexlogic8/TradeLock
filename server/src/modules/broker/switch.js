@@ -2,7 +2,7 @@
 // the Trade-via switch on the Brokers page and by Algo Trading's pre-open fallback (autotrade.js preopenRoute).
 import { stmt } from '../../db/index.js';
 import { dropAdapter } from './registry.js';
-import { clearBook, getBook } from './book.js';
+import { clearBook, clearKillStatus, getBook } from './book.js';
 import { FLAGS, swapBrokerState, tradingBroker } from './per-broker.js';
 import { forgetDays } from '../risk/service.js';
 import { syncAccount } from '../risk/monitor.js';
@@ -26,7 +26,7 @@ export async function switchTradeVia(acct, on, { carryFlags = false, ip = null, 
   swapBrokerState(acct, tradingBroker(acct), to);
   if (carryFlags) stmt(`UPDATE broker_accounts SET ${FLAGS.map(k => `${k} = ?`).join(', ')} WHERE id = ?`).run(...FLAGS.map(k => acct[k]), acct.id);
   stmt('UPDATE broker_accounts SET trade_via = ? WHERE id = ?').run(on ? 'stoxkart' : 'own', acct.id);
-  forgetDays(acct.user_id); clearBook(acct.user_id);
+  forgetDays(acct.user_id); clearBook(acct.user_id); clearKillStatus(acct.user_id);
   dropAdapter(acct.id);
   audit(acct.user_id, 'broker.trade_via', { to, ...(reason ? { reason } : {}) }, ip);
   await sync(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), { force: true }).catch(() => {});
@@ -43,7 +43,7 @@ export async function switchPaper(acct, on, { ip = null, sync = syncAccount } = 
   swapBrokerState(acct, from, to);
   if (on) stmt(`UPDATE broker_accounts SET ${FLAGS.map(k => `${k} = ?`).join(', ')} WHERE id = ?`).run(...FLAGS.map(k => acct[k]), acct.id);
   stmt('UPDATE broker_accounts SET paper_mode = ? WHERE id = ?').run(on ? 1 : 0, acct.id);
-  forgetDays(acct.user_id); clearBook(acct.user_id);
+  forgetDays(acct.user_id); clearBook(acct.user_id); clearKillStatus(acct.user_id);
   dropAdapter(acct.id);
   audit(acct.user_id, 'algo.paper_mode', { on }, ip);
   await sync(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), { force: true }).catch(() => {});

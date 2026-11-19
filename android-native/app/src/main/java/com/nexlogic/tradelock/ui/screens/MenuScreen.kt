@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,9 +49,19 @@ import coil.compose.AsyncImage
 import com.nexlogic.tradelock.data.User
 import com.nexlogic.tradelock.ui.components.Eyebrow
 import com.nexlogic.tradelock.ui.components.TlCard
+import com.nexlogic.tradelock.ui.components.IconBadge
+import com.nexlogic.tradelock.ui.components.PageHeader
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.style.TextAlign
 import com.nexlogic.tradelock.ui.components.tactile
 import com.nexlogic.tradelock.ui.theme.Tl
 import com.nexlogic.tradelock.ui.theme.TlType
+
+// Each row's icon tint (by path): a calm spread of the palette.
+private val TINT = mapOf("qrlogin" to Tl.mint, "alarm" to Tl.amber, "strategy" to Tl.violet, "backtest" to Tl.ice, "calendar" to Tl.mint,
+    "journal" to Tl.amber, "analytics" to Tl.violet, "brokers" to Tl.ice, "wallet" to Tl.mint, "billing" to Tl.amber, "profile" to Tl.violet,
+    "affiliate" to Tl.ice, "settings" to Tl.muted)
 
 private val TRADING = listOf(
     Triple("Scan to sign in on web", "qrlogin", Icons.Rounded.QrCodeScanner),
@@ -73,14 +84,16 @@ private val ACCOUNT = listOf(
 @Composable
 fun MenuScreen(user: User?, bottomPad: PaddingValues, onOpen: (String) -> Unit, onSignOut: () -> Unit) {
     LazyColumn(
-        Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding(),
+        Modifier.fillMaxSize().ambient().statusBarsPadding(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = bottomPad.calculateBottomPadding() + 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        item { PageHeader("Menu", "Everything in TradeLock", modifier = Modifier.padding(top = 6.dp, start = 2.dp)) }
         item {
-            TlCard(Modifier.fillMaxWidth()) {
+            TlCard(Modifier.fillMaxWidth().tactile({ onOpen("profile") }), accent = Tl.mint) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(56.dp).clip(CircleShape).background(Tl.mintBrush), contentAlignment = Alignment.Center) {
+                    // The avatar inside an aurora ring.
+                    Box(Modifier.size(62.dp).clip(CircleShape).background(Tl.aurora).padding(3.dp).clip(CircleShape).background(Tl.mintBrush), contentAlignment = Alignment.Center) {
                         Text(user?.initials ?: "", color = Color(0xFF04261F), fontWeight = FontWeight.Black, fontSize = 20.sp)
                         if (!user?.avatar.isNullOrBlank()) AsyncImage(user!!.avatar, null, Modifier.size(56.dp).clip(CircleShape))
                     }
@@ -89,21 +102,26 @@ fun MenuScreen(user: User?, bottomPad: PaddingValues, onOpen: (String) -> Unit, 
                         Text(user?.name ?: "", style = TlType.title, color = Tl.text)
                         Text(user?.email ?: "", style = TlType.small.copy(fontSize = 13.sp), color = Tl.muted)
                     }
+                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tl.dim)
                 }
             }
         }
         item { Group("Trading", TRADING, onOpen) }
         item { Group("Account", ACCOUNT, onOpen) }
         item {
-            TlCard(Modifier.fillMaxWidth().tactile(onSignOut), padding = 16.dp) {
+            TlCard(Modifier.fillMaxWidth().tactile(onSignOut), padding = 14.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Rounded.Logout, null, tint = Tl.red, modifier = Modifier.size(22.dp))
+                    IconBadge(Icons.AutoMirrored.Rounded.Logout, Tl.red, 36.dp)
                     Spacer(Modifier.width(14.dp))
                     Text("Sign out", style = TlType.label.copy(fontSize = 16.sp), color = Tl.red)
                 }
             }
         }
-        item { Text("TradeLock native · preview", style = TlType.small, color = Tl.dim, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) }
+        item {
+            val ctx = LocalContext.current
+            val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
+            Text("TradeLock${ver?.let { " $it" } ?: ""} · NEXLOGIC LLP", style = TlType.small, color = Tl.dim, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+        }
     }
 }
 
@@ -117,9 +135,7 @@ private fun Group(title: String, rows: List<Triple<String, String, ImageVector>>
                     Modifier.fillMaxWidth().tactile({ onOpen(path) }).clip(RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Tl.surfaceHi), contentAlignment = Alignment.Center) {
-                        Icon(icon, null, tint = Tl.mint, modifier = Modifier.size(19.dp))
-                    }
+                    IconBadge(icon, TINT[path] ?: Tl.mint, 36.dp)
                     Spacer(Modifier.width(14.dp))
                     Text(label, style = TlType.label.copy(fontSize = 16.sp), color = Tl.text, modifier = Modifier.weight(1f))
                     Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tl.dim)

@@ -1,5 +1,7 @@
 package com.nexlogic.tradelock.ui.screens
 
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -29,6 +31,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.UnfoldMore
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import com.nexlogic.tradelock.ui.components.OiBar
+import com.nexlogic.tradelock.ui.components.STRATEGIES
+import com.nexlogic.tradelock.ui.components.Study
+import com.nexlogic.tradelock.ui.components.StudyType
+import com.nexlogic.tradelock.ui.components.previousDayRange
+import com.nexlogic.tradelock.ui.components.strategyMarkers
+import com.nexlogic.tradelock.ui.components.todaysOpeningRange
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -55,6 +71,7 @@ import com.nexlogic.tradelock.data.ScalperViewModel
 import com.nexlogic.tradelock.data.Toast
 import com.nexlogic.tradelock.ui.components.CandleChart
 import com.nexlogic.tradelock.ui.components.ChartLevel
+import com.nexlogic.tradelock.ui.components.LabelCell
 import com.nexlogic.tradelock.ui.components.Dot
 import com.nexlogic.tradelock.ui.components.Eyebrow
 import com.nexlogic.tradelock.ui.components.HoldToConfirm
@@ -67,13 +84,52 @@ import com.nexlogic.tradelock.ui.theme.Tl
 import com.nexlogic.tradelock.ui.theme.TlType
 import kotlinx.coroutines.launch
 
-private val INTERVALS = listOf("1" to "1m", "5" to "5m", "15" to "15m")
-private enum class ScAsk { None, Underlying, Expiry, Buy, Sell, Exit, Level, Chain }
+private val INTERVALS = listOf("1" to "1m", "5" to "5m", "15" to "15m", "25" to "25m", "60" to "1h")
+private val OR_HIGH = Color(0xFFFFBA52); private val OR_LOW = Color(0xFF5AB8FF); private val PREV = Color(0xFFC9A0FF)
+private enum class ScAsk { None, Underlying, Expiry, Buy, Sell, Exit, Level, Chain, Interval, Positions, Orders, Studies }
+private val CLOCK = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").withZone(java.time.ZoneId.of("Asia/Kolkata"))
+private val OI_RES = Color(0xFFFF7A90); private val OI_SUP = Color(0xFF3FC8E4); private val MAX_PAIN = Color(0xFFC08A5B)
+
+/** OI levels from the chain: the most call OI (resistance), the most put OI (support), max pain, and per-strike bars. */
+private class OiInfo(val levels: List<ChartLevel>, val bars: List<OiBar>)
+private fun oiLevels(rows: List<com.nexlogic.tradelock.data.StrikeRow>): OiInfo {
+    val r = rows.filter { (it.ce?.oi ?: 0.0) > 0 || (it.pe?.oi ?: 0.0) > 0 }
+    if (r.size < 3) return OiInfo(emptyList(), emptyList())
+    val res = r.maxByOrNull { it.ce?.oi ?: 0.0 }?.strike
+    val sup = r.maxByOrNull { it.pe?.oi ?: 0.0 }?.strike
+    // max pain: the expiry price at which option buyers together collect the least
+    val pain = r.minByOrNull { k -> r.sumOf { x -> (x.ce?.oi ?: 0.0) * maxOf(0.0, k.strike - x.strike) + (x.pe?.oi ?: 0.0) * maxOf(0.0, x.strike - k.strike) } }?.strike
+    val levels = buildList {
+        res?.let { add(ChartLevel(it, OI_RES, "OI Resistance", fit = false, outlined = true)) }
+        pain?.takeIf { it != res && it != sup }?.let { add(ChartLevel(it, MAX_PAIN, "Max Pain", fit = false, outlined = true)) }
+        sup?.takeIf { it != res }?.let { add(ChartLevel(it, OI_SUP, "OI Support", fit = false, outlined = true)) }
+    }
+    return OiInfo(levels, r.map { OiBar(it.strike, it.ce?.oi ?: 0.0, it.pe?.oi ?: 0.0) })
+}
 private val ORDER_BLUE = Color(0xFF5AA9FF)
+private val POS_BLUE = Color(0xFF2962FF); private val POS_AMBER = Color(0xFFF7A600)
+/** P&L as on the web / a broker's chart: "+9.75 INR" (Indian grouping, two decimals). */
+private fun pnlText(v: Double): String =
+    (if (v < 0) "−" else "+") + java.text.NumberFormat.getNumberInstance(java.util.Locale("en", "IN")).apply { minimumFractionDigits = 2; maximumFractionDigits = 2 }.format(kotlin.math.abs(v)) + " INR"
+/** First TP / SL from the entry label: 10% of the live price away, on the right side (the web's defaultLevel). */
+private fun defaultLevel(tp: Boolean, long: Boolean, ltp: Double): Double {
+    val away = maxOf(0.05, Math.round(ltp * 0.10 * 20) / 20.0)
+    return Math.round((if (tp == long) ltp + away else ltp - away) * 20) / 20.0
+}
 
 @Composable
-fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
+fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues, onClose: () -> Unit = {}) {
     val sc: ScalperViewModel = viewModel()
+    // Full screen while open: the status and navigation bars hide (a swipe from the edge shows them for a moment).
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        var ctx = view.context
+        while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) ctx = ctx.baseContext
+        val ctl = (ctx as? android.app.Activity)?.window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+        ctl?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        ctl?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        onDispose { ctl?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
+    }
     LaunchedEffect(Unit) { sc.start() }
     val s by sc.state.collectAsState()
     val dash by vm.dash.collectAsState()
@@ -83,6 +139,12 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
     val scope = rememberCoroutineScope()
     val c = s.contract
     val size = sc.sizeFor(s)
+    // Sell margin (writing the option) comes from Dhan's calculator: asked again when the contract or lots change
+    // (after a short pause) and every 20 s, as the web ticket does.
+    LaunchedEffect(c?.securityId, size.lots) {
+        kotlinx.coroutines.delay(450)
+        while (true) { sc.refreshMargin(size.lots); kotlinx.coroutines.delay(20_000) }
+    }
     // A dragged level stays where it was let go until the server's next update confirms it.
     val held = remember { androidx.compose.runtime.mutableStateMapOf<String, Double>() }
     LaunchedEffect(dash) { held.clear() }
@@ -94,15 +156,37 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
     val pos = dash?.positions?.firstOrNull { it.securityId == c?.securityId && it.qty != 0.0 }
     val bracket = dash?.brackets?.firstOrNull { it.securityId == c?.securityId }
     fun pnlAt(price: Double) = pos?.let { (price - it.avg) * it.qty * s.pointValue } ?: 0.0
+    // ✕ on the entry label closes the position: the first tap arms it ("Exit?") for 4 s, a second tap sends the exit.
+    var exitArmedAt by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     val levels = buildList {
-        pos?.let { p -> add(ChartLevel(p.avg, if (p.qty > 0) Tl.mint else Tl.red, "${if (p.qty > 0) "BUY" else "SELL"} ${"%.2f".format(p.avg)} · ${inr(p.unrealized, sign = true)}", dashed = false)) }
+        // The open position, drawn as on the web (and a broker's chart): [TP][SL][ qty ][ +9.75 INR ][ ✕ ] on the entry,
+        // [TP|SL][ qty ][ P&L there ][ ✕ ] on the target and stop lines. Entry P&L follows the live tick.
         if (pos != null) {
-            bracket?.tp?.let { tp -> val v = at("tp", tp); add(ChartLevel(v, Tl.green, "TP ${"%.2f".format(v)} · ${inr(pnlAt(v), sign = true)}", id = "tp", draggable = true, removable = true)) }
-            bracket?.sl?.let { sl -> val v = at("sl", sl); add(ChartLevel(v, Tl.red, "SL ${"%.2f".format(v)} · ${inr(pnlAt(v), sign = true)}", id = "sl", draggable = true, removable = true)) }
+            val qtyCell = LabelCell(kotlin.math.abs(pos.qty).toLong().toString(), Color.White, POS_BLUE)
+            val live = c?.ltp?.takeIf { it > 0 }?.let { pnlAt(it) } ?: pos.unrealized
+            val tp = bracket?.tp?.let { at("tp", it) }; val sl = bracket?.sl?.let { at("sl", it) }
+            val armed = System.currentTimeMillis() - exitArmedAt <= 4_000   // the screen redraws every second (clock pill)
+            // TP / SL buttons only while that level can still be added: a set level has its own line, and a Super Order
+            // leg removed at Dhan cannot be added back.
+            val canTp = tp == null && bracket?.superOrder != true; val canSl = sl == null && bracket?.superOrder != true
+            add(ChartLevel(pos.avg, POS_BLUE, "", dashed = true, cells = listOfNotNull(
+                if (canTp) LabelCell("TP", Tl.green, act = "add-tp") else null,
+                if (canSl) LabelCell("SL", POS_AMBER, act = "add-sl") else null,
+                qtyCell,
+                LabelCell(pnlText(live), Tl.money(live)),
+                if (armed) LabelCell("Exit?", Color.White, Tl.red, act = "exit") else LabelCell("✕", Tl.text, act = "exit"),
+            )))
+            tp?.let { v -> add(ChartLevel(v, Tl.green, "TP", dashed = false, id = "tp", draggable = true, removable = true, cells = listOf(
+                LabelCell("TP", Color(0xFF05121A), Tl.green), qtyCell, LabelCell(pnlText(pnlAt(v)), Tl.money(pnlAt(v))), LabelCell("✕", Tl.text, act = "remove")))) }
+            sl?.let { v -> add(ChartLevel(v, POS_AMBER, "SL", dashed = false, id = "sl", draggable = true, removable = true, cells = listOf(
+                LabelCell("SL", Color(0xFF05121A), POS_AMBER), qtyCell, LabelCell(pnlText(pnlAt(v)), Tl.money(pnlAt(v))), LabelCell("✕", Tl.text, act = "remove")))) }
         }
-        dash?.orders.orEmpty().filter { it.securityId == c?.securityId && it.type == "LIMIT" }.forEach { o ->
-            val v = at("o:${o.id}", o.price)
-            add(ChartLevel(v, if (o.side == "BUY") ORDER_BLUE else Tl.amber, "${o.side} LMT ${"%.2f".format(v)} · ${(o.qty / s.qtyPerLot.coerceAtLeast(1)).toInt()} lot", id = "o:${o.id}", draggable = true, removable = true))
+        // Pending entries: limits at their price, stop entries at their trigger (a position's own stop-loss is its SL line).
+        val slIds = dash?.brackets.orEmpty().mapNotNull { it.slOrderId }.toSet()
+        dash?.orders.orEmpty().filter { it.securityId == c?.securityId && (it.type == "LIMIT" || ((it.type == "STOP_LOSS" || it.type == "SL") && it.id !in slIds)) }.forEach { o ->
+            val stop = o.type != "LIMIT"
+            val v = at("o:${o.id}", if (stop) (o.triggerPrice ?: o.price) else o.price)
+            add(ChartLevel(v, if (o.side == "BUY") ORDER_BLUE else Tl.amber, "${o.side} ${if (stop) "STOP" else "LMT"} ${"%.2f".format(v)} · ${(o.qty / s.qtyPerLot.coerceAtLeast(1)).toInt()} lot", id = "o:${o.id}", draggable = true, removable = true))
         }
         (s.alerts ?: dash?.alerts).orEmpty().filter { it.securityId == c?.securityId }.forEach { a ->
             val v = at("a:${a.id}", a.price)
@@ -119,7 +203,7 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
             when {
                 id == "tp" -> done(sc.setBracket(c!!.securityId, price, bracket?.sl))
                 id == "sl" -> done(sc.setBracket(c!!.securityId, bracket?.tp, price))
-                id.startsWith("o:") -> done(sc.moveOrder(id.removePrefix("o:"), price), "Limit order moved to ${"%.2f".format(com.nexlogic.tradelock.data.tick(price))}.")
+                id.startsWith("o:") -> done(sc.moveOrder(id.removePrefix("o:"), price), "Order moved to ${"%.2f".format(com.nexlogic.tradelock.data.tick(price))}.")
                 id.startsWith("a:") -> {
                     // The side (≥ / ≤) comes from the alert's own contract price: without a live one the move would keep the old side.
                     val a = (s.alerts ?: dash?.alerts).orEmpty().firstOrNull { "a:${it.id}" == id }
@@ -144,110 +228,122 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
     // Today's move of the index: from the first bar of today's session (the chart's own candles).
     val dayOpen = s.spotCandles.lastOrNull()?.let { last -> val day = (last.time + 19_800) / 86_400; s.spotCandles.firstOrNull { (it.time + 19_800) / 86_400 == day }?.open }
     val spotMove = dayOpen?.takeIf { it > 0 && s.spot > 0 }?.let { s.spot - it }
+    // The clock pill and the live bar's countdown tick every second.
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1_000 - now % 1_000) } }
+    // Share of the chart area the index chart takes (the handle between the charts moves it).
+    var split by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(0.5f) }
+    val oi = remember(s.strikes) { oiLevels(s.strikes) }
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding()) {
-        // ---- header: instrument (tap to change) · live price and today's move · feed ----
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).tactile({ ask = ScAsk.Underlying }, haptic = false)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(s.label, style = TlType.label.copy(fontSize = 13.sp), color = Tl.muted, maxLines = 1)
-                    Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tl.muted, modifier = Modifier.size(16.dp))
-                }
-                Row(verticalAlignment = Alignment.Bottom) {
-                    RollingText("%,.2f".format(s.spot), TlType.num.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold), Tl.text)
-                    spotMove?.let { mv ->
-                        Spacer(Modifier.width(8.dp))
-                        Text("%+.2f (%+.2f%%)".format(mv, mv / dayOpen!! * 100), style = TlType.numSm.copy(fontSize = 12.sp), color = Tl.money(mv), modifier = Modifier.padding(bottom = 4.dp))
-                    }
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(CircleShape).background(Tl.surfaceHi).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                Dot(if (s.feed == "live") Tl.mint else Tl.amber, 6.dp); Spacer(Modifier.width(6.dp))
-                Text(if (s.feed == "live") "LIVE" else s.feed.uppercase(), style = TlType.eyebrow.copy(fontSize = 9.sp), color = if (s.feed == "live") Tl.mint else Tl.amber)
-            }
+    // ---- indicators, overlays and strategies: per chart, remembered on this phone (as the web keeps them per browser) ----
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("scalper_chart", android.content.Context.MODE_PRIVATE) }
+    var spotStudies by remember { mutableStateOf(Study.decodeList(prefs.getString("studies.spot", null)) ?: Study.DEFAULT) }
+    var optStudies by remember { mutableStateOf(Study.decodeList(prefs.getString("studies.opt", null)) ?: Study.DEFAULT) }
+    var overlays by remember { mutableStateOf(prefs.getStringSet("overlays", setOf("oi", "prev"))!!.toSet()) }
+    val session by vm.session.collectAsState()
+    val admin = (session as? com.nexlogic.tradelock.data.Session.SignedIn)?.user?.admin == true
+    // Chart strategy signals are for administrators only (as on the web); others get clean charts.
+    var strategies by remember(admin) { mutableStateOf(if (admin) prefs.getStringSet("strategies", STRATEGIES.map { it.first }.toSet())!!.toSet() else emptySet()) }
+    fun saveStudies(spot: Boolean, l: List<Study>) {
+        if (spot) spotStudies = l else optStudies = l
+        prefs.edit().putString(if (spot) "studies.spot" else "studies.opt", Study.encodeList(l)).apply()
+    }
+    fun toggleOverlay(k: String) { overlays = if (k in overlays) overlays - k else overlays + k; prefs.edit().putStringSet("overlays", overlays).apply() }
+    fun toggleStrategy(k: String) { strategies = if (k in strategies) strategies - k else strategies + k; prefs.edit().putStringSet("strategies", strategies).apply() }
+    var studiesSpot by remember { mutableStateOf(true) }   // which chart the Indicators / Interval sheet is for
+    val spotSec = (s.interval.toIntOrNull() ?: 5) * 60L
+    val optSec = (s.optInterval.toIntOrNull() ?: 5) * 60L
+    // Day levels: the opening range (with ORB on) and the previous session's high / low, on each chart from its own candles.
+    fun dayLevels(cs: List<com.nexlogic.tradelock.ui.components.Candle>, sec: Long) = buildList {
+        if ("orb" in strategies && sec <= 300) todaysOpeningRange(cs, now)?.let { (h, l) ->
+            add(ChartLevel(h, OR_HIGH, "OR High", fit = false, outlined = true)); add(ChartLevel(l, OR_LOW, "OR Low", fit = false, outlined = true))
         }
-        // ---- controls: interval · expiry · option chain ----
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.clip(RoundedCornerShape(12.dp)).background(Tl.surface).border(1.dp, Tl.line, RoundedCornerShape(12.dp)).padding(3.dp)) {
-                INTERVALS.forEach { (k, l) ->
-                    val on = s.interval == k
-                    Box(Modifier.tactile({ sc.setInterval(k) }).clip(RoundedCornerShape(9.dp)).background(if (on) Tl.raised else Color.Transparent).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                        Text(l, style = TlType.small.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp), color = if (on) Tl.mint else Tl.muted)
-                    }
-                }
+        if ("prev" in overlays) previousDayRange(cs, now)?.let { (h, l) ->
+            add(ChartLevel(h, PREV, "Prev High", fit = false, outlined = true)); add(ChartLevel(l, PREV, "Prev Low", fit = false, outlined = true))
+        }
+    }
+    val minute = now / 60_000   // signals and day levels are worked out again once a minute (and on new candles)
+    val spotDay = remember(s.spotCandles.size, s.spotCandles.lastOrNull()?.time, strategies, overlays, minute) { dayLevels(s.spotCandles, spotSec) }
+    val optDay = remember(s.optionCandles.size, s.optionCandles.lastOrNull()?.time, strategies, overlays, minute) { dayLevels(s.optionCandles, optSec) }
+    val spotMarks = remember(s.spotCandles.size, s.spotCandles.lastOrNull()?.time, strategies, minute) { strategyMarkers(strategies, s.spotCandles, spotSec, now, "spot") }
+    val optMarks = remember(s.spotCandles.size, s.spotCandles.lastOrNull()?.time, s.side, strategies, minute) { strategyMarkers(strategies, s.spotCandles, spotSec, now, s.side) }
+
+    // imePadding: while the lots are typed, the screen shrinks so the ticket stays above the keyboard.
+    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().imePadding()) {
+        // ---- top pill bar: clock · P&L · Positions · Orders · Chain · feed ----
+        val openPos = dash?.positions.orEmpty().filter { it.qty != 0.0 }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TopPill(onClose) { Icon(Icons.Rounded.Close, "Close", tint = Tl.text, modifier = Modifier.size(20.dp)) }
+            TopPill { Text(CLOCK.format(java.time.Instant.ofEpochMilli(now)), style = TlType.numSm.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = Tl.text) }
+            TopPill({ ask = ScAsk.Positions }) {
+                Text("P&L ", style = TlType.small.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = Tl.text)
+                val net = dash?.netPnl ?: 0.0
+                RollingText(inr(net, sign = net != 0.0), TlType.numSm.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold), Tl.money(net))
             }
-            Spacer(Modifier.weight(1f))
-            Row(Modifier.tactile({ ask = ScAsk.Expiry }).clip(RoundedCornerShape(12.dp)).background(Tl.surface).border(1.dp, Tl.line, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text(shortExpiry(s.expiry), style = TlType.small.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp), color = Tl.text)
-                Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tl.muted, modifier = Modifier.size(14.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Row(Modifier.tactile({ ask = ScAsk.Chain }).clip(RoundedCornerShape(12.dp)).background(Tl.mint.copy(alpha = 0.14f)).border(1.dp, Tl.mint.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            TopPill({ ask = ScAsk.Positions }) { Text("Positions" + if (openPos.isNotEmpty()) " ${openPos.size}" else "", style = TlType.small.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = Tl.text) }
+            TopPill({ ask = ScAsk.Orders }) { Text("Orders" + (dash?.orders?.size?.takeIf { it > 0 }?.let { " $it" } ?: ""), style = TlType.small.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = Tl.text) }
+            TopPill({ ask = ScAsk.Chain }) {
                 Icon(Icons.Rounded.TableRows, null, tint = Tl.mint, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(5.dp))
-                Text("Chain", style = TlType.small.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp), color = Tl.mint)
+                Text("Chain", style = TlType.small.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = Tl.mint)
+            }
+            TopPill {
+                Dot(if (s.feed == "live") Tl.mint else Tl.amber, 6.dp); Spacer(Modifier.width(6.dp))
+                Text(if (s.feed == "live") "LIVE" else s.feed.uppercase(), style = TlType.eyebrow.copy(fontSize = 10.sp), color = if (s.feed == "live") Tl.mint else Tl.amber)
             }
         }
         if (s.error != null) Text(s.error!!, style = TlType.small, color = Tl.red, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), maxLines = 2)
 
-        // ---- index chart: the smaller one ----
-        Box(Modifier.weight(0.42f).fillMaxWidth().padding(start = 6.dp, end = 2.dp, top = 4.dp)) {
-            CandleChart(s.spotCandles, fill = true, levels = spotLevels, onMove = ::onMove, onRemove = ::onRemove,
-                onLongPress = { p -> levelAt = p to true; ask = ScAsk.Level })
-            ChartTag("${s.label} · ${INTERVALS.firstOrNull { it.first == s.interval }?.second ?: ""}", Modifier.align(Alignment.TopStart))
-        }
-
-        // ---- the contract: CE / PE and the strike (tap for the option chain) ----
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(16.dp)).background(Tl.surface)
-                .border(1.dp, (if (s.side == "CE") Tl.green else Tl.red).copy(alpha = 0.35f), RoundedCornerShape(16.dp)).padding(5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(Modifier.clip(RoundedCornerShape(11.dp)).background(Tl.surfaceHi).padding(2.dp)) {
-                listOf("CE" to Tl.green, "PE" to Tl.red).forEach { (k, col) ->
-                    val on = s.side == k
-                    Box(Modifier.tactile({ sc.selectSide(k) }).clip(RoundedCornerShape(9.dp)).background(if (on) col.copy(alpha = 0.22f) else Color.Transparent).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                        Text(k, style = TlType.label.copy(fontSize = 13.sp), color = if (on) col else Tl.muted)
-                    }
+        // ---- the two charts as cards, index over option, with a handle between them to resize ----
+        fun ivLabel(k: String) = INTERVALS.firstOrNull { it.first == k }?.second ?: "${k}m"
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val total = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+            Column(Modifier.fillMaxSize()) {
+                ChartCard(Modifier.weight(split).fillMaxWidth(),
+                    title = s.label, onTitle = { ask = ScAsk.Underlying }, kind = "Spot", onKind = { ask = ScAsk.Underlying },
+                    price = s.spot, change = spotMove, base = dayOpen, interval = ivLabel(s.interval), onInterval = { studiesSpot = true; ask = ScAsk.Interval },
+                    onStudies = { studiesSpot = true; ask = ScAsk.Studies }) {
+                    CandleChart(s.spotCandles, fill = true, levels = spotLevels + (if ("oi" in overlays) oi.levels else emptyList()) + spotDay, onMove = ::onMove, onRemove = ::onRemove,
+                        onLongPress = { p -> levelAt = p to true; ask = ScAsk.Level }, oiBars = if ("oi" in overlays) oi.bars else emptyList(),
+                        intervalSec = spotSec.toInt(), nowMs = now, studies = spotStudies, markers = spotMarks)
                 }
-            }
-            Row(Modifier.weight(1f).tactile({ ask = ScAsk.Chain }, haptic = false).padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(c?.let { "%.0f".format(it.strike) } ?: "Pick a strike", style = TlType.label.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold), color = Tl.text, maxLines = 1)
-                    Text((if (c != null && c.strike == s.atm) "ATM · " else "") + shortExpiry(c?.expiry ?: s.expiry), style = TlType.small.copy(fontSize = 11.sp), color = if (c != null && c.strike == s.atm) Tl.amber else Tl.dim)
+                // drag handle: pull up or down to give either chart more room
+                Box(Modifier.fillMaxWidth().height(18.dp).pointerInput(Unit) {
+                    detectVerticalDragGestures { ch, dy -> ch.consume(); split = (split + dy / total).coerceIn(0.25f, 0.75f) }
+                }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(Tl.lineHi))
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    RollingText(c?.let { "%.2f".format(it.ltp) } ?: "–", TlType.num.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold), Tl.text)
-                    c?.takeIf { it.ltp > 0 && it.change != 0.0 }?.let { x ->
-                        val prev = x.ltp - x.change
-                        Text("%+.2f%s".format(x.change, if (prev > 0) " (%+.1f%%)".format(x.change / prev * 100) else ""), style = TlType.numSm.copy(fontSize = 11.sp), color = Tl.money(x.change))
-                    }
-                }
-                Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tl.muted, modifier = Modifier.padding(start = 4.dp).size(18.dp))
-            }
-        }
-
-        // ---- option chart: the larger one ----
-        Box(Modifier.weight(0.58f).fillMaxWidth().padding(start = 6.dp, end = 2.dp)) {
-            CandleChart(s.optionCandles, fill = true, levels = levels, onMove = ::onMove, onRemove = ::onRemove,
-                onLongPress = { p -> levelAt = p to false; ask = ScAsk.Level })
-            // Before a target / stop is set: one tap places it 20% from the entry, then drag it where it belongs.
-            if (pos != null && (bracket?.tp == null || bracket.sl == null)) {
-                Row(Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 64.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val long = pos.qty > 0
-                    if (bracket?.tp == null) LevelChip("+ TP", Tl.green) {
-                        scope.launch { done(sc.setBracket(pos.securityId, pos.avg * (if (long) 1.2 else 0.8), bracket?.sl), "Target set: drag the green line to move it.") }
-                    }
-                    if (bracket?.sl == null) LevelChip("+ SL", Tl.red) {
-                        scope.launch { done(sc.setBracket(pos.securityId, bracket?.tp, pos.avg * (if (long) 0.8 else 1.2)), "Stop-loss placed at ${dash?.broker?.label ?: "Dhan"}: drag the red line to move it.") }
+                ChartCard(Modifier.weight(1f - split).fillMaxWidth(),
+                    title = c?.let { "${shortExpiry(it.expiry)} ${"%.0f".format(it.strike)}" } ?: "Pick a strike", onTitle = { ask = ScAsk.Chain },
+                    kind = if (s.side == "CE") "Call" else "Put", kindTint = if (s.side == "CE") Tl.green else Tl.red, onKind = { sc.selectSide(if (s.side == "CE") "PE" else "CE") },
+                    price = c?.ltp ?: 0.0, change = c?.change?.takeIf { (c.ltp) > 0 && it != 0.0 }, base = c?.let { it.ltp - it.change },
+                    tag = if (c != null && c.strike == s.atm) "ATM" else null, interval = ivLabel(s.optInterval), onInterval = { studiesSpot = false; ask = ScAsk.Interval },
+                    onStudies = { studiesSpot = false; ask = ScAsk.Studies }) {
+                    Box(Modifier.fillMaxSize()) {
+                        CandleChart(s.optionCandles, fill = true, levels = levels + optDay, onMove = ::onMove, onRemove = ::onRemove,
+                            onLongPress = { p -> levelAt = p to false; ask = ScAsk.Level }, intervalSec = optSec.toInt(), nowMs = now, studies = optStudies, markers = optMarks,
+                            onAction = { act ->
+                                val p = pos ?: return@CandleChart
+                                val long = p.qty > 0; val ref = c?.ltp?.takeIf { it > 0 } ?: p.avg
+                                when (act) {
+                                    // TP / SL on the entry label: placed 10% of the live price away on the right side (as the web),
+                                    // so it is always valid for the server however far the price has moved from the entry.
+                                    "add-tp" -> scope.launch { done(sc.setBracket(p.securityId, defaultLevel(true, long, ref), bracket?.sl), "Target set: drag the green line to move it.") }
+                                    "add-sl" -> scope.launch { done(sc.setBracket(p.securityId, bracket?.tp, defaultLevel(false, long, ref)), "Stop-loss placed at ${dash?.broker?.label ?: "Dhan"}: drag the orange line to move it.") }
+                                    "exit" -> if (now - exitArmedAt > 4_000) exitArmedAt = System.currentTimeMillis() else {
+                                        exitArmedAt = 0L
+                                        scope.launch { val err = sc.exitPosition(p.symbol); if (err == null) vm.toast("Exit sent for ${p.symbol}.") else vm.toast(err, Toast.Tone.Error) }
+                                    }
+                                }
+                            })
                     }
                 }
             }
         }
 
         // ---- open positions on this chain: one slim live bar each ----
-        open.take(2).forEach { p ->
+        open.take(1).forEach { p ->
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).clip(RoundedCornerShape(14.dp)).background(Tl.surfaceHi)
                     .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
@@ -269,7 +365,7 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
         Column(
             Modifier.fillMaxWidth().padding(top = 4.dp).clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(Tl.surface)
                 .border(1.dp, Tl.line, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = bottomPad.calculateBottomPadding() + 2.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = bottomPad.calculateBottomPadding() + 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(size.reason ?: "${size.lots} lot${if (size.lots == 1) "" else "s"} × ${s.qtyPerLot}" + (c?.ltp?.takeIf { it > 0 }?.let { " · ${inr(it * size.lots * s.qtyPerLot)}" } ?: ""),
@@ -282,13 +378,13 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
             }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OrderButton("Sell", Tl.red, Modifier.weight(1f), enabled = c != null && size.lots > 0 && !s.placing) { ask = ScAsk.Sell }
+                OrderButton("Sell", s.margin?.takeIf { m -> m.securityId == c?.securityId && m.lots == size.lots }?.sell?.let { inr(it) } ?: if (c != null && size.lots > 0) "…" else "–", Tl.red, Modifier.weight(1f), enabled = c != null && size.lots > 0 && !s.placing) { ask = ScAsk.Sell }
                 Row(Modifier.height(52.dp).clip(RoundedCornerShape(14.dp)).background(Tl.surfaceHi), verticalAlignment = Alignment.CenterVertically) {
                     Step("−", s.manual) { sc.stepLots(-1) }
-                    Text("${size.lots}", style = TlType.num.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold), color = Tl.text, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    LotsField(size.lots) { sc.setLots(it) }
                     Step("+", s.manual) { sc.stepLots(1) }
                 }
-                OrderButton("Buy", Tl.green, Modifier.weight(1f), enabled = c != null && size.lots > 0 && !s.placing) { ask = ScAsk.Buy }
+                OrderButton("Buy", c?.ltp?.takeIf { it > 0 && size.lots > 0 }?.let { inr(it * size.lots * s.qtyPerLot) } ?: "–", Tl.green, Modifier.weight(1f), enabled = c != null && size.lots > 0 && !s.placing) { ask = ScAsk.Buy }
             }
         }
     }
@@ -358,11 +454,14 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
                 }
                 Spacer(Modifier.height(16.dp))
                 if (!onIndex && c != null && size.lots > 0) {
-                    ActionRow("Buy limit", "${size.lots} lot${if (size.lots == 1) "" else "s"} @ ${"%.2f".format(p)}", ORDER_BLUE) {
-                        ask = ScAsk.None; scope.launch { done(sc.placeLimit("BUY", p), "Buy limit @ ${"%.2f".format(p)} placed at ${dash?.broker?.label ?: "Dhan"}.") }
+                    val lotTxt = "${size.lots} lot${if (size.lots == 1) "" else "s"}"
+                    val buyStop = com.nexlogic.tradelock.data.isStop("BUY", p, ref); val sellStop = com.nexlogic.tradelock.data.isStop("SELL", p, ref)
+                    val at = dash?.broker?.label ?: "Dhan"
+                    ActionRow(if (buyStop) "Buy stop" else "Buy limit", "$lotTxt ${if (buyStop) "when it rises to" else "@"} ${"%.2f".format(p)}", ORDER_BLUE) {
+                        ask = ScAsk.None; scope.launch { done(sc.placeLimit("BUY", p, ref), "${if (buyStop) "Buy stop" else "Buy limit"} @ ${"%.2f".format(p)} placed at $at.") }
                     }
-                    ActionRow("Sell limit", "${size.lots} lot${if (size.lots == 1) "" else "s"} @ ${"%.2f".format(p)}", Tl.amber) {
-                        ask = ScAsk.None; scope.launch { done(sc.placeLimit("SELL", p), "Sell limit @ ${"%.2f".format(p)} placed at ${dash?.broker?.label ?: "Dhan"}.") }
+                    ActionRow(if (sellStop) "Sell stop" else "Sell limit", "$lotTxt ${if (sellStop) "when it falls to" else "@"} ${"%.2f".format(p)}", Tl.amber) {
+                        ask = ScAsk.None; scope.launch { done(sc.placeLimit("SELL", p, ref), "${if (sellStop) "Sell stop" else "Sell limit"} @ ${"%.2f".format(p)} placed at $at.") }
                     }
                 }
                 ActionRow("Price alert", "rings when it ${if (ref > 0 && p < ref) "falls to" else "reaches"} ${"%.2f".format(p)}", Tl.violet) {
@@ -409,6 +508,75 @@ fun ScalperScreen(vm: AppViewModel, bottomPad: PaddingValues) {
                         ChainCell(row.pe, row.strike == s.strike && s.side == "PE", Tl.red, !itm && !atm, Alignment.End, Modifier.weight(1f)) {
                             sc.selectStrike(row.strike); sc.selectSide("PE"); ask = ScAsk.None
                         }
+                    }
+                }
+            }
+        }
+        ScAsk.Interval -> TlSheet({ ask = ScAsk.None }) {
+            Text("Candle interval", style = TlType.title, color = Tl.text)
+            Text(if (studiesSpot) "${s.label} chart" else "${c?.symbol ?: "Option"} chart", style = TlType.small, color = Tl.muted)
+            Spacer(Modifier.height(12.dp))
+            val cur = if (studiesSpot) s.interval else s.optInterval
+            INTERVALS.forEach { (k, l) ->
+                val on = cur == k
+                Row(Modifier.fillMaxWidth().tactile({ ask = ScAsk.None; if (studiesSpot) sc.setInterval(k) else sc.setOptInterval(k) }).clip(RoundedCornerShape(14.dp))
+                    .background(if (on) Tl.mint.copy(alpha = 0.10f) else Color.Transparent).padding(horizontal = 14.dp, vertical = 14.dp)) {
+                    Text("$l · ${if (k == "60") "1 hour" else "$k minute${if (k == "1") "" else "s"}"}", style = TlType.label.copy(fontSize = 16.sp), color = if (on) Tl.mint else Tl.text)
+                }
+            }
+        }
+        ScAsk.Studies -> ChartToolsSheet(
+            startOnSpot = studiesSpot, spotName = s.label, optName = c?.let { "${"%.0f".format(it.strike)} ${it.option}" } ?: "Option", spotInterval = s.interval,
+            spotStudies = spotStudies, optStudies = optStudies, onStudies = ::saveStudies,
+            overlays = overlays, onOverlay = ::toggleOverlay, admin = admin, strategies = strategies, onStrategy = ::toggleStrategy,
+            onToast = { vm.toast(it) }, onDismiss = { ask = ScAsk.None })
+        ScAsk.Positions -> TlSheet({ ask = ScAsk.None }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Positions", style = TlType.title, color = Tl.text, modifier = Modifier.weight(1f))
+                val net = dash?.netPnl ?: 0.0
+                Text("Net ${inr(net, sign = true)}", style = TlType.num, color = Tl.money(net))
+            }
+            dash?.let { d -> Text("Realized ${inr(d.realized, sign = true)} · open ${inr(d.unrealized, sign = true)} · charges ${inr(d.charges)}", style = TlType.small, color = Tl.muted, modifier = Modifier.padding(top = 4.dp)) }
+            Spacer(Modifier.height(12.dp))
+            val rows = dash?.positions.orEmpty()
+            if (rows.isEmpty()) Text("No positions today.", style = TlType.body, color = Tl.muted, modifier = Modifier.padding(vertical = 20.dp))
+            rows.forEach { p ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(Tl.surfaceHi).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Tap the name: open this contract in the option chart (its index / expiry is loaded first when needed).
+                    Column(Modifier.weight(1f).tactile({
+                        if (p.qty != 0.0) scope.launch {
+                            if (sc.openContract(p.securityId, p.symbol, p.segment)) ask = ScAsk.None
+                            else vm.toast("That contract is not in Power Scalper's option chains.", Toast.Tone.Warn)
+                        }
+                    })) {
+                        Text(p.symbol, style = TlType.label, color = Tl.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (p.qty != 0.0) "${if (p.qty > 0) "Long" else "Short"} ${kotlin.math.abs(p.qty).toLong()} · avg ${"%.2f".format(p.avg)}" + (p.ltp?.let { " · LTP ${"%.2f".format(it)}" } ?: "") else "Closed",
+                            style = TlType.small, color = Tl.muted)
+                    }
+                    val pl = p.unrealized + p.realized
+                    Text(inr(pl, sign = true), style = TlType.num.copy(fontSize = 15.sp), color = Tl.money(pl))
+                    if (p.qty != 0.0) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.tactile({ exitSymbol = p.symbol; ask = ScAsk.Exit }).clip(RoundedCornerShape(9.dp)).background(Tl.red.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                            Text("Exit", style = TlType.small.copy(fontWeight = FontWeight.Bold), color = Tl.red)
+                        }
+                    }
+                }
+            }
+        }
+        ScAsk.Orders -> TlSheet({ ask = ScAsk.None }) {
+            Text("Open orders", style = TlType.title, color = Tl.text); Spacer(Modifier.height(12.dp))
+            val rows = dash?.orders.orEmpty()
+            if (rows.isEmpty()) Text("No open orders.", style = TlType.body, color = Tl.muted, modifier = Modifier.padding(vertical = 20.dp))
+            rows.forEach { o ->
+                val name = s.strikes.firstNotNullOfOrNull { r -> listOfNotNull(r.ce, r.pe).firstOrNull { it.securityId == o.securityId }?.symbol } ?: o.securityId ?: ""
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(Tl.surfaceHi).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${o.side} ${o.type} · ${o.qty.toLong()}", style = TlType.label, color = if (o.side == "BUY") Tl.green else Tl.red)
+                        Text(name + (if (o.price > 0) " @ ${"%.2f".format(o.price)}" else "") + (o.triggerPrice?.takeIf { it > 0 }?.let { " · trigger ${"%.2f".format(it)}" } ?: ""), style = TlType.small, color = Tl.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Box(Modifier.tactile({ scope.launch { done(sc.cancelOrder(o.id), "Order cancelled.") } }).clip(RoundedCornerShape(9.dp)).background(Tl.red.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        Text("Cancel", style = TlType.small.copy(fontWeight = FontWeight.Bold), color = Tl.red)
                     }
                 }
             }
@@ -464,10 +632,15 @@ private fun StrikeStrip(strikes: List<Double>, selected: Double?, atm: Double?, 
 }
 
 @Composable
-private fun OrderButton(label: String, tint: Color, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) =
-    Box(modifier.height(52.dp).tactile(onClick, enabled = enabled).clip(RoundedCornerShape(14.dp)).background(if (enabled) tint else tint.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
-        Text(label, color = if (tint == Tl.green) Color(0xFF032414) else Color(0xFF1C0309), fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+private fun OrderButton(side: String, amount: String, tint: Color, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
+    val ink = if (tint == Tl.green) Color(0xFF032414) else Color(0xFF1C0309)
+    // top half: the side, small; bottom half: the amount (Buy: live premium × qty · Sell: Dhan's margin), rolling with each update
+    Column(modifier.height(52.dp).tactile(onClick, enabled = enabled).clip(RoundedCornerShape(14.dp)).background(if (enabled) tint else tint.copy(alpha = 0.25f)),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text(side, color = ink.copy(alpha = 0.75f), fontWeight = FontWeight.Bold, fontSize = 11.sp, lineHeight = 13.sp)
+        RollingText(amount, TlType.num.copy(fontWeight = FontWeight.ExtraBold, fontSize = 14.sp), ink)
     }
+}
 
 @Composable
 private fun Step(label: String, enabled: Boolean, onClick: () -> Unit) =
@@ -477,6 +650,54 @@ private fun Step(label: String, enabled: Boolean, onClick: () -> Unit) =
 
 /** "2026-11-23" → "23 Nov". */
 private fun shortExpiry(e: String): String = runCatching { java.time.LocalDate.parse(e).format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) }.getOrDefault(e.ifEmpty { "Expiry" })
+
+/** One pill of the top bar (tappable when [onClick] is set). */
+@Composable
+private fun TopPill(onClick: (() -> Unit)? = null, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) =
+    Row(Modifier.then(if (onClick != null) Modifier.tactile(onClick) else Modifier).clip(CircleShape).background(Tl.surface).border(1.dp, Tl.line, CircleShape)
+        .padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+
+/**
+ * A chart in a rounded card: the instrument (underlined, tap to change) with its kind (Spot / Call / Put, tap to switch),
+ * the live price and its move, and the interval pill on the right.
+ */
+@Composable
+private fun ChartCard(
+    modifier: Modifier, title: String, onTitle: () -> Unit, kind: String, onKind: () -> Unit, price: Double, change: Double?, base: Double?,
+    interval: String, onInterval: () -> Unit, onStudies: () -> Unit, kindTint: Color = Tl.text, tag: String? = null, chart: @Composable () -> Unit,
+) = Column(modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(22.dp)).background(Tl.surface).border(1.dp, Tl.line, RoundedCornerShape(22.dp)).padding(top = 10.dp)) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = TlType.label.copy(fontSize = 17.sp, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline), color = Tl.text, maxLines = 1,
+                    modifier = Modifier.tactile(onTitle, haptic = false))
+                Spacer(Modifier.width(10.dp))
+                Row(Modifier.tactile(onKind), verticalAlignment = Alignment.CenterVertically) {
+                    Text(kind, style = TlType.label.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium), color = kindTint)
+                    Icon(Icons.Rounded.UnfoldMore, null, tint = Tl.muted, modifier = Modifier.size(18.dp))
+                }
+                tag?.let { Spacer(Modifier.width(6.dp)); Text(it, style = TlType.eyebrow.copy(fontSize = 9.sp), color = Tl.amber, modifier = Modifier.clip(CircleShape).background(Tl.amber.copy(alpha = 0.14f)).padding(horizontal = 6.dp, vertical = 2.dp)) }
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                RollingText(if (price > 0) "%.2f".format(price) else "–", TlType.num.copy(fontSize = 17.sp), Tl.text)
+                change?.let { mv ->
+                    Spacer(Modifier.width(8.dp))
+                    Text("%+.2f%s".format(mv, base?.takeIf { it > 0 }?.let { " (%+.2f%%)".format(mv / it * 100) } ?: ""), style = TlType.numSm.copy(fontSize = 13.sp), color = Tl.money(mv), modifier = Modifier.padding(bottom = 1.dp))
+                }
+            }
+        }
+        // fx: this chart's indicators
+        Box(Modifier.padding(end = 8.dp).tactile(onStudies).clip(CircleShape).background(Tl.surfaceHi).padding(horizontal = 12.dp, vertical = 7.dp)) {
+            Text("ƒx", style = TlType.small.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic), color = Tl.text)
+        }
+        Row(Modifier.tactile(onInterval).clip(CircleShape).background(Tl.surfaceHi).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(interval, style = TlType.small.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = Tl.text)
+            Box(Modifier.padding(horizontal = 7.dp).width(1.dp).height(14.dp).background(Tl.lineHi))
+            Icon(Icons.Rounded.Tune, null, tint = Tl.muted, modifier = Modifier.size(16.dp))
+        }
+    }
+    Box(Modifier.weight(1f).fillMaxWidth().padding(start = 4.dp, top = 2.dp, bottom = 4.dp)) { chart() }
+}
 
 /** A small label over the top-left of a chart. */
 @Composable
@@ -525,3 +746,32 @@ private fun OrderRow(k: String, v: String) =
         Text(k, style = TlType.body.copy(fontSize = 15.sp), color = Tl.muted, modifier = Modifier.weight(1f))
         Text(v, style = TlType.num, color = Tl.text)
     }
+
+/**
+ * The lot count on the ticket, typed with the number keypad: Done or leaving the field saves it (1–500; empty or 0
+ * puts the last value back). While it is not being edited it follows the ticket (− / +, Auto sizing).
+ */
+@Composable
+private fun LotsField(lots: Int, onSet: (Int) -> Unit) {
+    var text by remember { mutableStateOf(lots.toString()) }
+    var editing by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(lots) { if (!editing) text = lots.toString() }
+    fun commit() {
+        val n = text.toIntOrNull()
+        if (n != null && n > 0) { onSet(n.coerceAtMost(500)); text = n.coerceAtMost(500).toString() } else text = lots.toString()
+    }
+    androidx.compose.foundation.text.BasicTextField(
+        value = text,
+        onValueChange = { v -> text = v.filter(Char::isDigit).take(3) },
+        singleLine = true,
+        textStyle = TlType.num.copy(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Tl.text, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Tl.amber),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { commit(); focus.clearFocus() }),
+        modifier = Modifier.width(52.dp).onFocusChanged { f ->
+            if (f.isFocused) editing = true
+            else if (editing) { editing = false; commit() }
+        },
+    )
+}

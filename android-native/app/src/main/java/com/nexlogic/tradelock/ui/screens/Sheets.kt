@@ -1,5 +1,9 @@
 package com.nexlogic.tradelock.ui.screens
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,12 +50,16 @@ fun TlSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Tl.surface,
+        containerColor = Color(0xFF0E131B),
         scrimColor = Color(0xB3020509),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = { Box(Modifier.padding(top = 12.dp, bottom = 6.dp).size(44.dp, 5.dp).clip(CircleShape).background(Tl.lineHi)) },
+        dragHandle = { Box(Modifier.padding(top = 12.dp, bottom = 6.dp).size(44.dp, 5.dp).clip(CircleShape).background(Tl.aurora)) },
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 18.dp).navigationBarsPadding(), content = content)
+        // A faint aurora light at the top of the sheet.
+        Column(Modifier.fillMaxWidth().drawBehind {
+            val r = size.width * 0.8f
+            drawCircle(Brush.radialGradient(listOf(Color(0x14A78BFA), Color.Transparent), center = Offset(size.width * 0.2f, 0f), radius = r), radius = r, center = Offset(size.width * 0.2f, 0f))
+        }.padding(horizontal = 22.dp).padding(bottom = 18.dp).navigationBarsPadding(), content = content)
     }
 }
 
@@ -138,13 +146,14 @@ fun KillSheet(dash: Dash?, onDismiss: () -> Unit, onConfirm: () -> Unit) = TlShe
 
 @Composable
 fun PrimaryButton(text: String, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) =
-    Box(modifier.height(54.dp).tactile(onClick).clip(RoundedCornerShape(16.dp)).background(Tl.mintBrush), contentAlignment = Alignment.Center) {
+    Box(modifier.height(54.dp).tactile(onClick).shadow(18.dp, RoundedCornerShape(16.dp), spotColor = Tl.mint, ambientColor = Tl.mint).clip(RoundedCornerShape(16.dp)).background(Tl.mintBrush), contentAlignment = Alignment.Center) {
         Text(text, color = Color(0xFF04261F), fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 
 @Composable
 fun DangerButton(text: String, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) =
-    Box(modifier.height(54.dp).tactile(onClick).clip(RoundedCornerShape(16.dp)).background(Tl.red), contentAlignment = Alignment.Center) {
+    Box(modifier.height(54.dp).tactile(onClick).shadow(18.dp, RoundedCornerShape(16.dp), spotColor = Tl.red, ambientColor = Tl.red).clip(RoundedCornerShape(16.dp))
+        .background(Brush.verticalGradient(listOf(Color(0xFFFF7690), Color(0xFFF0446A)))), contentAlignment = Alignment.Center) {
         Text(text, color = Color(0xFF1C0309), fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 

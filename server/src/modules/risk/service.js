@@ -192,7 +192,8 @@ export function getDashboard(userId, acct = accountFor(userId)) {
     broker,
     positions: book.positions.filter(p => p.qty !== 0).map(p => (lv?.positions[String(p.securityId)] ? { ...p, ltp: lv.positions[String(p.securityId)].ltp ?? p.ltp, unrealized: lv.positions[String(p.securityId)].unrealized } : p)),
     // Target / stop set on the Power Scalper chart for open positions (the stop is an order at the broker).
-    brackets: bracketsFor(userId).map(({ securityId, tp, sl, slOrderId }) => ({ securityId, tp, sl, slAtBroker: !!slOrderId })),
+    // super: TP / SL are legs of a Dhan Super Order (both at the broker; a removed leg cannot be set again).
+    brackets: bracketsFor(userId).map(({ securityId, tp, sl, slOrderId, superId }) => ({ securityId, tp, sl, slAtBroker: !!slOrderId || !!superId, super: !!superId, slOrderId: slOrderId ?? null })),
     // Price alerts waiting on Power Scalper charts (drawn as level markers).
     alerts: activeAlerts(userId).map(({ id, segment, securityId, price, dir }) => ({ id, segment, securityId, price, dir })),
     orders: book.orders,

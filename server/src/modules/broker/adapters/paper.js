@@ -6,6 +6,7 @@
 import { stmt, tx } from '../../../db/index.js';
 import { ist } from '../../../lib/time.js';
 import { optionCharges } from '../../scalper/orb5-options.js';
+import { mcxLotValue } from '../../risk/charges.js';
 
 export const PAPER_DEFAULT = 1_000_000;          // ₹10 lakh: a new wallet, and Reset
 export const PAPER_MIN = 10_000, PAPER_MAX = 10_000_000;   // ₹10,000 – ₹1 crore
@@ -40,13 +41,19 @@ export function setPaperBalance(userId, amount) {
 }
 export const resetPaperWallet = userId => setPaperBalance(userId, PAPER_DEFAULT);
 
+/**
+ * Rupees per point per unit of quantity. MCX counts quantity in LOTS (as Dhan does), and one lot is worth the contract's
+ * lot value per point (CRUDEOILM and GOLDM 10): P&L, the wallet, the margin and the charges all use it. Else 1.
+ */
+export const paperUnit = (segment, symbol) => (/^MCX/.test(String(segment || '')) ? mcxLotValue(symbol) : 1);
+
 /** Today's positions from today's paper fills (buys and sells of options), average cost. */
-function positionsOf(userId, day = today()) {
+export function positionsOf(userId, day = today()) {
   const by = new Map();
   for (const f of stmt('SELECT * FROM paper_fills WHERE user_id = ? AND day = ? ORDER BY id').all(userId, day)) {
-    const p = by.get(f.security_id) || { symbol: f.symbol, securityId: f.security_id, exchangeSegment: f.segment, qty: 0, cost: 0, realized: 0 };
+    const p = by.get(f.security_id) || { symbol: f.symbol, securityId: f.security_id, exchangeSegment: f.segment, qty: 0, cost: 0, realized: 0, unit: paperUnit(f.segment, f.symbol) };
     if (f.side === 'BUY') { p.qty += f.qty; p.cost += f.qty * f.price; }
-    else { const avg = p.qty > 0 ? p.cost / p.qty : f.price; p.realized += (f.price - avg) * f.qty; p.cost -= avg * f.qty; p.qty -= f.qty; }
+    else { const avg = p.qty > 0 ? p.cost / p.qty : f.price; p.realized += (f.price - avg) * f.qty * p.unit; p.cost -= avg * f.qty; p.qty -= f.qty; }
     by.set(f.security_id, p);
   }
   return [...by.values()].map(p => ({ ...p, avg: p.qty > 0 ? round2(p.cost / p.qty) : 0, realized: round2(p.realized) }));
@@ -61,15 +68,15 @@ export function createPaperAdapter({ userId, data }) {
     return Number(await data.ltp?.(seg, id).catch(() => null)) || null;
   };
   const funds = () => {
-    const w = paperWallet(userId), open = positionsOf(userId).filter(p => p.qty > 0).reduce((a, p) => a + p.qty * p.avg, 0);
+    const w = paperWallet(userId), open = positionsOf(userId).filter(p => p.qty > 0).reduce((a, p) => a + p.qty * p.avg * p.unit, 0);
     return { available: round2(w.balance - open), used: round2(open), opening: w.sod_balance, withdrawable: null, collateral: 0 };
   };
   const fill = (o, price) => tx(() => {
     const qty = o.qty - (o.filled_qty || 0), now = Date.now();
     if (o.side === 'SELL') {   // closing: the wallet takes the P&L after charges
       const pos = positionsOf(userId, o.day).find(p => p.securityId === o.security_id), avg = pos?.qty > 0 ? pos.cost / pos.qty : price;
-      const charges = optionCharges(o.day, avg * qty, price * qty).total;
-      stmt('UPDATE paper_wallet SET balance = balance + ?, updated_at = ? WHERE user_id = ?').run(round2((price - avg) * qty - charges), now, userId);
+      const unit = paperUnit(o.segment, o.symbol), charges = optionCharges(o.day, avg * qty * unit, price * qty * unit).total;
+      stmt('UPDATE paper_wallet SET balance = balance + ?, updated_at = ? WHERE user_id = ?').run(round2((price - avg) * qty * unit - charges), now, userId);
       stmt('INSERT INTO paper_fills (user_id, day, order_id, security_id, segment, symbol, side, qty, price, charges, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
         .run(userId, o.day, o.id, o.security_id, o.segment, o.symbol, 'SELL', qty, price, round2(charges), now);
     } else {
@@ -87,7 +94,8 @@ export function createPaperAdapter({ userId, data }) {
     const hit = o.type === 'MARKET' || (o.type === 'STOP_LOSS' ? (o.side === 'SELL' ? px <= o.trigger_price : px >= o.trigger_price)
       : (o.side === 'BUY' ? px <= o.limit_price : px >= o.limit_price));
     if (hit) {
-      if (o.side === 'BUY' && px * o.qty > funds().available + 0.01) reject(o, `Insufficient funds: ₹${round2(px * o.qty)} needed, ₹${funds().available} available in the paper wallet`);
+      const need = px * o.qty * paperUnit(o.segment, o.symbol);
+      if (o.side === 'BUY' && need > funds().available + 0.01) reject(o, `Insufficient funds: ₹${round2(need)} needed, ₹${funds().available} available in the paper wallet`);
       else if (o.side === 'SELL' && !(positionsOf(userId, o.day).find(p => p.securityId === o.security_id)?.qty >= o.qty)) reject(o, 'Paper trading sells only what it holds');
       else fill(o, round2(px));
     }
@@ -149,13 +157,13 @@ export function createPaperAdapter({ userId, data }) {
       const positions = await Promise.all(pos.map(async p => {
         const ltp = p.qty !== 0 ? await ltpOf(p.exchangeSegment, p.securityId) : null;
         return { symbol: p.symbol, securityId: p.securityId, exchangeSegment: p.exchangeSegment, productType: 'INTRADAY', qty: p.qty, carryQty: 0, avg: p.avg, ltp,
-          realized: p.realized, unrealized: p.qty !== 0 && ltp > 0 ? round2((ltp - p.avg) * p.qty) : 0 };
+          realized: p.realized, unrealized: p.qty !== 0 && ltp > 0 ? round2((ltp - p.avg) * p.qty * p.unit) : 0 };
       }));
       const fills = stmt('SELECT * FROM paper_fills WHERE user_id = ? AND day = ? ORDER BY id').all(userId, today());
       return {
-        posSig: positions.map(p => `${p.securityId}:${p.qty}`).join('|'), orderSig: open.map(o => `${o.id}:${o.status}`).join('|') + `#${fills.length}`,
+        posSig: positions.map(p => `${p.securityId}:${p.qty}`).join('|'), orderSig: open.map(o => `${o.id}:${o.status}:${o.limit_price ?? ''}:${o.trigger_price ?? ''}`).join('|') + `#${fills.length}`,   // prices: a moved order is a change
         funds: funds(), positions,
-        orders: open.map(o => ({ id: pid(o.id), symbol: o.symbol, side: o.side, qty: o.qty, price: o.limit_price ?? o.trigger_price, type: o.type, status: 'PENDING', securityId: o.security_id != null ? String(o.security_id) : undefined })),
+        orders: open.map(o => ({ id: pid(o.id), symbol: o.symbol, side: o.side, qty: o.qty, price: o.limit_price ?? o.trigger_price, triggerPrice: o.trigger_price ?? undefined, type: o.type, status: 'PENDING', securityId: o.security_id != null ? String(o.security_id) : undefined, exchangeSegment: o.segment })),
         trades: fills.map(f => ({ id: `paper:${f.id}`, orderId: pid(f.order_id), ts: f.created_at, symbol: f.symbol, side: f.side, qty: f.qty, price: f.price, pnl: null })),
       };
     },

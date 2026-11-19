@@ -6,3 +6,9 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+# Razorpay Checkout (its own rules, from Razorpay's Android integration guide)
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-dontwarn com.razorpay.**
+-keep class com.razorpay.** { *; }
+-optimizations !method/inlining/
+-keepclasseswithmembers class * { public void onPayment*(...); }

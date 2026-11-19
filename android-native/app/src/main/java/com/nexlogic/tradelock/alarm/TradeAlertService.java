@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.alarm;
 
+import android.annotation.SuppressLint;
 import com.nexlogic.tradelock.BuildConfig;
 import com.nexlogic.tradelock.MainActivity;
 import com.nexlogic.tradelock.R;
@@ -331,6 +332,8 @@ public class TradeAlertService extends Service {
     try { startActivity(full); } catch (Exception e) { Log.w(TAG, "alarm screen blocked; notification shown", e); }
   }
 
+  // savedFilter is a value read back from getCurrentInterruptionFilter(), so it is always a valid filter.
+  @SuppressLint("WrongConstant")
   synchronized void silence() {
     if (player != null) { try { player.stop(); } catch (Exception ignored) { } player.release(); player = null; }
     if (vibrator != null) { vibrator.cancel(); vibrator = null; }

@@ -1,10 +1,12 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -51,6 +53,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.nexlogic.tradelock.R
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -131,12 +136,12 @@ fun BrokerScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
     val current = tab ?: when { real == null || a.bool("paperMode") == true -> "paper"; real.str("tradeVia") == "stoxkart" -> "stoxkart"; else -> real.str("broker") ?: "dhan" }
     val soon = data?.arr("catalog")?.mapNotNull { it as? JsonObject }?.firstOrNull { it.str("id") == current && it.str("status") != "available" }
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
+            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("Broker accounts", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+                Text("Broker accounts", style = TlType.page)
                 Text("Connection health and what your broker allows", style = TlType.small, color = Tl.muted)
             }
         }
@@ -166,7 +171,8 @@ fun BrokerScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
                 usePaper = { act("paper", "Paper trading is on: no orders go to your broker.") { if (real != null) Api.post("/brokers/${real.str("id")}/paper", buildJsonObject { put("on", true) }) else Api.post("/paper/account") } },
                 useReal = { act("real", "Real trading is on.") { Api.post("/brokers/${real!!.str("id")}/paper", buildJsonObject { put("on", false) }) } },
                 onOpen = onOpenWeb)
-            soon != null && current != "stoxkart" -> TlCard(Modifier.fillMaxWidth(), padding = 20.dp) {
+            // StoxKart (beta) is linkable only when the server offers it (administrators); else it is coming soon.
+            soon != null && (current != "stoxkart" || soon.bool("link") != true) -> TlCard(Modifier.fillMaxWidth(), padding = 20.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) { BrokerMark(current, soon.str("name") ?: current, 40); Spacer(Modifier.width(12.dp)); Text(soon.str("name") ?: current, style = TlType.title, color = Tl.text) }
                 Spacer(Modifier.height(10.dp))
                 Text("Coming soon. TradeLock will connect ${soon.str("name")} the same way as Dhan: your limits enforced at the broker.", style = TlType.body, color = Tl.muted)
@@ -239,7 +245,23 @@ fun BrokerScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
 
 /** A round broker mark: the brand's first letter on its colour (Paper: P on blue). */
 @Composable
-private fun BrokerMark(id: String, name: String, size: Int) {
+internal fun BrokerMark(id: String, name: String, size: Int) {
+    // Paper: TradeLock's own mark, a full tile (never a broker's logo, also when a Dhan account trades on paper).
+    if (id == "paper" || name.trim().equals("Paper", ignoreCase = true)) {
+        Image(painterResource(R.drawable.broker_paper), name, Modifier.size(size.dp).clip(RoundedCornerShape((size / 3.5).dp)), contentScale = ContentScale.Fit)
+        return
+    }
+    // The broker's own logo on a white tile (as on the web); brokers without one keep the lettered tile.
+    val logo = when (id) {
+        "dhan" -> R.drawable.broker_dhan; "stoxkart" -> R.drawable.broker_stoxkart; "zerodha" -> R.drawable.broker_zerodha
+        "upstox" -> R.drawable.broker_upstox; "angelone" -> R.drawable.broker_angelone; else -> null
+    }
+    if (logo != null) {
+        Box(Modifier.size(size.dp).clip(RoundedCornerShape((size / 3.5).dp)).background(Color.White).padding((size * 0.12).dp), contentAlignment = Alignment.Center) {
+            Image(painterResource(logo), name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        }
+        return
+    }
     val (bg, fg) = when (id) {
         "dhan" -> Color.White to Color(0xFF0E8F6E); "paper" -> Color(0xFF1C2E4A) to Color(0xFF5AA9FF); "stoxkart" -> Color(0xFF0B3D2E) to Color(0xFF2BD67B)
         "zerodha" -> Color.White to Color(0xFF387ED1); "upstox" -> Color(0xFF5A2D91) to Color.White; "angelone" -> Color.White to Color(0xFF1C47B9); else -> Tl.raised to Tl.text

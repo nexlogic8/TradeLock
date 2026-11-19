@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -71,9 +72,9 @@ import kotlin.math.min
 
 @Composable
 private fun BackHeader(title: String, onBack: () -> Unit) = Row(verticalAlignment = Alignment.CenterVertically) {
-    Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
+    Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text) }
     Spacer(Modifier.width(12.dp))
-    Text(title, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+    Text(title, style = TlType.page)
 }
 
 @Composable
@@ -94,7 +95,7 @@ fun AnalyticsScreen(vm: AppViewModel, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { try { d = Api.get("/analytics?sessions=20") } catch (e: ApiError) { error = e.message } }
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BackHeader("Analytics", onBack)
         val a = d ?: run { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { if (error != null) Text(error!!, color = Tl.red) else CircularProgressIndicator(color = Tl.mint) }; return@Column }
         Text("Last ${a.num("sessions")?.toInt() ?: 0} sessions · ${a.str("from") ?: ""} → ${a.str("to") ?: ""}", style = TlType.small, color = Tl.muted)
@@ -148,7 +149,7 @@ fun AffiliateScreen(vm: AppViewModel, onBack: () -> Unit) {
     val clip = LocalClipboardManager.current
     LaunchedEffect(Unit) { try { d = Api.get("/affiliate") } catch (e: ApiError) { error = e.message } }
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BackHeader("Refer & earn", onBack)
         val a = d ?: run { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { if (error != null) Text(error!!, color = Tl.red) else CircularProgressIndicator(color = Tl.mint) }; return@Column }
         val link = a.str("link") ?: ""

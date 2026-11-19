@@ -9,11 +9,12 @@ import { builtInFor, sharedRulesFor } from './strategy-library.js';
 import { artInfo } from './strategy-art.js';
 import { confirmAlgoStart, noticeDialog } from '../ui/dialog.js';
 import { raw } from '../core/dom.js';
-import { rulesPanel, bindRules, editableSet, ruleSetNow } from './rules.js';
 
 const inr = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 const price = n => (Number.isFinite(Number(n)) && n !== null ? Number(n).toFixed(2) : '—');
 const time = n => n ? new Date(n).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : '—';
+// Fill times to the second, 24-hour IST ("09:15:02").
+const secs = n => n ? new Date(n).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }) : '—';
 
 // The strategies Algo Trading can run (descriptions shared with the Strategy page): every one for administrators,
 // the public Gap card for other users (server: lib/access.js).
@@ -54,10 +55,11 @@ function historySection(rows) {
       ${rows.length ? html`
         <p class="muted small algo-history-sum">Real money: ${traded.length} trade${traded.length === 1 ? '' : 's'} · ${wins} won · P&amp;L <b class="${total >= 0 ? 'pos' : 'neg'}">${money(total)}</b>${used ? ` (${(total / used * 100).toFixed(1)}% of the capital used)` : ''} · before charges${rows.some(t => t.paper) ? ` · paper trades are marked Paper and not counted` : ''}</p>
         <div class="bt-table-wrap"><table class="bt-table algo-trades">
-          <thead><tr><th>Date</th><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>%</th><th>Status</th></tr></thead>
-          <tbody>${rows.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
-            <td class="num">${t.day}</td><td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${INDEX_SHORT[t.underlying] || 'NIFTY 50'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
+          <thead><tr><th>Date</th><th>Entry time</th><th>Exit time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>Exit</th><th>Capital used</th><th>P&amp;L</th><th>%</th><th>Status</th></tr></thead>
+          <tbody>${rows.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; const cap = t.capital ?? (t.entryPrice > 0 && t.qty > 0 ? t.entryPrice * t.qty : null); return html`<tr>
+            <td class="num">${t.day}</td><td class="num">${secs(t.enteredAt ?? t.createdAt)}</td><td class="num">${secs(t.exitedAt)}</td><td>${t.strategy || 'ORB 5m'} · ${INDEX_SHORT[t.underlying] || 'NIFTY 50'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.exitPrice)}</td>
+            <td class="num">${cap == null ? '—' : `₹${Math.round(cap).toLocaleString('en-IN')}`}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnl == null ? '—' : money(t.pnl)}</td>
             <td class="num ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${t.pnlPct == null ? '—' : `${t.pnlPct > 0 ? '+' : ''}${t.pnlPct.toFixed(1)}%`}</td>
             <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
@@ -123,9 +125,33 @@ function capitalFields(attr, c, dis, zeroText) {
 /** The capital fields' values for a save: the value box sets the chosen mode's number; the other one is kept. */
 function capitalFrom(box, attr, cur) {
   if (!box.querySelector(`[${attr}="capitalMode"]`)) return { capitalMode: cur.capitalMode || 'amount', capital: Number(cur.capital || 0), capitalPct: Number(cur.capitalPct || 80) };   // hidden (fixed lots): kept
-  const mode = box.querySelector(`[${attr}="capitalMode"]`)?.value || 'amount', v = Number(box.querySelector(`[${attr}="capitalValue"]`)?.value || 0);
+  const mode = fieldValue(box, attr, 'capitalMode') || 'amount', v = Number(fieldValue(box, attr, 'capitalValue') || 0);
   const same = mode === (cur.capitalMode || 'amount');   // a changed mode keeps both numbers; the box shows the other one next
   return { capitalMode: mode, capital: same && mode === 'amount' ? v : Number(cur.capital || 0), capitalPct: same && mode === 'percent' ? v : Number(cur.capitalPct || (attr === 'data-gap-cfg' ? 80 : 100)) };
+}
+/**
+ * Gap's sizing from its three-way choice: fixed lots, a fixed ₹ capital, or a % of the funds; one number box for the
+ * chosen one. Just after switching, the box still holds the previous choice's number: then every saved value is kept
+ * (fixed lots come back from lastLots, kept by the server while sizing by capital; 1 if never set) and the page
+ * redraws with the new choice's number.
+ */
+function gapSizing(box, cur) {
+  const pick = fieldValue(box, 'data-gap-cfg', 'sizing') || 'amount', v = Number(fieldValue(box, 'data-gap-cfg', 'sizeValue') || 0);
+  const was = Number(cur.lots) > 0 ? 'lots' : cur.capitalMode === 'percent' ? 'percent' : 'amount', same = pick === was;
+  return {
+    lots: pick === 'lots' ? (same ? Math.max(1, Math.round(v)) : Number(cur.lots) > 0 ? Number(cur.lots) : Number(cur.lastLots) > 0 ? Number(cur.lastLots) : 1) : 0,
+    capitalMode: pick === 'lots' ? (cur.capitalMode || 'amount') : pick,
+    capital: pick === 'amount' && same ? v : Number(cur.capital || 0),
+    capitalPct: pick === 'percent' && same ? v : Number(cur.capitalPct || 80),
+  };
+}
+/** A setting's value: the checked option of a segmented choice, a switch as '1' / '0', else the field's own value. */
+function fieldValue(box, attr, k) {
+  const all = [...box.querySelectorAll(`[${attr}="${k}"]`)];
+  if (!all.length) return undefined;
+  if (all[0].type === 'radio') return all.find(x => x.checked)?.value;
+  if (all[0].type === 'checkbox') return all[0].checked ? '1' : '0';
+  return all[0].value;
 }
 const money = n => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`;
 
@@ -149,22 +175,51 @@ function strangleSettings(a, rules, U = 'NIFTY') {
     </div>`;
 }
 
-/** Inside the Gap open 09:15 row: one index's settings (as the Gap backtest's inputs), saved together when one changes. */
+/** A segmented choice (as the app's): radio buttons styled as one pill bar; the checked one is the value. */
+const seg = (attr, k, name, value, options, dis) => html`<div class="set-seg" role="radiogroup">${options.map(([v, t]) => html`<label class="set-seg-opt"><input type="radio" name="${name}" value="${v}" ${raw(`${attr}="${k}"`)} ${value === v ? 'checked' : ''} ${dis}><span>${t}</span></label>`)}</div>`;
+/** A setting with a switch on the right (as the app's toggle rows): a checkbox styled as a switch; checked = '1'. */
+const toggleRow = (attr, k, title, sub, on, dis) => html`<label class="set-toggle"><span class="set-toggle-txt"><b>${title}</b><small>${sub}</small></span><input type="checkbox" role="switch" ${raw(`${attr}="${k}"`)} ${on ? 'checked' : ''} ${dis}></label>`;
+/** A number field with its label on top and an optional hint below. */
+const numField = (attr, k, label, value, min, max, step = '1', dis = '', hint = '') => html`<label class="set-num"><span>${label}</span><input class="input num" type="number" inputmode="decimal" min="${min}" max="${max}" step="${step}" ${raw(`${attr}="${k}"`)} value="${value ?? ''}" ${dis}>${hint ? html`<small>${hint}</small>` : ''}</label>`;
+
+/** Inside the Gap open 09:15 row: one index's settings (laid out as the app's settings sheet), saved together when one changes. */
 function gapSettings(a, U, rules) {
-  const cell = a?.grid?.gap?.[U] || {}, c = cell.cfg || {}, dis = a ? '' : 'disabled', pct = c.capitalMode === 'percent';
-  const num = (k, label, min, max, step = '1') => html`<label class="algo-strangle-field"><span>${label}</span><input class="input" type="number" min="${min}" max="${max}" step="${step}" data-gap-cfg="${k}" value="${c[k] ?? ''}" ${dis}></label>`;
-  const pick = (k, label, yes, no) => html`<label class="algo-strangle-field"><span>${label}</span><select class="input" data-gap-cfg="${k}" ${dis}><option value="1" ${c[k] ? 'selected' : ''}>${yes}</option><option value="0" ${c[k] ? '' : 'selected'}>${no}</option></select></label>`;
+  const cell = a?.grid?.gap?.[U] || {}, c = cell.cfg || {}, dis = a ? '' : 'disabled', pct = c.capitalMode === 'percent', A = 'data-gap-cfg';
+  const pre = c.decide === 'preopen', lots = Number(c.lots) > 0;
+  const sizing = lots ? `${c.lots} lot${c.lots > 1 ? 's' : ''} a trade` : pct ? `${c.capitalPct}% of funds` : c.capital > 0 ? money(c.capital) : 'Risk rules capital';
+  const how = [
+    pre ? 'Side from the index pre-open (09:00–09:08 auction) vs its previous close: up → CE, down → PE, decided at 09:14:30.'
+      : 'Side from the ATM premiums at 09:15 (the backtested rule).',
+    pre ? 'The buy goes at 09:15:00 as a market order, sent again each second if not filled, until 09:15:30. The green rule does not apply.'
+      : 'Bought in the first seconds after 09:15, so “green” is checked then, not on the whole first minute.',
+    pre ? 'Strike ITM3 from the pre-open ATM (one deeper: the index often moves back in the first seconds).' : 'Strike ITM2.',
+    lots ? `Each trade buys ${c.lots} lot${c.lots > 1 ? 's' : ''} (the funds must cover them).`
+      : `${pct ? `Each trade uses ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Each trade uses ${money(c.capital)}` : `Each trade uses your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade.`,
+    c.stopPct > 0 ? (lots ? `Stop-loss ${c.stopPct}% below the fill price.` : `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.`) : null,
+  ].filter(Boolean);
   return html`
-    <div class="algo-strat-sub algo-strangle" data-gap-index="${U}">
-      <b class="algo-strangle-title">${INDEX_SHORT[U]}</b>
-      <label class="algo-strangle-field"><span>Decide the side</span><select class="input" data-gap-cfg="decide" ${dis}>${[['premium', 'ATM premium at 09:15 (backtested)'], ['preopen', 'Index pre-open, order at 09:15:00']].map(([v, t]) => html`<option value="${v}" ${(c.decide || 'premium') === v ? 'selected' : ''}>${t}</option>`)}</select></label>
-      ${num('lots', 'Fixed lots (0 = from capital)', 0, 500)}
-      ${c.lots > 0 ? '' : capitalFields('data-gap-cfg', c, dis, '0 = Risk rules / funds')}
-      ${num('stopPct', c.lots > 0 ? 'Stop-loss % of the premium paid' : 'Stop-loss % of capital', 0, 100, '0.5')}
-      ${pick('costToCost', 'Cost to cost at 1R', 'On', 'Off')}
-      ${pick('requireGreen', 'Premium green in the first seconds', 'Required', 'Not required')}
-      ${pick('autoExit', 'Exit at 09:16', 'Yes, sell at 09:16:00', `No: stop, your exit or ${rules?.squareOff || '15:15'}`)}
-      <small class="muted">${c.decide === 'preopen' ? 'Side from the index pre-open (09:00–09:08 auction) vs its previous close: up → CE, down → PE, decided at 09:14:30; the buy goes at 09:15:00 as a market order (sent again each second if not filled, until 09:15:30). The green rule does not apply. ' : ''}${c.lots > 0 ? `Each trade buys ${c.lots} lot${c.lots > 1 ? 's' : ''} (the funds must cover them).` : `${pct ? `Each trade uses ${c.capitalPct}% of the funds available at 09:15` : c.capital > 0 ? `Each trade uses ${money(c.capital)}` : `Each trade uses your Risk rules capital per trade, or ${c.fundsPct ?? 80}% of the funds`}, within the funds and your Risk rules capital per trade.`} ${c.stopPct > 0 ? (c.lots > 0 ? `Stop-loss ${c.stopPct}% below the fill price.` : `Stop-loss ${c.stopPct}% of that capital, spread over the quantity.`) : html`<span class="warn">Set a stop-loss %: at 0 the stop comes from the Algo Trading daily stop-loss, and with that off Gap does not trade.</span>`} ${c.decide === 'preopen' ? 'Strike ITM3 from the pre-open ATM (one deeper: the index often moves back in the first seconds). ' : 'Strike ITM2. '}${c.decide === 'preopen' ? '' : 'The live order is bought in the first seconds after 09:15, so “green” can only be checked then, not on the whole first minute.'}</small>
+    <div class="algo-strat-sub set-card" data-gap-index="${U}">
+      <div class="set-head">
+        <span class="set-index">${INDEX_SHORT[U]}</span>
+        <span class="set-sum">${pre ? 'Index pre-open' : 'ATM premium 09:15'} · ${sizing} · ${c.stopPct > 0 ? `SL ${c.stopPct}%` : 'no SL %'}</span>
+      </div>
+      <div class="set-grid set-choices">
+        <div class="set-field"><span class="set-label">Decide the side</span>${seg(A, 'decide', `gap-decide-${U}`, c.decide || 'premium', [['premium', 'ATM premium 09:15'], ['preopen', 'Index pre-open']], dis)}</div>
+        <div class="set-field"><span class="set-label">Size each trade</span>${seg(A, 'sizing', `gap-size-${U}`, lots ? 'lots' : pct ? 'percent' : 'amount', [['lots', 'Fixed lots'], ['amount', 'Fixed capital ₹'], ['percent', '% of funds']], dis)}</div>
+      </div>
+      <div class="set-grid">
+        ${lots ? numField(A, 'sizeValue', 'Lots per trade', c.lots, 1, 500, '1', dis, 'The funds must cover them.')
+          : pct ? numField(A, 'sizeValue', '% of available funds', c.capitalPct, 1, 100, '1', dis, 'Of the funds available at 09:15, within your Risk rules capital per trade.')
+          : numField(A, 'sizeValue', 'Capital per trade ₹', c.capital, 0, 1e9, '1000', dis, '0 = your Risk rules capital per trade (else 80% of the funds).')}
+        ${numField(A, 'stopPct', lots ? 'Stop-loss % of the premium paid' : 'Stop-loss % of capital', c.stopPct, 0, 100, '0.5', dis)}
+      </div>
+      ${c.stopPct > 0 ? '' : html`<div class="set-warn">${icon('alert')}<span>Set a stop-loss %: at 0 the stop comes from the Algo Trading daily stop-loss, and with that off Gap does not trade.</span></div>`}
+      <div class="set-toggles">
+        ${toggleRow(A, 'costToCost', 'Cost to cost at 1R', 'Moves the stop to the entry once the trade is 1R up.', !!c.costToCost, dis)}
+        ${toggleRow(A, 'requireGreen', 'Premium green first', pre ? 'Not used with the index pre-open.' : 'Buy only if the premium is green in the first seconds.', !!c.requireGreen, dis)}
+        ${toggleRow(A, 'autoExit', 'Exit at 09:16', c.autoExit ? 'Sells at 09:16:00.' : `Holds: the stop, your exit or ${rules?.squareOff || '15:15'}.`, !!c.autoExit, dis)}
+      </div>
+      <details class="set-how"><summary>${icon('info')}How it trades</summary><ul>${how.map(t => html`<li>${t}</li>`)}</ul></details>
     </div>`;
 }
 
@@ -177,9 +232,8 @@ export default {
   // Paper is the default: with no broker connected, opening the page sets up the Paper account (₹10 lakh paper wallet,
   // shared market data), so strategies can be switched on and Algo Trading started on paper at once.
   async load(ctx) {
-    // Other users edit their Algo Trading risk rules here; administrators size each strategy from its own settings.
-    const rules = isAdmin() ? null : await get('/rules').catch(() => null);
-    ctx.ui.algoRules = rules ? { set: 'algo', form: editableSet(rules, 'algo'), error: null, pending: rules.pending ? rules.pendingFrom : null, mode: rules.mode } : null;
+    // Risk rules: one master set on the Risk rules page covers Manual and Algo trades (no separate Algo set any more).
+    ctx.ui.algoRules = null;
     const d = await get('/algo/live');
     if (d.account) return d;
     try { await post('/paper/account'); return await get('/algo/live'); } catch { return d; }
@@ -239,11 +293,10 @@ export default {
 
 
 
-      ${ctx.ui.algoRules ? html`
-      <section class="algo-rules-card" id="algo-rules">
-        <h3 class="panel-title algo-rules-title">Risk rules for Algo Trading</h3>
-        ${rulesPanel(ctx.ui.algoRules.form, { set: 'algo', now: ruleSetNow(ctx.state.dash, ctx.ui.algoRules.mode), capital: ctx.state.dash?.capital ?? d.budget?.capital, dash: ctx.state.dash, error: ctx.ui.algoRules.error, pending: ctx.ui.algoRules.pending })}
-      </section>` : ''}
+      <section class="panel pad algo-block" id="algo-rules">
+        <h3 class="panel-title">Risk rules</h3>
+        <p class="muted small">Algo Trading follows your <a href="/rules" data-nav="rules">Risk rules</a>: the same daily stop-loss, profit target, trades per day, losing streak and cutoff cover your Manual and Algo trades.</p>
+      </section>
 
       <section class="panel pad algo-block algo-shared">
         <h3 class="panel-title">Every automatic trade</h3>
@@ -253,9 +306,9 @@ export default {
       <section class="panel pad algo-block">
         <h3 class="panel-title">Today</h3>
         ${d.trades.length ? html`<div class="bt-table-wrap"><table class="bt-table algo-trades">
-          <thead><tr><th>Time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>SL</th><th>Exit</th><th>Status</th></tr></thead>
+          <thead><tr><th>Entry time</th><th>Exit time</th><th>Signal</th><th>Contract</th><th>Lots</th><th>Entry</th><th>SL</th><th>Exit</th><th>Status</th></tr></thead>
           <tbody>${d.trades.map(t => { const [label, tone] = STATUS[t.status] || [t.status, '']; return html`<tr>
-            <td class="num">${time(t.createdAt)}</td><td>${t.strategy || 'ORB 5m'} · ${INDEX_SHORT[t.underlying] || 'NIFTY 50'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
+            <td class="num">${secs(t.enteredAt ?? t.createdAt)}</td><td class="num">${secs(t.exitedAt)}</td><td>${t.strategy || 'ORB 5m'} · ${INDEX_SHORT[t.underlying] || 'NIFTY 50'} · ${t.direction}${t.paper ? html` <span class="pill sm ice">Paper</span>` : ''}</td><td>${t.symbol || '—'}</td>
             <td class="num">${t.lots ?? '—'}</td><td class="num">${price(t.entryPrice)}</td><td class="num">${price(t.slPrice)}</td><td class="num">${price(t.exitPrice)}</td>
             <td><span class="pill sm ${tone}" title="${t.reason || ''}">${label}</span>${t.reason ? html`<small class="algo-reason">${t.reason}</small>` : ''}</td></tr>`; })}</tbody></table></div>`
           : html`<p class="muted small" style="margin:0">No automatic trades yet today.</p>`}
@@ -279,7 +332,6 @@ export default {
     const refresh = async () => { try { const d = await get('/algo/live'); if (el.querySelector('.sart-anchor.open, .sart-anchor:focus-within, .sart-anchor:hover, [data-rules-set] input:focus')) return; ctx.data = d; ctx.paint(); } catch { /* keep the last view */ } };
     const timer = setInterval(refresh, 15_000);
     signal.addEventListener('abort', () => clearInterval(timer), { once: true });
-    if (ctx.ui.algoRules) bindRules(ctx, ctx.ui.algoRules, { capital: () => ctx.state.dash?.capital ?? ctx.data.budget?.capital, onSaved: () => refresh() });
     const syncTopbar = account => {
       const dash = store.get().dash;
       if (dash && account) store.set({ dash: { ...dash, broker: account } });
@@ -372,10 +424,10 @@ export default {
     on(el, 'change', '[data-gap-cfg]', async (_, field) => {
       const id = ctx.data.account?.id, box = field.closest('[data-gap-index]'), U = box?.dataset.gapIndex;
       if (!id || !box) return;
-      const cur = ctx.data.account?.grid?.gap?.[U]?.cfg || {}, val = k => box.querySelector(`[data-gap-cfg="${k}"]`)?.value ?? (cur[k] == null ? undefined : String(cur[k] === true ? 1 : cur[k] === false ? 0 : cur[k]));
-      const cfg = { ...capitalFrom(box, 'data-gap-cfg', cur), fundsPct: Number(val('fundsPct') || 80), stopPct: Number(val('stopPct') || 0), compound: val('compound') === '1',
+      const cur = ctx.data.account?.grid?.gap?.[U]?.cfg || {}, val = k => fieldValue(box, 'data-gap-cfg', k) ?? (cur[k] == null ? undefined : String(cur[k] === true ? 1 : cur[k] === false ? 0 : cur[k]));
+      const cfg = { ...gapSizing(box, cur), fundsPct: Number(val('fundsPct') || 80), stopPct: Number(val('stopPct') || 0), compound: val('compound') === '1',
         costToCost: val('costToCost') === '1', requireGreen: val('requireGreen') === '1', autoExit: val('autoExit') === '1',
-        decide: val('decide') || 'premium', lots: Number(val('lots') || 0) };
+        decide: val('decide') || 'premium' };
       try {
         await post(`/brokers/${id}/algo-grid`, { strategy: 'gap', index: U, cfg });
         toast(`Gap open 09:15 ${INDEX_SHORT[U]} settings saved.`, 'ok');

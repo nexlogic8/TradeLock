@@ -91,14 +91,32 @@ export async function setBracket(userId, acct, { securityId, tp = null, sl = nul
   if (problem) throw bad('BRACKET_LEVEL', problem);
 
   const cur = bracketOf(userId, securityId), qty = Math.abs(pos.qty);
+  if (cur?.superId && cur.side === Math.sign(pos.qty)) return setSuperLegs(userId, adapter, pos, cur, { tp, sl }, ip);
   let slOrderId = cur?.slOrderId && cur.side === Math.sign(pos.qty) ? cur.slOrderId : null;
+  // The stop's state asked of the broker now: the 2-second account sync may not list a stop placed a moment ago
+  // (16 Nov: a drag 4 s after placing one sent a second stop, which the broker took as a new short and rejected).
+  const statusOf = async id => { try { return (await adapter.orderStatus?.(id)) || null; } catch { return null; } };
+  let stopRejected = null;   // the broker's reason when it turned the stop order down
   try {
     if (sl == null && slOrderId) { await adapter.cancelOrder(slOrderId).catch(() => {}); slOrderId = null; }
     else if (sl != null) {
-      if (slOrderId && pendingAtBroker(userId, slOrderId) && adapter.modifyStopLoss) {
+      const live = slOrderId ? await statusOf(slOrderId) : null;
+      const resting = !!slOrderId && (live ? live.status === 'pending' : pendingAtBroker(userId, slOrderId));
+      if (resting && adapter.modifyStopLoss) {
         try { await adapter.modifyStopLoss(slOrderId, { triggerPrice: sl, price: stopLimitFor(sl, long, tick), qty }); }
         catch { await adapter.cancelOrder(slOrderId).catch(() => {}); slOrderId = await placeStop(adapter, pos, sl, tick); }
-      } else slOrderId = await placeStop(adapter, pos, sl, tick);
+      } else {
+        // Not resting (filled, rejected, cancelled) or unknown: make sure no old stop is left behind, then place one.
+        if (slOrderId && live?.status !== 'failed' && live?.status !== 'filled') await adapter.cancelOrder(slOrderId).catch(() => {});
+        slOrderId = await placeStop(adapter, pos, sl, tick);
+      }
+      // The broker answers "pending" and may reject a moment later (funds, price band): confirm before saving the stop.
+      for (let i = 0; i < 2 && adapter.orderStatus; i++) {
+        await sleep(500);
+        const s = await statusOf(slOrderId);
+        if (s?.status === 'failed') { stopRejected = String(s.reason || 'no reason given').replace(/^RMS:\d+:/, '').trim(); slOrderId = null; break; }
+        if (s?.status === 'filled') break;
+      }
     }
   } catch (e) {
     if (e instanceof HttpError) throw e;
@@ -107,8 +125,94 @@ export async function setBracket(userId, acct, { securityId, tp = null, sl = nul
   if (tp == null && sl == null) { dropBracket(userId, securityId); markDirty(userId); audit(userId, 'bracket.cleared', { symbol: pos.symbol }, ip); return null; }
   const b = { securityId: String(pos.securityId), segment: pos.exchangeSegment, symbol: pos.symbol, side: Math.sign(pos.qty), qty, tp, sl, slOrderId };
   saveBracket(userId, b); markDirty(userId);
-  audit(userId, 'bracket.set', { symbol: pos.symbol, tp, sl, slOrderId }, ip);
+  audit(userId, 'bracket.set', { symbol: pos.symbol, tp, sl, slOrderId, ...(stopRejected && { stopRejected }) }, ip);
+  // Rejected at the broker: the stop is still kept, watched by TradeLock (no order at the broker: exit at market when
+  // reached, as the target), and the user is told why the broker refused it.
+  if (stopRejected) throw new HttpError(502, 'BROKER_REJECTED', `${adapter.label || 'Broker'} rejected the stop-loss order (${stopRejected}). TradeLock is watching your stop-loss ${sl} itself and will exit at market when it is reached.`);
   return bracketOf(userId, securityId);
+}
+
+// ---- Super Order positions: the target and stop-loss are legs of the entry's Dhan Super Order ----
+
+const LEG = { tp: 'TARGET_LEG', sl: 'STOP_LOSS_LEG' };
+const legError = e => (e instanceof HttpError ? e : new HttpError(502, 'BROKER_REJECTED', `Dhan did not change the super order: ${e?.message || e}`));
+
+/**
+ * Dragging / removing TP or SL on a position entered as a Super Order: move the leg at Dhan (modify), or cancel it
+ * (null). Dhan cannot add a cancelled leg back, so a level removed here cannot be set again on this position.
+ */
+async function setSuperLegs(userId, adapter, pos, cur, next, ip) {
+  for (const k of ['tp', 'sl']) {
+    if (next[k] === cur[k]) continue;
+    if (cur[k] == null) throw bad('SUPER_LEG_GONE', `This position's ${k === 'tp' ? 'target' : 'stop-loss'} was removed from its Dhan Super Order, and Dhan cannot add it back. Exit the position or keep the other leg.`);
+    try {
+      if (next[k] == null) await adapter.cancelSuperLeg(cur.superId, LEG[k]);
+      else await adapter.modifySuperLeg(cur.superId, LEG[k], next[k]);
+    } catch (e) { throw legError(e); }
+  }
+  const b = { ...cur, tp: next.tp, sl: next.sl, qty: Math.abs(pos.qty) };
+  saveBracket(userId, b); markDirty(userId);
+  audit(userId, 'bracket.set', { symbol: pos.symbol, tp: b.tp, sl: b.sl, superId: cur.superId }, ip);
+  return bracketOf(userId, pos.securityId);
+}
+
+/** A new entry placed as a Super Order: its target / stop-loss, shown on the chart as soon as the position appears. */
+export function saveSuperBracket(userId, { securityId, segment, symbol, side, qty, tp, sl, superId }) {
+  saveBracket(userId, { securityId, segment, symbol, side, qty, tp, sl, slOrderId: null, superId });
+  markDirty(userId);
+}
+
+/**
+ * Before TradeLock closes a position itself (exit button, rules, kill switch): cancel what is left of its Super Order
+ * at Dhan (the entry leg cancels every leg), so no target / stop-loss leg is left to trade after the exit.
+ */
+export async function releaseSuper(userId, acct, securityId) {
+  const b = bracketOf(userId, securityId);
+  if (!b?.superId) return;
+  await BROKER.adapterFor(acct).cancelSuperLeg?.(b.superId, 'ENTRY_LEG').catch(() => {});
+  dropBracket(userId, securityId); markDirty(userId);
+}
+
+/**
+ * Before TradeLock sends an exit for a position: take its target / stop off the broker first. A resting stop-loss order
+ * for the same quantity makes the broker treat the exit as a new short (16 Nov: refused for funds until the stop was
+ * cancelled by hand), and both could trade. Returns { closed } when the stop (or a Super Order leg) already traded, so
+ * there is nothing left to exit, { filledQty } for a stop that traded in part, or { unknown } when the cancel could not
+ * be confirmed (no exit then: it could sell twice).
+ */
+export async function releaseForExit(userId, acct, securityId) {
+  const b = bracketOf(userId, securityId);
+  if (!b) return {};
+  const adapter = BROKER.adapterFor(acct);
+  if (b.superId) {
+    const so = await adapter.superOrder?.(b.superId).catch(() => null);
+    const traded = so && Object.values(so.legs || {}).some(l => l.status === 'TRADED');
+    if (!traded) await adapter.cancelSuperLeg?.(b.superId, 'ENTRY_LEG').catch(() => {});
+    dropBracket(userId, securityId); markDirty(userId);
+    return traded ? { closed: true } : {};
+  }
+  if (b.slOrderId && adapter.orderStatus) {
+    const c = await cancelConfirmed(adapter, b.slOrderId);
+    if (c.state === 'unknown') return { unknown: true };
+    dropBracket(userId, securityId); markDirty(userId);
+    return c.state === 'filled' ? { closed: true } : { filledQty: c.filledQty || 0 };
+  }
+  dropBracket(userId, securityId); markDirty(userId);
+  return {};
+}
+
+/**
+ * The watcher for a Super Order position. Dhan runs the legs (one exit cancels the other), so TradeLock only cleans up:
+ * once the position is flat (target or stop traded, or closed elsewhere) any leg still resting is cancelled. A position
+ * not there yet while the entry is still working is left alone.
+ */
+async function watchSuper(userId, adapter, b, pos) {
+  if (pos && Math.sign(pos.qty) === b.side) return;
+  const so = await adapter.superOrder?.(b.superId).catch(() => null);
+  if (!pos && so && ['TRANSIT', 'PENDING', 'PART_TRADED'].includes(so.status) && Date.now() - b.updatedAt < 120_000) return;   // entering
+  const resting = so && Object.values(so.legs || {}).some(l => ['PENDING', 'TRANSIT', 'TRIGGER_PENDING'].includes(l.status));
+  if (!so || resting || ['PENDING', 'TRANSIT', 'PART_TRADED'].includes(so.status)) await adapter.cancelSuperLeg?.(b.superId, 'ENTRY_LEG').catch(() => {});
+  dropBracket(userId, b.securityId); markDirty(userId);
 }
 
 /** Cancel the stop order and wait until the broker confirms: 'cancelled' (with any part filled), 'filled' or 'unknown'. */
@@ -167,6 +271,7 @@ export async function watchBrackets(userId, acct) {
     const adapter = BROKER.adapterFor(acct);
     for (const b of rows) {
       const pos = positionOf(userId, b.securityId);
+      if (b.superId) { await watchSuper(userId, adapter, b, pos); continue; }   // Dhan runs the target and stop legs
       if (!pos || Math.sign(pos.qty) !== b.side) {
         // Closed: the stop filled, the user exited, or a limit closed it. A stop order still resting would open a new position.
         if (b.slOrderId && pendingAtBroker(userId, b.slOrderId)) await adapter.cancelOrder(b.slOrderId).catch(() => {});

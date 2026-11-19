@@ -129,7 +129,8 @@ function drawDay(ctx) {
   const xTicks = [];
   const step = svg.clientWidth < 520 ? 125 : 75;
   for (let m = OPEN; m <= CLOSE; m += step) xTicks.push([m, hhmm(m)]);
-  lineChart(svg, pts, { xDomain: [Math.min(OPEN, pts[0][0]), Math.max(CLOSE, pts.at(-1)[0])], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, endLabel: inr(d.pnl, { sign: true }) });
+  lineChart(svg, pts, { xDomain: [Math.min(OPEN, pts[0][0]), Math.max(CLOSE, pts.at(-1)[0])], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, endLabel: inr(d.pnl, { sign: true }),
+    smooth: true, hover: i => ({ title: `${shortDay(d.day)} · ${hhmm(Math.round(pts[i][0]))} IST`, value: inr(pts[i][1], { sign: true }), sub: 'P&L after charges' }) });
 }
 
 export default {
@@ -162,7 +163,7 @@ export default {
           ${monthPicker(month)}
           <button class="icon-btn" data-month="1" aria-label="Next month" ${isCurrent ? 'disabled' : ''}>${icon('arrow')}</button>
         </div>
-        ${syncBox(ctx)}
+        ${ctx.data.paper ? html`<div class="banner info" style="margin:8px 0 0">${icon('info')}<div><b>Paper trading history.</b> Paper keeps its own P&amp;L, separate from your broker's. Switch to Real on AI Algo Trading to see your broker's days.</div></div>` : syncBox(ctx)}
         </div>
         <div class="cal-sum">
           <div><span class="muted small">Net P&amp;L</span><b class="num ${tone(s.net)}">${inr(s.net, { sign: true })}</b></div>
@@ -200,7 +201,15 @@ export default {
     const sc = niceScale(-reach, reach, 4);
     const last = daysIn(month);
     const xTicks = [1, 8, 15, 22, last].map(n => [n, `${n} ${monthLabel(month).slice(0, 3)}`]);
-    lineChart(svg, pts, { xDomain: [0, last], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, endLabel: inr(summary.net, { sign: true }) });
+    const css = getComputedStyle(document.documentElement), red = css.getPropertyValue('--red').trim(), mint = css.getPropertyValue('--mint').trim();
+    lineChart(svg, pts, { xDomain: [0, last], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks, endLabel: inr(summary.net, { sign: true }), smooth: true,
+      // Hover: that day's date and P&L (its own colour), with the month's running total and its trades.
+      hover: i => {
+        if (!i) return { title: `Start of ${monthLabel(month)}`, value: inr(0), sub: 'Running total' };
+        const day = days[i - 1];
+        return { title: longDay(day.day), value: `Day ${inr(day.pnl, { sign: true })}`, color: day.pnl < 0 ? red : mint,
+          sub: `Month ${inr(pts[i][1], { sign: true })} · ${day.entries || 0} trade${day.entries === 1 ? '' : 's'}` };
+      } });
     // Daily results underneath, one bar per day of the month.
     const vals = Array.from({ length: last }, (_, i) => days.find(d => +d.day.slice(8) === i + 1)?.pnl ?? 0);
     const bs = niceScale(Math.min(0, ...vals), Math.max(0, ...vals), 2);

@@ -98,13 +98,7 @@ function setNote(set, now) {
   const live = set === now;
   return html`
     <div class="rule-sets" id="rule-sets">
-      ${set === 'manual'
-        ? html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target, Profit give-back and the kill switch cover your whole account</b> (Manual + Algo trades) and are always in force, whether Algo Trading is on or off.</p>`
-        : html`<p class="small rule-account" id="rule-account-note"><b>Daily stop-loss, Profit target, Profit give-back and the kill switch</b> are set on the <a href="/rules" data-nav="rules">Risk rules</a> page and cover your whole account (Manual + Algo trades).</p>`}
-      <p class="muted small" id="rule-set-note"><b>${set === 'manual' ? 'The other rules here are for manual trading.' : `${SET_NAMES[set]} rules.`}</b> ${live
-        ? html`In force now${now === 'algo' ? ': Algo Trading is on.' : ': Algo Trading is off.'}`
-        : html`Not in force now: they apply when Algo Trading is switched ${set === 'algo' ? 'on' : 'off'}. Edits are saved for then.`}
-      ${set === 'manual' ? html` Algo Trading's own rules are on the <a href="/algo" data-nav="algo">AI Algo Trading</a> page.` : ''}</p>
+      <p class="small rule-account" id="rule-account-note"><b>These rules cover your whole account: Manual and Algo trades alike</b>, whether Algo Trading is on or off.</p>
     </div>`;
 }
 
@@ -144,11 +138,8 @@ export function rulesPanel(f, { set, now, capital, dash, error = null, pending =
     <div class="mt-s" id="rules-error">${formError(error)}</div>`;
 }
 
-/** The set in force now from the live dashboard (Algo Trading on with protection → 'algo'). */
-export const ruleSetNow = (dash, fallback = 'manual') => {
-  const b = dash?.broker;
-  return b ? (b.algoOn && b.agentOn !== false ? 'algo' : 'manual') : fallback;
-};
+/** The set in force: always the master set ('manual', this page) since one set covers Manual and Algo trades. */
+export const ruleSetNow = () => 'manual';
 
 /**
  * Edits in a rules panel: every change is saved by itself (no Save button): switches, % / ₹ and the cutoff at once,

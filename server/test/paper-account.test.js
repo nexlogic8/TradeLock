@@ -76,3 +76,19 @@ test('Overview data for a Paper account: the broker has capabilities (kill switc
   assert.deepEqual(d.broker.capabilities, { positions: 'available', squareOff: 'available', accountLock: 'killswitch' });
   assert.equal(d.killSwitch.supported, true);
 });
+
+test('a pending paper buy stop (chart "+") can be moved up or down by dragging it, and cancelled', async () => {
+  const order = { symbol: 'SENSEX 2026-11-19 82300 CE', securityId: '889900', exchangeSegment: 'BSE_FNO', side: 'BUY', qty: 20, productType: 'INTRADAY' };
+  const placed = await call('POST', '/orders', { ...order, type: 'STOP_LOSS', triggerPrice: 246.45, ltp: 183.3 });
+  assert.equal(placed.status, 201, JSON.stringify(placed.body));
+  const pending = () => call('GET', '/dashboard').then(r => r.body.orders.find(o => o.securityId === '889900'));
+  const o = await pending();
+  assert.deepEqual([o.type, o.triggerPrice], ['STOP_LOSS', 246.45], JSON.stringify(o));
+  const up = await call('PUT', `/orders/${encodeURIComponent(o.id)}`, { price: 260 });
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  assert.equal((await pending()).triggerPrice, 260, 'moved up');
+  const down = await call('PUT', `/orders/${encodeURIComponent(o.id)}`, { price: 230.5 });
+  assert.equal(down.status, 200, JSON.stringify(down.body));
+  assert.equal((await pending()).triggerPrice, 230.5, 'moved down');
+  assert.equal((await call('DELETE', `/orders/${encodeURIComponent(o.id)}`)).status, 200);
+});

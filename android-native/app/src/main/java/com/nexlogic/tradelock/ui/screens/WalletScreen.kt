@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,7 +71,7 @@ import java.time.format.DateTimeFormatter
 
 private val DAY = DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.of("Asia/Kolkata"))
 private val STAMP = DateTimeFormatter.ofPattern("d MMM, HH:mm").withZone(ZoneId.of("Asia/Kolkata"))
-private enum class WAsk { None, Pay, Withdraw, Cancel }
+private enum class WAsk { None, Pay, Withdraw, Cancel, Add }
 
 /** TradeLock wallet and subscription: balance, plan status, pay from the wallet, withdraw, history. */
 @Composable
@@ -81,24 +82,34 @@ fun WalletScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
     var error by remember { mutableStateOf<String?>(null) }
     var ask by remember { mutableStateOf(WAsk.None) }
     val scope = rememberCoroutineScope()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     suspend fun load() {
         try { w = Api.get("/wallet"); sub = Api.get("/billing").obj("subscription"); error = null; vm.loadWallet() } catch (e: ApiError) { error = e.message }
     }
     LaunchedEffect(Unit) { load() }
+    // A payment was verified (or Razorpay's webhook may have credited it): show the new balance at once.
+    LaunchedEffect(Unit) { com.nexlogic.tradelock.data.RazorpayPay.updates.collect { load() } }
+    // Back from a UPI app or the background: refresh.
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) scope.launch { load() } }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
     val b = w?.obj("balances")
     val plan = w?.obj("plan")
 
     LazyColumn(
-        Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding(),
+        Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding(),
         contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text)
                 }
                 Spacer(Modifier.width(12.dp))
-                Text("Wallet", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+                Text("Wallet", style = TlType.page)
             }
         }
         if (w == null) { item { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { if (error != null) Text(error!!, color = Tl.red) else CircularProgressIndicator(color = Tl.mint) } }; return@LazyColumn }
@@ -121,7 +132,7 @@ fun WalletScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
                 (b?.long("pendingWithdrawals") ?: 0).takeIf { it > 0 }?.let { Spacer(Modifier.height(8.dp)); Text("${paise(it)} on its way to you", style = TlType.small, color = Tl.amber) }
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PrimaryButton("+  Add balance", Modifier.weight(1f)) { onOpenWeb("wallet?web=1") }
+                    PrimaryButton("+  Add balance", Modifier.weight(1f)) { ask = WAsk.Add }
                     GhostButton("Withdraw", Modifier.weight(1f)) { ask = WAsk.Withdraw }
                 }
             }
@@ -153,7 +164,8 @@ fun WalletScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
                 Spacer(Modifier.height(4.dp))
                 Text("${paise(plan?.long("total"))} a month incl. GST", style = TlType.small, color = Tl.dim)
                 Spacer(Modifier.height(16.dp))
-                PrimaryButton(if (active && !trial) "Pay the next month" else "Pay ${paise(plan?.long("total"))} from wallet") { ask = WAsk.Pay }
+                // Plans, coupons and checkout live on the Subscription screen.
+                PrimaryButton(if (active && !trial) "Extend · apply a coupon" else "Subscribe · apply a coupon") { onOpenWeb("billing") }
                 if (active && !trial) {
                     Spacer(Modifier.height(10.dp))
                     if (sub?.bool("cancelAtPeriodEnd") == true) GhostButton("Turn renewal back on", Modifier.fillMaxWidth()) {
@@ -200,14 +212,36 @@ fun WalletScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
 
     when (ask) {
         WAsk.None -> Unit
-        WAsk.Pay -> ConfirmSheet("Pay ${paise(plan?.long("total"))} from your wallet?",
-            listOf("One month of ${plan?.str("name") ?: "TradeLock"}, GST included.", "Added funds are used first, then earnings.", "Your wallet has ${paise(b?.long("total"))}."),
-            "Pay now", "Not now", danger = false, onDismiss = { ask = WAsk.None }) {
-            ask = WAsk.None
-            scope.launch {
-                try { Api.post("/wallet/subscribe"); vm.toast("Paid. Your subscription is active.") }
-                catch (e: ApiError) { vm.toast(e.message, Toast.Tone.Error) }
-                load()
+        // As on the website (/billing/checkout): the wallet pays first and Razorpay opens for whatever is left.
+        WAsk.Pay -> {
+            val total = plan?.long("total") ?: 0L
+            val inWallet = b?.long("total") ?: 0L
+            val due = (total - inWallet).coerceAtLeast(0L)
+            ConfirmSheet(if (due == 0L) "Pay ${paise(total)} from your wallet?" else "Pay ${paise(total)}?",
+                listOf("One month of ${plan?.str("name") ?: "TradeLock"}, GST included.",
+                    when {
+                        due == 0L -> "Added funds are used first, then earnings. Your wallet has ${paise(inWallet)}."
+                        inWallet > 0L -> "${paise(inWallet)} from your wallet, ${paise(due)} through Razorpay (UPI, cards, netbanking)."
+                        else -> "Through Razorpay: UPI, cards or netbanking."
+                    }),
+                if (due == 0L) "Pay now" else "Pay ${paise(due)}", "Not now", danger = false, onDismiss = { ask = WAsk.None }) {
+                ask = WAsk.None
+                scope.launch {
+                    try {
+                        val res = Api.post("/billing/checkout", buildJsonObject { put("useWallet", true) })
+                        if (res.bool("paid") != true && res.str("provider") == "razorpay") {
+                            val activity = activityOf(ctx)
+                            if (activity == null) { vm.toast("Could not open the payment screen.", Toast.Tone.Error); return@launch }
+                            com.nexlogic.tradelock.data.RazorpayPay.pay(activity, res, "${plan?.str("name") ?: "TradeLock"} · 1 month").getOrElse {
+                                val received = it.message?.startsWith("Payment received") == true
+                                if (received) vm.toast(it.message!!) else vm.toast(it.message ?: "Payment failed.", Toast.Tone.Error)
+                                load(); return@launch
+                            }
+                        }
+                        vm.toast("Paid. Your subscription is active.")
+                    } catch (e: ApiError) { vm.toast(e.message, Toast.Tone.Error) }
+                    load()
+                }
             }
         }
         WAsk.Cancel -> ConfirmSheet("Cancel renewal?",
@@ -216,6 +250,23 @@ fun WalletScreen(vm: AppViewModel, onBack: () -> Unit, onOpenWeb: (String) -> Un
             ask = WAsk.None
             scope.launch { runCatching { Api.post("/billing/cancel") }.onSuccess { vm.toast("Renewal cancelled.") }; load() }
         }
+        // The server creates the Razorpay order (as on the website); Razorpay Checkout opens natively; the signed
+        // result is verified on the server, which credits the wallet (its webhook does it too if the app closes).
+        WAsk.Add -> AddBalanceSheet(onDismiss = { ask = WAsk.None }, onPay = pay@{ rupees ->
+            try {
+                val order = Api.post("/wallet/topup", buildJsonObject { put("amount", rupees) })
+                if (order.str("provider") == "razorpay") {
+                    val activity = activityOf(ctx) ?: return@pay "Could not open the payment screen."
+                    com.nexlogic.tradelock.data.RazorpayPay.pay(activity, order, "Wallet top-up").getOrElse {
+                        // Paid but not yet confirmed: close the sheet; the balance refreshes as soon as the server credits it.
+                        if (it.message?.startsWith("Payment received") == true) { ask = WAsk.None; vm.toast(it.message!!); load(); return@pay null }
+                        return@pay it.message
+                    }
+                }
+                val added = (order.long("amount") ?: 0L) / 100.0
+                ask = WAsk.None; vm.toast("₹${"%,.0f".format(added)} added to your wallet."); load(); null
+            } catch (e: ApiError) { e.message }
+        })
         WAsk.Withdraw -> WithdrawSheet(b?.long("total") ?: 0, { ask = WAsk.None }) { body ->
             try { Api.post("/wallet/withdraw", body); ask = WAsk.None; vm.toast("Withdrawal requested: it arrives within 2 working days."); load(); null }
             catch (e: ApiError) { e.message }
@@ -236,6 +287,48 @@ private fun LedgerRow(title: String, at: Long?, amountPaise: Long, tag: String, 
             Text((at?.let { STAMP.format(Instant.ofEpochMilli(it)) } ?: "") + " · $tag", style = TlType.small.copy(fontSize = 11.sp), color = tagColor)
         }
         Text((if (amountPaise > 0) "+" else "") + paise(amountPaise), style = TlType.num, color = if (amountPaise > 0) Tl.green else Tl.text)
+    }
+}
+
+internal fun activityOf(c: android.content.Context): android.app.Activity? {
+    var x: android.content.Context? = c
+    while (x is android.content.ContextWrapper) { if (x is android.app.Activity) return x; x = x.baseContext }
+    return null
+}
+
+/** Add balance: an amount (typed or a quick chip), then Razorpay. onPay returns an error message, or null when done. */
+@Composable
+private fun AddBalanceSheet(onDismiss: () -> Unit, onPay: suspend (Double) -> String?) {
+    var amount by remember { mutableStateOf("1000") }
+    var err by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    TlSheet(onDismiss) {
+        Text("Add balance", style = TlType.title.copy(fontSize = 22.sp), color = Tl.text)
+        Text("UPI · cards · netbanking, through Razorpay", style = TlType.small, color = Tl.muted)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("500", "1000", "2000", "5000").forEach { v ->
+                val on = amount == v
+                Box(Modifier.tactile({ amount = v; err = null }).clip(RoundedCornerShape(12.dp)).background(if (on) Tl.mint.copy(alpha = 0.16f) else Tl.surfaceHi)
+                    .border(1.dp, if (on) Tl.mint.copy(alpha = 0.6f) else Tl.line, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Text("₹$v", style = TlType.label, color = if (on) Tl.mint else Tl.text)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        WField("Amount (₹)", amount, KeyboardType.Number) { amount = it.filter(Char::isDigit); err = null }
+        err?.let { Text(it, style = TlType.small, color = Tl.red, modifier = Modifier.padding(top = 6.dp)) }
+        Spacer(Modifier.height(14.dp))
+        PrimaryButton(if (busy) "Opening Razorpay…" else "Add ₹${amount.ifEmpty { "0" }}") {
+            if (busy) return@PrimaryButton
+            val rupees = amount.toDoubleOrNull() ?: 0.0
+            if (rupees <= 0) { err = "Enter an amount."; return@PrimaryButton }
+            busy = true
+            scope.launch { err = onPay(rupees); busy = false }
+        }
+        Spacer(Modifier.height(8.dp))
+        GhostButton("Cancel", Modifier.fillMaxWidth()) { onDismiss() }
     }
 }
 

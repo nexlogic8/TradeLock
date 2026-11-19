@@ -1,6 +1,6 @@
 import { html } from '../core/dom.js';
 import { get } from '../core/api.js';
-import { inr, tone, pct, shortDay, axisInr } from '../core/format.js';
+import { inr, tone, pct, shortDay, longDay, axisInr } from '../core/format.js';
 import { icon } from '../ui/icons.js';
 import { empty } from '../ui/parts.js';
 import { lineChart, barChart, niceScale } from '../ui/charts.js';
@@ -55,7 +55,14 @@ export default {
     const n = a.series.length;
     const tickIdx = [0, Math.round(n / 4), Math.round(n / 2), Math.round((3 * n) / 4), n - 1].filter((v, i, arr) => arr.indexOf(v) === i && v < n);
     const labels = a.series.map(s => shortDay(s.day));
-    lineChart(eq, pts, { xDomain: [-1, n - 1], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks: tickIdx.map(i => [i, labels[i]]), endLabel: axisInr(a.netPnl) });
+    const css = getComputedStyle(document.documentElement), red = css.getPropertyValue('--red').trim(), mint = css.getPropertyValue('--mint').trim();
+    lineChart(eq, pts, { xDomain: [-1, n - 1], yDomain: [sc.lo, sc.hi], yTicks: sc.ticks, fmtY: axisInr, xTicks: tickIdx.map(i => [i, labels[i]]), endLabel: axisInr(a.netPnl), smooth: true,
+      // Hover: that session's date and P&L (its own colour) with the running total.
+      hover: i => {
+        if (!i) return { title: 'Start', value: inr(0), sub: 'Cumulative P&L' };
+        const s = a.series[i - 1];
+        return { title: longDay(s.day), value: `Day ${inr(s.pnl, { sign: true })}`, color: s.pnl < 0 ? red : mint, sub: `Cumulative ${inr(s.cumulative, { sign: true })}` };
+      } });
     const vals = a.series.map(s => s.pnl);
     const bs = niceScale(Math.min(0, ...vals), Math.max(0, ...vals), 2);
     barChart(document.getElementById('daily'), vals, { yDomain: [bs.lo, bs.hi], fmtY: axisInr, labels, xTicks: tickIdx, fmtTip: v => inr(v, { sign: true }) });

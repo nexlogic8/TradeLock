@@ -1,5 +1,7 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
+import androidx.compose.foundation.border
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -80,13 +82,13 @@ fun SettingsScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) -> Uni
         try { user = Api.patch("/settings", body).obj("user"); ok?.let { vm.toast(it) } } catch (e: ApiError) { vm.toast(e.message, Toast.Tone.Error) }
     }
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text)
             }
             Spacer(Modifier.width(12.dp))
-            Text("Settings", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+            Text("Settings", style = TlType.page)
         }
         Spacer(Modifier.height(16.dp))
         Eyebrow("Profile", Modifier.padding(start = 4.dp, bottom = 10.dp))

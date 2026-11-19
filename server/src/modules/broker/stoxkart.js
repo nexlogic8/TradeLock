@@ -17,7 +17,8 @@
 import { createHmac } from 'node:crypto';
 import { stmt } from '../../db/index.js';
 import { decrypt, encrypt, totp } from '../../lib/crypto.js';
-import { bad } from '../../lib/errors.js';
+import { bad, forbidden } from '../../lib/errors.js';
+import { isAdminEmail } from '../../lib/access.js';
 import { v } from '../../lib/validate.js';
 import { limit } from '../../lib/ratelimit.js';
 import { request } from '../../lib/httpclient.js';
@@ -134,11 +135,17 @@ export function removeStoxkartLink(userId, ip) {
   return { linked: false };
 }
 
+/** StoxKart is in beta: administrators only (ADMIN_EMAILS). Everyone else sees it as coming soon. */
+export const stoxkartAllowed = user => isAdminEmail(user?.email);
+export function requireStoxkart(user) {
+  if (!stoxkartAllowed(user)) throw forbidden('STOXKART_BETA', 'StoxKart is in beta and not available on your account yet.');
+}
+
 export function stoxkartRoutes(r) {
-  r.get('/api/brokers/links/stoxkart', ctx => stoxkartLink(ctx.user.id));
-  r.put('/api/brokers/links/stoxkart', ctx => { limit(`stoxkart-save:${ctx.user.id}`, 10, 10 * 60e3); return saveStoxkartLink(ctx.user.id, ctx.body, ctx.ip); });
-  r.post('/api/brokers/links/stoxkart/test', ctx => testStoxkartLink(ctx.user.id, ctx.ip));
-  r.delete('/api/brokers/links/stoxkart', ctx => removeStoxkartLink(ctx.user.id, ctx.ip));
+  r.get('/api/brokers/links/stoxkart', ctx => { requireStoxkart(ctx.user); return stoxkartLink(ctx.user.id); });
+  r.put('/api/brokers/links/stoxkart', ctx => { requireStoxkart(ctx.user); limit(`stoxkart-save:${ctx.user.id}`, 10, 10 * 60e3); return saveStoxkartLink(ctx.user.id, ctx.body, ctx.ip); });
+  r.post('/api/brokers/links/stoxkart/test', ctx => { requireStoxkart(ctx.user); return testStoxkartLink(ctx.user.id, ctx.ip); });
+  r.delete('/api/brokers/links/stoxkart', ctx => { requireStoxkart(ctx.user); return removeStoxkartLink(ctx.user.id, ctx.ip); });
   // The redirect and postback URLs registered in the StoxKart app. Stage 1 logs in with TOTP on the server, so
   // nothing is read from them yet: the redirect returns to Broker accounts, postbacks are acknowledged.
   r.get('/api/brokers/stoxkart/callback', ctx => {

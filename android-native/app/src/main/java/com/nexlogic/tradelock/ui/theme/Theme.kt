@@ -33,6 +33,14 @@ object Tl {
     val cardBrush = Brush.verticalGradient(listOf(Color(0xFF151B24), Color(0xFF0D1117)))
     val edgeBrush = Brush.verticalGradient(listOf(Color(0x33FFFFFF), Color(0x08FFFFFF)))
     val mintBrush = Brush.verticalGradient(listOf(Color(0xFF4BF0D2), Color(0xFF1FC7A8)))
+    val ice = Color(0xFF5AA9FF)
+
+    /** The glass look of AI Algo Trading, shared by every screen: a deep gradient fill and a light gradient edge. */
+    val glass = Brush.verticalGradient(listOf(Color(0xFF161D28), Color(0xFF0C1016)))
+    val edgeOff = Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x0FFFFFFF)))
+    fun edgeOn(c: Color) = Brush.linearGradient(listOf(c.copy(alpha = 0.8f), c.copy(alpha = 0.35f), Color(0x22FFFFFF)))
+    /** Page titles: mint → ice → violet (AI Algo Trading keeps its amber aurora). */
+    val aurora = Brush.linearGradient(listOf(Color(0xFF4BF0D2), Color(0xFF5AA9FF), Color(0xFFB794FF)))
 
     fun money(v: Double): Color = if (v > 0.004) green else if (v < -0.004) red else text
 }
@@ -50,6 +58,8 @@ object TlType {
     val small = TextStyle(fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp)
     /** Small spaced capitals: "TODAY'S P&L". */
     val eyebrow = TextStyle(fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 1.6.sp)
+    /** A page's title, painted with the aurora gradient. */
+    val page = TextStyle(brush = Tl.aurora, fontWeight = FontWeight.ExtraBold, fontSize = 28.sp, letterSpacing = (-0.5).sp)
 }
 
 @Composable

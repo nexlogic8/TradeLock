@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -94,13 +95,13 @@ fun CalendarScreen(vm: AppViewModel, onBack: () -> Unit) {
     val maxAbs = days.values.maxOfOrNull { abs(it.pnl) }?.takeIf { it > 0 } ?: 1.0
     val s = data?.obj("summary")
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text)
             }
             Spacer(Modifier.width(12.dp))
-            Text("P&L calendar", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text, modifier = Modifier.weight(1f))
+            Text("P&L calendar", style = TlType.page, modifier = Modifier.weight(1f))
             Text(if (syncing) "Syncing…" else "Sync", style = TlType.label, color = Tl.mint, modifier = Modifier.tactile({
                 if (syncing) return@tactile
                 syncing = true
@@ -123,6 +124,14 @@ fun CalendarScreen(vm: AppViewModel, onBack: () -> Unit) {
             }
         }
         Spacer(Modifier.height(14.dp))
+        // Paper keeps its own days, separate from the broker's (switching parks one history and brings back the other).
+        if (data?.bool("paper") == true) {
+            TlCard(Modifier.fillMaxWidth(), padding = 14.dp, accent = Tl.ice) {
+                Text("Paper trading history", style = TlType.label, color = Tl.ice)
+                Text("Paper keeps its own P&L, separate from your broker's. Switch to Real on AI Algo Trading to see your broker's days.", style = TlType.small, color = Tl.muted)
+            }
+            Spacer(Modifier.height(14.dp))
+        }
         // summary
         TlCard(Modifier.fillMaxWidth(), padding = 18.dp) {
             Eyebrow("Month net · after charges")
@@ -188,7 +197,7 @@ fun CalendarScreen(vm: AppViewModel, onBack: () -> Unit) {
                 else -> PnlChart(points!!, null, null)
             }
             Spacer(Modifier.height(6.dp))
-            Text(if (d.source == "broker") "From ${"your broker"}'s trade history, after charges." else "From TradeLock's live record.", style = TlType.small, color = Tl.dim)
+            Text(if (d.source == "broker") "From ${"your broker"}'s trade history, after charges." else "From TradeLock's own record, after charges.", style = TlType.small, color = Tl.dim)
         }
     }
 }

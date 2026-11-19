@@ -1,5 +1,6 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.ambient
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -70,13 +71,13 @@ fun AlarmScreen(vm: AppViewModel, onBack: () -> Unit) {
     val missing = needs.filterNot { it.ok }
     val watching = AlarmCenter.running(c)
 
-    Column(Modifier.fillMaxSize().background(Tl.bg).statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(Modifier.fillMaxSize().ambient().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.surface), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).tactile(onBack).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, tint = Tl.text)
             }
             Spacer(Modifier.width(12.dp))
-            Text("Trade alarm", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = Tl.text)
+            Text("Trade alarm", style = TlType.page)
         }
         Spacer(Modifier.height(16.dp))
         TlCard(Modifier.fillMaxWidth(), padding = 20.dp) {

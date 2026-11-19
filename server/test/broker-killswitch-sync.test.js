@@ -27,7 +27,7 @@ test('an overnight reading of yesterday\'s Dhan lock is not recorded as today\'s
   assert.equal(s.ks_armed, null);
 });
 
-test('a lock copied from the broker clears when the broker switch is off; a TradeLock lock stays', async t => {
+test('every lock follows the broker: switched off there (or never really on), off here, a rule lock too', async t => {
   let now = Date.parse('2026-10-15T09:40:00+05:30');
   t.mock.method(Date, 'now', () => now);
   const copied = account('copied', now);
@@ -40,7 +40,8 @@ test('a lock copied from the broker clears when the broker switch is off; a Trad
   patchDay(own.uid, '2026-10-15', { ks_armed: 'rule:maxLoss', ks_active_at: now - 600e3 });
   own.adapter.getKillSwitch = async () => false;
   await syncAccount(own.acct, { force: true });
-  assert.ok(dayState(own.uid, '2026-10-15').ks_active_at, 'a rule lock is TradeLock\'s own record and is kept');
+  // Since 13 Nov 2026 every kill switch can be switched off the same day, so a rule lock follows the broker as well.
+  assert.equal(dayState(own.uid, '2026-10-15').ks_active_at, null, 'Dhan says off, so the rule lock is off too');
 
   // Switched on in the Dhan app during the session: recorded.
   now += 120e3;

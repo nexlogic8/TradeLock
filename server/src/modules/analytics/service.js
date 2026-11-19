@@ -1,6 +1,8 @@
 import { stmt } from '../../db/index.js';
 import { ist } from '../../lib/time.js';
 import { brokerDays, syncState } from './brokerpnl.js';
+import { estimateCharges } from '../risk/charges.js';
+import { fillsForDay } from '../trades/service.js';
 
 export function analytics(userId, sessions = 20) {
   const own = stmt(`
@@ -48,7 +50,11 @@ export function pnlCalendar(userId, month) {
     SELECT day, realized, unrealized, realized + unrealized AS pnl, entries, wins, losses, breaches, ks_active_at AS ksAt
     FROM day_state WHERE user_id = ? AND day >= ? AND day <= ? AND (sync_ok > 0 OR realized != 0 OR entries > 0)
     ORDER BY day`).all(userId, `${month}-01`, `${month}-31`)
-    .map(r => ({ ...r, pnl: Math.round(r.pnl * 100) / 100, locked: !!r.ksAt, ksAt: undefined, source: 'tradelock' }));
+    .map(r => {
+      // After charges, like the header and the day chart (the broker's own history below is already net).
+      const charges = Math.round(estimateCharges(fillsForDay(userId, r.day)).total * 100) / 100;
+      return { ...r, gross: Math.round(r.pnl * 100) / 100, charges, pnl: Math.round((r.pnl - charges) * 100) / 100, locked: !!r.ksAt, ksAt: undefined, source: 'tradelock' };
+    });
   // The broker's trade history is the record of what really happened; TradeLock's own numbers fill
   // the gaps, and stay for today while the session is live (they include open positions).
   const byDay = new Map(live.map(d => [d.day, d]));
@@ -65,8 +71,10 @@ export function pnlCalendar(userId, month) {
   const traded = days.filter(d => d.entries > 0 || d.pnl !== 0);
   const best = traded.reduce((b, d) => (!b || d.pnl > b.pnl ? d : b), null);
   const worst = traded.reduce((w, d) => (!w || d.pnl < w.pnl ? d : w), null);
+  const mode = stmt(`SELECT paper_mode FROM broker_accounts WHERE user_id = ? AND status != 'disconnected' ORDER BY broker = 'paper', created_at DESC LIMIT 1`).get(userId);
   return {
     month,
+    paper: mode?.paper_mode === 1,
     days,
     brokerSync: syncState(userId),
     summary: {

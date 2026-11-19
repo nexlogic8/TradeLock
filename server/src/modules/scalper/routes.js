@@ -148,8 +148,10 @@ async function orLastGood(key, load) {
 // The chain contracts a user loaded, per index (the page preloads all three). With the index named
 // (NSE and BSE ids can collide) only that index's chain is searched.
 function allowedFor(userId, securityId, key) {
-  const fresh = [...(allowedByUser.get(userId)?.entries() || [])].filter(([, a]) => Date.now() - a.at <= 8 * 60 * 60_000);
-  const scoped = key ? fresh.filter(([k]) => k === String(key).toUpperCase()) : fresh;
+  // Entries are per index and expiry ("NIFTY:2026-11-17"): the website and the app may each show another expiry.
+  // Newest first, so a lookup without a contract gets the chain loaded last.
+  const fresh = [...(allowedByUser.get(userId)?.entries() || [])].filter(([, a]) => Date.now() - a.at <= 8 * 60 * 60_000).sort((x, y) => y[1].at - x[1].at);
+  const scoped = key ? fresh.filter(([k]) => k.split(':')[0] === String(key).toUpperCase()) : fresh;
   if (!securityId) return scoped[0]?.[1] || null;
   return scoped.find(([, a]) => a.ids.has(securityId))?.[1] || null;
 }
@@ -877,7 +879,7 @@ export function scalperRoutes(r) {
     const atm = strikes.reduce((best, row) => !best || Math.abs(row.strike - Number(chain.last_price)) < Math.abs(best.strike - Number(chain.last_price)) ? row : best, null);
     allowScalperContracts(ctx.user.id, expiry, strikes, { ...u, spotSegment:spotSeg });
     if (!allowedByUser.has(ctx.user.id)) allowedByUser.set(ctx.user.id, new Map());
-    allowedByUser.get(ctx.user.id).set(u.key, { expiry, underlying:u.key, indexId:u.securityId, segment:u.optionSegment, exchange:u.exchange,
+    allowedByUser.get(ctx.user.id).set(`${u.key}:${expiry}`, { expiry, underlying:u.key, indexId:u.securityId, segment:u.optionSegment, exchange:u.exchange,
       spotSegment:spotSeg, spotInstrument:index.instrument, optionInstrument:u.optionInstrument || 'OPTIDX', mcx:!!u.mcx, multiplier:u.multiplier || null,
       ids: new Set(strikes.flatMap(row => [row.ce?.securityId, row.pe?.securityId]).filter(Boolean).map(String)), at: now });
     // MCX: Dhan counts quantity in lots (qtyPerLot 1); lotSize is then the rupees per point per lot, for sizing and funds.
@@ -953,6 +955,17 @@ export function scalperRoutes(r) {
       () => dataCall(() => adapter.marginRequired({ ...spec, side })))));
     return { lotSize, lots, qty, price, buy:buy.value.total, sell:sell.value.total,
       available:Number.isFinite(sell.value.available) ? sell.value.available : buy.value.available, asOf:Math.min(buy.asOf, sell.asOf) };
+  });
+
+  // Which chain a contract belongs to (a position opened from the Positions list): its index, expiry, strike and side,
+  // from Dhan's instrument list. Dhan's own position symbols ("NIFTY-Nov2026-24100-PE") carry no expiry day.
+  r.get('/api/scalper/contract', async ctx => {
+    limit(`scalper-contract:${ctx.user.id}`, 60, 60_000);
+    const securityId = String(ctx.query.securityId || ''), exch = String(ctx.query.segment || '').split('_')[0].toUpperCase();
+    if (!/^\d{1,12}$/.test(securityId) || !['NSE', 'BSE', 'MCX'].includes(exch)) throw bad('INVALID_INSTRUMENT', 'Unknown contract.');
+    const meta = (await indexOptionInstruments()).get(`${exch}:${securityId}`);
+    if (!meta) throw bad('INVALID_INSTRUMENT', 'That contract is not one of Power Scalper\'s option chains.');
+    return { underlying: meta.underlying, expiry: meta.expiry, strike: meta.strike, option: meta.option };
   });
 
   r.get('/api/scalper/candles', async ctx => {

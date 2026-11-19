@@ -52,7 +52,7 @@ import { ist, regularMarketOpen as marketOpen, regularTradingDay as isTradingDay
 import { accountFor, adapterFor, probeAdapter } from '../broker/registry.js';
 import { brokerBusy, switchTradeVia } from '../broker/switch.js';
 import { tradingBroker } from '../broker/per-broker.js';
-import { getBook, getKillStatus } from '../broker/book.js';
+import { getBook, getKillStatus, killSwitchLock } from '../broker/book.js';
 import { getRules } from '../rules/service.js';
 import { getSubscription } from '../billing/service.js';
 import { checkOrder } from '../risk/gate.js';
@@ -293,17 +293,43 @@ const heldBy = (uid, securityId, exceptId = 0) => stmt(`SELECT symbol, json_extr
   WHERE user_id = ? AND security_id = ? AND id != ? AND status IN ('placing', 'open', 'closing') LIMIT 1`).get(uid, String(securityId), exceptId);
 /** Today's auto trades, newest first (for the dashboard). */
 export function autoTradesToday(userId, day = ist().day) {
-  return stmt(`SELECT id, paper, direction, status, reason, symbol, strike, expiry, lots, qty, entry_price AS entryPrice, sl_price AS slPrice,
+  return stmt(`SELECT id, day, paper, direction, status, reason, symbol, strike, expiry, lots, qty, entry_price AS entryPrice, sl_price AS slPrice,
       exit_price AS exitPrice, created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy, COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') AS underlying
-      FROM auto_trades WHERE user_id = ? AND day = ? ORDER BY id DESC`).all(userId, day);
+      FROM auto_trades WHERE user_id = ? AND day = ? ORDER BY id DESC`).all(userId, day).map(t => withFillTimes(userId, t));
 }
 
-/** Earlier days' automatic trades, newest first, with each one's P&L (before charges) when it has an entry and an exit. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/**
+ * enteredAt / exitedAt: when the broker filled the entry and the exit (to the second), from the account's fills, since
+ * created_at is when the signal was decided (a Gap entry decided at 09:14:30 fills after 09:15:00). An auto trade's
+ * "SENSEX 2026-11-19 81500 CE" is the broker's "SENSEX-Nov2026-81500-CE": the first buy at or after the signal, then the
+ * first sell after it. No fill found: the trade's own times (created_at, closed_at).
+ */
+function withFillTimes(userId, t) {
+  const m = /^([A-Z]+) (\d{4})-(\d{2})-\d{2} (\d+(?:\.\d+)?) (CE|PE)$/.exec(String(t.symbol || ''));
+  let enteredAt = null, exitedAt = null;
+  if (m && !t.paper) {
+    const sym = `${m[1]}-${MON[Number(m[3]) - 1]}${m[2]}-${Number(m[4])}-${m[5]}`;
+    const fills = stmt(`SELECT ts, side FROM trades WHERE user_id = ? AND day = ? AND kind = 'exec' AND symbol = ? AND ts >= ? ORDER BY ts`)
+      .all(userId, t.day, sym, (t.createdAt || 0) - 120_000);
+    enteredAt = fills.find(f => f.side === 'BUY')?.ts ?? null;
+    if (enteredAt) exitedAt = fills.find(f => f.side === 'SELL' && f.ts >= enteredAt)?.ts ?? null;
+  }
+  return { ...t, enteredAt: enteredAt ?? (t.entryPrice > 0 ? t.createdAt : null), exitedAt: exitedAt ?? (t.exitPrice > 0 ? t.closedAt : null) };
+}
+
+/**
+ * Finished automatic trades, newest first, with each one's P&L (before charges) when it has an entry and an exit:
+ * earlier days, and today's as soon as they are done (a trade still being placed, open or closing is only in Today).
+ */
 export function autoTradeHistory(userId, today = ist().day, limit = 300) {
   return stmt(`SELECT id, day, paper, direction, status, reason, symbol, lots, qty, entry_price AS entryPrice, sl_price AS slPrice, exit_price AS exitPrice,
       created_at AS createdAt, closed_at AS closedAt, json_extract(detail, '$.setup.strategy') AS strategy, COALESCE(json_extract(detail, '$.setup.underlying'), 'NIFTY') AS underlying
-      FROM auto_trades WHERE user_id = ? AND day < ? ORDER BY day DESC, id DESC LIMIT ?`).all(userId, today, limit)
+      FROM auto_trades WHERE user_id = ? AND (day < ? OR (day = ? AND status NOT IN ('placing', 'open', 'closing')))
+      ORDER BY day DESC, id DESC LIMIT ?`).all(userId, today, today, limit)
     .filter(t => !String(t.symbol || '').startsWith('TEST'))
+    // capital: what the trade put in (entry premium × quantity), for every trade with an entry.
+    .map(t => ({ ...withFillTimes(userId, t), capital: t.entryPrice > 0 && t.qty > 0 ? round2(t.entryPrice * t.qty) : null }))
     .map(t => (t.entryPrice > 0 && t.exitPrice > 0 && t.qty > 0
       ? { ...t, pnl: round2((t.exitPrice - t.entryPrice) * t.qty), pnlPct: round2((t.exitPrice / t.entryPrice - 1) * 100) } : { ...t, pnl: null, pnlPct: null }));
 }
@@ -887,7 +913,7 @@ async function enter(acct, adapter, id, setup, direction, { now, pause, instrume
   const t = ist(), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
   const verdict = checkOrder(order, { rules, positions: book.positions, orders: book.orders || [], concurrent: true, entryInFlight: entriesInFlight.has(uid),
     entries: s.entries, pnl: s.realized + s.unrealized, minutes: marketOpen() ? t.minutes : null, capital: capitalFor(uid, s), paused: !!s.paused,
-    killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
+    killSwitchActive: !!killSwitchLock(uid, s), killSwitchLabel: killSwitchLock(uid, s), pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
 
   entriesInFlight.add(uid);
@@ -1084,7 +1110,7 @@ async function enterGap(acct, adapter, id, setup, direction, { now = Date.now(),
   // Capital per trade is checked at the premium the order was sized at, not at the chase limit above it.
   const verdict = checkOrder(lim ? { ...order, price: undefined } : order, { price: quoteAt, rules, positions: book.positions, orders: book.orders || [], concurrent: true, entryInFlight: entriesInFlight.has(uid),
     entries: s.entries, pnl: s.realized + s.unrealized, minutes: marketOpen() ? t.minutes : null, capital: capitalFor(uid, s), paused: !!s.paused,
-    killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
+    killSwitchActive: !!killSwitchLock(uid, s), killSwitchLabel: killSwitchLock(uid, s), pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return skip(verdict.reason);
   // Pre-open decision: everything is ready; the order goes FIRE_MS after 09:15:00.000 (exchanges take none before).
   if (pre) { const w = open915 + GAP_PRE.fireMs - Date.now(); if (w > 0) await sleep(w); }
@@ -1478,7 +1504,7 @@ export async function strangleTick(acct, { now = Date.now(), adapter = adapterFo
   const t = ist(now), s = dayState(uid, t.day), book = getBook(uid), rules = getRules(uid).active;
   const verdict = checkOrder({ symbol: `${u.symbol} ${expiry} CE+PE`, side: 'BUY', qty, price: round2(px(legs.CE) + px(legs.PE)) }, { rules, positions: book.positions, orders: book.orders || [],
     concurrent: true, entryInFlight: entriesInFlight.has(uid), entries: s.entries, pnl: s.realized + s.unrealized, minutes: t.minutes, capital: capitalFor(uid, s), paused: !!s.paused,
-    killSwitchActive: !!s.ks_active_at || getKillStatus(uid)?.active === true, pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
+    killSwitchActive: !!killSwitchLock(uid, s), killSwitchLabel: killSwitchLock(uid, s), pauseReason: s.pause_reason, subscriptionActive: !!getSubscription(uid)?.active });
   if (!verdict.ok) return later(verdict.reason);
 
   // Claim both legs before any order: a second pass or a restart never buys them again.
@@ -1657,6 +1683,24 @@ export async function manageTrade(trade, { now = Date.now(), acct = accountFor(t
 }
 
 const scanning = new Set();
+
+/**
+ * The user's own exit (Power Scalper ✕, Positions → Exit, a rule's emergency exit) on a position an automatic trade
+ * holds: handed to that trade's exit, which cancels its stop-loss order at Dhan, waits until Dhan confirms, and only then
+ * sells. A plain sell while the stop rests for the same quantity is read by Dhan as a new short (17 Nov 2026: refused
+ * for ₹26.6 lakh margin) and could sell twice. Returns the trade, or null when no automatic trade holds the contract.
+ */
+export function exitAutoTrade(userId, securityId, reason = 'Your exit from TradeLock', { manage = null } = {}) {
+  const t = stmt(`SELECT * FROM auto_trades WHERE user_id = ? AND security_id = ? AND status IN ('open', 'closing') ORDER BY id DESC LIMIT 1`)
+    .get(userId, String(securityId));
+  if (!t) return null;
+  const trade = t.status === 'open' ? { ...t, status: 'closing', reason } : t;
+  if (t.status === 'open') update(t.id, { status: 'closing', reason });
+  exitTry.delete(t.id);   // at once, not after the 30 s retry gap
+  const run = manage || manageNow;   // (tests pass their own, with a stand-in broker)
+  if (run) run(trade); else manageTrade(trade).catch(e => console.error('[autotrade] exit', e.message));
+  return trade;
+}
 
 // ---- Algo only: while Algo Trading is on, a manual F&O position opened today is closed at once ----
 const FNO = new Set(['NSE_FNO', 'BSE_FNO']);

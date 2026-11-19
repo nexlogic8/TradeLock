@@ -21,7 +21,7 @@ import { notify } from '../notifications/service.js';
 import { getRules } from '../rules/service.js';
 import { upsertFills, fillsForDay, logRiskEvent } from '../trades/service.js';
 import { runEmergency, tryKillSwitch } from '../emergency/service.js';
-import { watchBrackets } from '../brackets/service.js';
+import { watchBrackets, mcxSessionOpen } from '../brackets/service.js';
 import { trackPositions, livePnl, chargesToday } from './live-pnl.js';
 import { evaluate, countEntries, closedTrades } from './engine.js';
 import { dayState, patchDay, recordPoint, getDashboard, capitalFor, capitalFromFunds, algoSecurityIds, algoPnlOf, setAlgoPnl } from './service.js';
@@ -122,8 +122,12 @@ export async function syncAccount(acct, { force = false } = {}) {
   const live = adapter.alwaysOn || marketOpen();
   const prevBook = getBook(uid), mins = ist().minutes;
   const preOpen = !live && isTradingDay() && mins >= config.market.open - PRE_OPEN_MIN && mins < config.market.open;
+  // After the NSE close MCX trades until 23:55: an account with an MCX position or order is kept as fresh as in market
+  // hours (read-only, like the off-hours sync), so a commodity fill, its P&L and its exit show at once, not in 5 minutes.
+  const mcxActive = !live && mcxSessionOpen() && (prevBook.positions.some(p => p.qty !== 0 && /^MCX/.test(String(p.exchangeSegment || '')))
+    || (prevBook.orders || []).some(o => /^MCX|CRUDE|GOLD|SILVER|NATURALGAS/i.test(`${o.exchangeSegment || ''} ${o.symbol || ''}`)));
   // An empty in-memory book (e.g. right after a restart) is always refilled immediately.
-  if (!live && !preOpen && !force && prevBook.at !== null && Date.now() - (m.lastOkAt ?? acct.last_sync_at ?? 0) < OFF_HOURS_SYNC_MS) return;
+  if (!live && !preOpen && !mcxActive && !force && prevBook.at !== null && Date.now() - (m.lastOkAt ?? acct.last_sync_at ?? 0) < OFF_HOURS_SYNC_MS) return;
   const started = Date.now();
   const t = ist(started);
   let s = null;
@@ -293,7 +297,7 @@ async function refreshKillStatus(uid, adapter, tradingDay, s) {
   if (prev && Date.now() - prev.checkedAt < every) return;
   try {
     const active = await adapter.getKillSwitch();
-    setKillStatus(uid, { active, checkedAt: Date.now() });
+    setKillStatus(uid, { active, label: adapter.label, checkedAt: Date.now() });
     const t = ist(), d = s ?? dayState(uid);
     // Before the session opens the broker still reports the previous day's lock (Dhan resets it in the
     // morning), so a lock read overnight is not today's. Record broker-side locks from market open only.

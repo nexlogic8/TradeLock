@@ -70,7 +70,7 @@ before(async () => {
   cookie = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
   uid = stmt('SELECT id FROM users WHERE email = ?').get('strangle@example.com').id;
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'manual');
   upsertAccount(uid, { broker: 'dhan', clientId: 'C4', accessToken: 'test-token-not-real-0123456789' });
   stmt("UPDATE broker_accounts SET agent_on = 1, algo_on = 1, status = 'connected', orb_on = 0, cross_on = 0, gap_on = 0 WHERE user_id = ?").run(uid);
   acct = stmt('SELECT * FROM broker_accounts WHERE user_id = ?').get(uid);
@@ -219,7 +219,7 @@ test('Gap open 09:15 settings per index: defaults keep the live behaviour; saved
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg })).status, 200);
   const saved = gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
   // A ₹ capital is used as it is: no compounding, all of it.
-  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, compound: false, fundsPct: 100, capitalMode: 'amount', capitalPct: 80, autoExit: true, noEntryLock: true, decide: 'premium', lots: 0, capitalSince: undefined });
+  assert.deepEqual({ ...saved, capitalSince: undefined }, { ...cfg, compound: false, fundsPct: 100, capitalMode: 'amount', capitalPct: 80, autoExit: true, noEntryLock: true, decide: 'premium', lots: 0, lastLots: 0, capitalSince: undefined });
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, decide: 'later' } })).status, 400, 'decide: premium or preopen');
   assert.ok(saved.capitalSince > 0, 'its capital counts trades from now');
   const live = (await (await fetch(`${base}/api/algo/live`, { headers: H })).json()).account;
@@ -231,4 +231,12 @@ test('Gap open 09:15 settings per index: defaults keep the live behaviour; saved
   const pctCfg = gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
   assert.deepEqual([pctCfg.capitalMode, pctCfg.capitalPct, pctCfg.capital, pctCfg.autoExit, pctCfg.noEntryLock], ['percent', 60, 50000, false, false]);
   assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, capitalMode: 'lots' } })).status, 400);
+  // Size each trade: 25 fixed lots, then Fixed capital, then % of funds: the 25 lots are kept (lastLots) for coming back.
+  const now = () => gapConfig(stmt('SELECT * FROM broker_accounts WHERE id = ?').get(acct.id), 'SENSEX');
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, lots: 25 } })).status, 200);
+  assert.deepEqual([now().lots, now().lastLots], [25, 25]);
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, lots: 0, capitalMode: 'amount', capital: 300000 } })).status, 200);
+  assert.deepEqual([now().lots, now().lastLots, now().capital], [0, 25, 300000], 'by capital: the lots are remembered');
+  assert.equal((await post({ strategy: 'gap', index: 'SENSEX', cfg: { ...cfg, lots: 0, capitalMode: 'percent', capitalPct: 80, capital: 300000 } })).status, 200);
+  assert.deepEqual([now().lots, now().lastLots, now().capitalPct], [0, 25, 80], 'still remembered after a second capital change');
 });

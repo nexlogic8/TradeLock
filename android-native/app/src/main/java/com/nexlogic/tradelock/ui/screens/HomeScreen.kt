@@ -1,5 +1,8 @@
 package com.nexlogic.tradelock.ui.screens
 
+import com.nexlogic.tradelock.ui.components.LivePulse
+import com.nexlogic.tradelock.ui.components.IconBadge
+import com.nexlogic.tradelock.ui.components.ambient
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -96,7 +99,7 @@ fun HomeScreen(vm: AppViewModel, bottomPad: PaddingValues, onOpen: (String) -> U
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = { refreshing = true; vm.refresh(); scope.launch { delay(1200); refreshing = false } },
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().ambient(),
     ) {
         LazyColumn(
             Modifier.fillMaxSize().statusBarsPadding(),
@@ -119,8 +122,9 @@ fun HomeScreen(vm: AppViewModel, bottomPad: PaddingValues, onOpen: (String) -> U
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ChipTile(Modifier.weight(1f), onClick = { onOpen("brokers") }) {
+                            if (b != null) { BrokerMark(if (b.label == "Paper") "paper" else b.broker, b.label, 22); Spacer(Modifier.width(8.dp)) }
                             Dot(if (live && b?.status != "error") Tl.mint else Tl.amber)
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(8.dp))
                             Text(b?.label ?: "Connect broker", style = TlType.label, color = Tl.text, maxLines = 1)
                         }
                         ChipTile(Modifier.weight(1f), onClick = { ask = Ask.Pnl }) {
@@ -141,7 +145,7 @@ fun HomeScreen(vm: AppViewModel, bottomPad: PaddingValues, onOpen: (String) -> U
             item { AlarmBanner(vm) { onOpen("alarm") } }
             item { KillCard(d) { ask = Ask.Kill } }
             item {
-                TlCard {
+                TlCard(accent = if (b == null) null else if ((d?.netPnl ?: 0.0) < 0) Tl.red else Tl.mint) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Intraday P&L", style = TlType.title, color = Tl.text, modifier = Modifier.weight(1f))
                         LivePill(live && d?.marketOpen == true)
@@ -191,14 +195,14 @@ private fun TopBar(unread: Int, onQr: () -> Unit, onBell: () -> Unit) {
         Spacer(Modifier.width(12.dp))
         Text(buildAnnotatedString {
             withStyle(SpanStyle(color = Tl.text)) { append("TRADE") }
-            withStyle(SpanStyle(color = Tl.mint)) { append("LOCK") }
+            withStyle(SpanStyle(brush = Tl.aurora)) { append("LOCK") }
         }, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, modifier = Modifier.weight(1f))
         // Scan the QR on the web login page to sign in there.
-        Box(Modifier.size(46.dp).tactile(onQr).clip(RoundedCornerShape(14.dp)).background(Tl.surface).border(1.dp, Tl.lineHi, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(46.dp).tactile(onQr).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.QrCodeScanner, "Scan to sign in on the web", tint = Tl.mint, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(10.dp))
-        Box(Modifier.size(46.dp).tactile(onBell).clip(RoundedCornerShape(14.dp)).background(Tl.surface).border(1.dp, Tl.lineHi, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(46.dp).tactile(onBell).clip(RoundedCornerShape(14.dp)).background(Tl.glass).border(1.dp, Tl.edgeOff, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.NotificationsNone, null, tint = Tl.mint, modifier = Modifier.size(22.dp))
             if (unread > 0) Box(Modifier.align(Alignment.TopEnd).offset((-6).dp, 6.dp).size(9.dp).clip(CircleShape).background(Tl.red))
         }
@@ -222,11 +226,9 @@ private fun FundCard(label: String, value: Double?, foot: String, accent: Color,
 @Composable
 private fun KillCard(d: Dash?, onClick: () -> Unit) {
     val on = d?.killArmed == true
-    TlCard(Modifier.fillMaxWidth().tactile(onClick, enabled = d?.broker != null && !on), padding = 16.dp) {
+    TlCard(Modifier.fillMaxWidth().tactile(onClick, enabled = d?.broker != null && !on), padding = 16.dp, accent = if (on) Tl.red else null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(Tl.red.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.PowerSettingsNew, null, tint = Tl.red, modifier = Modifier.size(22.dp))
-            }
+            IconBadge(Icons.Rounded.PowerSettingsNew, Tl.red, 44.dp)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -247,8 +249,8 @@ private fun LivePill(on: Boolean) {
         Modifier.clip(CircleShape).background(if (on) Tl.mint.copy(alpha = 0.12f) else Tl.surfaceHi).padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Dot(if (on) Tl.mint else Tl.dim, 6.dp)
-        Spacer(Modifier.width(6.dp))
+        if (on) LivePulse(Tl.mint) else Dot(Tl.dim, 6.dp)
+        Spacer(Modifier.width(4.dp))
         Text(if (on) "LIVE" else "CLOSED", style = TlType.eyebrow.copy(fontSize = 10.sp), color = if (on) Tl.mint else Tl.dim)
     }
 }

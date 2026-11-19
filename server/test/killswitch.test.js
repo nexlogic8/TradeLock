@@ -29,7 +29,11 @@ before(async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
   uid = (await call('POST', '/api/auth/signup', { email: 'ks@example.com', password: 'longpassword' })).body.user.id;
-  await call('POST', '/api/brokers/connect', { broker: 'mock' });
+  const conn = await call('POST', '/api/brokers/connect', { broker: 'mock' });
+  // A new broker account starts on Paper (Paper first): the kill switch flow runs on the real (demo) broker.
+  await call('POST', `/api/brokers/${conn.body.account.id}/paper`, { on: false });
+  // Real starts fresh (Protection off until switched on): switch it on.
+  await call('POST', `/api/brokers/${conn.body.account.id}/agent`, { on: true });
 });
 after(() => server.close());
 

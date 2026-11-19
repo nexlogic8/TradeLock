@@ -42,8 +42,12 @@ export function livePnlOf(positions, ltpOf) {
 
 /** After each broker sync: follow this user's open contracts on the feed (none open: stop). */
 export function trackPositions(userId) {
-  // The feed follows open positions (live P&L) and contracts with a price alert (alerts/service.js).
-  const open = getBook(userId).positions.filter(p => p.qty !== 0), keys = new Set([...open.map(keyOf), ...alertKeys(userId)]);
+  // The feed follows open positions (live P&L), contracts with a price alert (alerts/service.js) and the contracts of
+  // pending orders that TradeLock matches itself (paper limits and stops carry their segment), so they fill on time
+  // with no screen open: the REST quote fallback is rate-limited.
+  const book = getBook(userId), open = book.positions.filter(p => p.qty !== 0);
+  const resting = (book.orders || []).filter(o => o.exchangeSegment && o.securityId);
+  const keys = new Set([...open.map(keyOf), ...resting.map(keyOf), ...alertKeys(userId)]);
   const st = state.get(userId) || { keys: new Set(), snap: null };
   const same = keys.size === st.keys.size && [...keys].every(k => st.keys.has(k));
   if (!same) { try { positionsWatch(userId, keys); } catch (e) { console.error('[live-pnl] watch', e.message); } st.keys = keys; }

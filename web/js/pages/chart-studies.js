@@ -2,7 +2,8 @@
 // Pure functions on candles [{time (s), open, high, low, close, volume}], oldest first, so they are unit
 // tested on the server. These only draw on the charts; the Algo Trading rules have their own fixed maths.
 
-const IST_DAY = t => new Date(t * 1000 + 19_800_000).toISOString().slice(0, 10);
+// The IST day number of a bar (integer maths: VWAP runs this on every bar many times a second, a Date per bar was the cost).
+const IST_DAY = t => Math.floor((t + 19_800) / 86_400);
 const SOURCES = [['close', 'Close'], ['open', 'Open'], ['high', 'High'], ['low', 'Low'], ['hl2', '(H+L)/2'], ['hlc3', '(H+L+C)/3']];
 const source = (c, s) => s === 'open' ? c.open : s === 'high' ? c.high : s === 'low' ? c.low
   : s === 'hl2' ? (c.high + c.low) / 2 : s === 'hlc3' ? (c.high + c.low + c.close) / 3 : c.close;

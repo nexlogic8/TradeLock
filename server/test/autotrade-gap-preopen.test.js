@@ -46,7 +46,7 @@ before(async () => {
     body: JSON.stringify({ email: 'gappre@example.com', password: 'longpassword' }) });
   uid = stmt('SELECT id FROM users WHERE email = ?').get('gappre@example.com').id;
   const active = getRules(uid).active;
-  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'algo');
+  saveRules(uid, { ...active, cutoff: { ...active.cutoff, on: false } }, undefined, null, 'manual');
   upsertAccount(uid, { broker: 'dhan', clientId: 'C778', accessToken: 'test-token-not-real-0123456789' });
   const grid = { gap: { NIFTY: { on: true, cfg: { decide: 'preopen', lots: 2, stopPct: 20, capitalMode: 'percent', capitalPct: 90, costToCost: false, requireGreen: true, autoExit: false, noEntryLock: false } } } };
   stmt('UPDATE broker_accounts SET agent_on = 1, algo_on = 1, orb_on = 0, cross_on = 0, gap_on = 1, algo_grid = ? WHERE user_id = ?').run(JSON.stringify(grid), uid);

@@ -35,14 +35,17 @@ export function orderPermission(broker) {
 }
 
 // Broker logos (served from /icons/brokers). Unknown brokers get their initials.
-const BROKER_LOGOS = { dhan: 'dhan.svg', zerodha: 'zerodha.svg', upstox: 'upstox.png', angelone: 'angelone.png', stoxkart: 'stoxkart.png' };
-export const brokerLogo = (id, name, { off = false } = {}) => (BROKER_LOGOS[id]
-  ? html`<span class="b-logo img"><img src="/icons/brokers/${BROKER_LOGOS[id]}" alt="${name}" width="32" height="32"></span>`
+// Paper has TradeLock's own mark. A Dhan account trading on paper still reports broker 'dhan' with the label 'Paper',
+// so the label decides: Paper is never shown with a broker's logo.
+const BROKER_LOGOS = { paper: 'paper.svg', dhan: 'dhan.svg', zerodha: 'zerodha.svg', upstox: 'upstox.png', angelone: 'angelone.png', stoxkart: 'stoxkart.png' };
+const logoKey = (id, name) => (id === 'paper' || /^paper$/i.test(String(name || '').trim()) ? 'paper' : id);
+export const brokerLogo = (id, name, { off = false } = {}) => (BROKER_LOGOS[logoKey(id, name)]
+  ? html`<span class="b-logo img ${logoKey(id, name) === 'paper' ? 'paper' : ''}"><img src="/icons/brokers/${BROKER_LOGOS[logoKey(id, name)]}" alt="${name}" width="32" height="32"></span>`
   : html`<span class="b-logo ${off ? 'off' : ''}">${name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()}</span>`);
 
 /** Small inline broker logo (chips, card titles); nothing for brokers without one. */
-export const brokerMark = (id, name) => (BROKER_LOGOS[id]
-  ? html`<img class="b-mark" src="/icons/brokers/${BROKER_LOGOS[id]}" alt="${name}" width="18" height="18">` : '');
+export const brokerMark = (id, name) => (BROKER_LOGOS[logoKey(id, name)]
+  ? html`<img class="b-mark ${logoKey(id, name) === 'paper' ? 'paper' : ''}" src="/icons/brokers/${BROKER_LOGOS[logoKey(id, name)]}" alt="${name}" width="18" height="18">` : '');
 
 /** Profile picture (Google photo / Gravatar) over the initials; a broken image just disappears. */
 export const avatar = (u, cls = '') => html`<span class="avatar ${cls}">${u?.initials || ''}${u?.avatar ? html`<img class="av-img" src="${u.avatar}" alt="" referrerpolicy="no-referrer" loading="lazy">` : ''}</span>`;

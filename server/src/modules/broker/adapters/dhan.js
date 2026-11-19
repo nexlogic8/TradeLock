@@ -176,7 +176,8 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
       ]);
       const posSig = (pos || []).map(p => `${p.securityId}:${p.netQty}:${p.buyQty ?? ''}:${p.sellQty ?? ''}`).join('|');
       const ord = withOrders ? firstOrd : prevPosSig === undefined || posSig !== prevPosSig ? await call('GET', '/orders') : null;
-      const orderSig = ord ? ord.map(o => `${o.orderId}:${o.orderStatus}:${o.filledQty ?? ''}`).join('|') : prevOrderSig;
+      // Prices too: an order moved on the chart (or in the Dhan app) is a change, so the dashboard and charts update.
+      const orderSig = ord ? ord.map(o => `${o.orderId}:${o.orderStatus}:${o.filledQty ?? ''}:${o.price ?? ''}:${o.triggerPrice ?? ''}`).join('|') : prevOrderSig;
       const trd = ord && (prevOrderSig === undefined || orderSig !== prevOrderSig) ? await call('GET', '/trades') : null;
       const num = (...vals) => { for (const v of vals) if (typeof v === 'number') return v; return null; };
       return {
@@ -238,6 +239,40 @@ export function createDhanAdapter({ clientId, accessToken, transport = config.ht
       const ids = await orderIds(o.slice ? slicedIds(r) : [r?.orderId].filter(Boolean).map(String), { securityId: o.securityId, side: o.side, qty: o.qty });
       if (!ids.length) throw new BrokerError('Dhan accepted the order but returned no order id; check the Dhan app', 'BROKER');
       return { id: ids.join(','), status: 'pending' };
+    },
+
+    // ---- Super Order (Dhan v2 /super/orders): entry + target + stop-loss legs held at Dhan; one exit leg cancels the
+    // other. Needs Super Order active on the Dhan account and the static IP, like any order.
+    /** A MARKET entry with its target and stop-loss legs. { id, status: 'pending' } */
+    async placeSuperOrder(o) {
+      if (!o.securityId || !o.exchangeSegment) throw new BrokerError('Dhan orders need a security ID and exchange segment', 'VALIDATION');
+      const r = await call('POST', '/super/orders', {
+        dhanClientId: clientId, transactionType: o.side, exchangeSegment: o.exchangeSegment, productType: o.productType || 'INTRADAY',
+        orderType: 'MARKET', securityId: String(o.securityId), quantity: o.qty, price: 0,
+        targetPrice: o.targetPrice, stopLossPrice: o.stopLossPrice, trailingJump: 0,
+      });
+      if (r?.orderStatus === 'REJECTED') throw new BrokerError(r?.omsErrorDescription || 'Dhan rejected the super order', 'REJECTED');
+      if (!r?.orderId) throw new BrokerError('Dhan accepted the super order but returned no order id; check the Dhan app', 'BROKER');
+      return { id: String(r.orderId), status: 'pending' };
+    },
+    /** Move a leg after the entry filled: 'TARGET_LEG' (targetPrice) or 'STOP_LOSS_LEG' (stopLossPrice, no trailing). */
+    async modifySuperLeg(orderId, leg, price) {
+      await call('PUT', `/super/orders/${encodeURIComponent(orderId)}`, { dhanClientId: clientId, orderId: String(orderId), legName: leg,
+        ...(leg === 'TARGET_LEG' ? { targetPrice: price } : { stopLossPrice: price, trailingJump: 0 }) });
+      return { id: orderId };
+    },
+    /** Cancel a leg ('TARGET_LEG' / 'STOP_LOSS_LEG'), or 'ENTRY_LEG' for the whole order. A cancelled leg cannot be added again. */
+    async cancelSuperLeg(orderId, leg) {
+      await call('DELETE', `/super/orders/${encodeURIComponent(orderId)}/${leg}`);
+      return { status: 'cancelled' };
+    },
+    /** One super order from today's list: { status, reason, legs: { TARGET_LEG: { status, price }, STOP_LOSS_LEG: {...} } } or null. */
+    async superOrder(orderId) {
+      const list = await call('GET', '/super/orders');
+      const o = (Array.isArray(list) ? list : []).find(x => String(x.orderId) === String(orderId));
+      if (!o) return null;
+      const legs = Object.fromEntries((o.legDetails || []).map(l => [l.legName, { status: l.orderStatus, price: Number(l.price) || null, remaining: Number(l.remainingQuantity) || 0 }]));
+      return { status: o.orderStatus, reason: o.omsErrorDescription || null, filledQty: Number(o.filledQty) || 0, legs };
     },
 
     // Move a resting stop-loss order (Dhan Modify Order): same order, new trigger / limit price.

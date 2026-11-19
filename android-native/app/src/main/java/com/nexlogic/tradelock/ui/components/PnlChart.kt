@@ -10,6 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -41,7 +47,22 @@ fun PnlChart(points: List<PnlPoint>, stopLoss: Double?, target: Double?, modifie
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(0.25f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "p")
     val axisStyle = TextStyle(color = Tl.dim, fontSize = 10.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
 
-    Canvas(modifier.fillMaxWidth().height(220.dp)) {
+    // Press and drag (the touch version of hover): a vertical line snaps to the nearest point with its time and P&L.
+    var touchX by remember { mutableStateOf<Float?>(null) }
+    Canvas(modifier.fillMaxWidth().height(220.dp).pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            touchX = down.position.x
+            do {
+                val e = awaitPointerEvent()
+                val ch = e.changes.firstOrNull() ?: break
+                touchX = ch.position.x
+                // A mostly sideways drag reads the chart; a vertical one is left to the page scroll.
+                if (abs(ch.position.x - ch.previousPosition.x) > abs(ch.position.y - ch.previousPosition.y)) ch.consume()
+            } while (e.changes.any { it.pressed })
+            touchX = null
+        }
+    }) {
         val open = 9 * 60 + 15
         val lastMin = points.lastOrNull()?.minute ?: open
         val close = max(15 * 60 + 30, ceil(lastMin / 30.0).toInt() * 30)
@@ -90,12 +111,14 @@ fun PnlChart(points: List<PnlPoint>, stopLoss: Double?, target: Double?, modifie
         }
         val last = points.last()
         fill.lineTo(x(last.minute), y(0.0)); fill.close()
-        val up = last.net >= 0
-        val c = if (up) Tl.mint else Tl.red
-        drawPath(fill, Brush.verticalGradient(
-            if (up) listOf(c.copy(alpha = 0.28f), c.copy(alpha = 0.0f)) else listOf(c.copy(alpha = 0.0f), c.copy(alpha = 0.28f)),
-            startY = if (up) y(hi) else y(0.0), endY = if (up) y(0.0) else y(lo)))
-        drawPath(line, c, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val c = if (last.net >= 0) Tl.mint else Tl.red
+        // Two-tone around zero: green above the zero line, red below it (line and fill). The split sits just under zero,
+        // so a flat ₹0 stretch stays green and only real losses turn red.
+        val f = ((y(0.0) + 1.5.dp.toPx() - y(hi)) / (y(lo) - y(hi))).coerceIn(0f, 1f)
+        drawPath(fill, Brush.verticalGradient(0f to Tl.mint.copy(alpha = 0.30f), f to Tl.mint.copy(alpha = 0.02f), f to Tl.red.copy(alpha = 0.02f), 1f to Tl.red.copy(alpha = 0.30f),
+            startY = y(hi), endY = y(lo)))
+        drawPath(line, Brush.verticalGradient(0f to Tl.mint, f to Tl.mint, f to Tl.red, 1f to Tl.red, startY = y(hi), endY = y(lo)),
+            style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         val dot = Offset(x(last.minute), y(last.net))
         drawCircle(c.copy(alpha = 0.25f * pulse), radius = 12.dp.toPx(), center = dot)
         drawCircle(c, radius = 4.5.dp.toPx(), center = dot)
@@ -103,6 +126,26 @@ fun PnlChart(points: List<PnlPoint>, stopLoss: Double?, target: Double?, modifie
         val t = measurer.measure(inr(last.net, sign = true), axisStyle.copy(color = c, fontSize = 11.sp))
         val tx = (dot.x + 10.dp.toPx()).let { if (it + t.size.width > size.width) dot.x - 10.dp.toPx() - t.size.width else it }
         drawText(t, topLeft = Offset(tx, dot.y - t.size.height / 2f))
+
+        touchX?.let { tx0 ->
+            val i = points.indices.minBy { abs(x(points[it].minute) - tx0) }
+            val p = points[i]; val px = x(p.minute); val py = y(p.net); val pc = if (p.net >= 0) Tl.mint else Tl.red
+            drawLine(pc.copy(alpha = 0.7f), Offset(px, top), Offset(px, bottom), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+            drawCircle(pc.copy(alpha = 0.22f), radius = 11.dp.toPx(), center = Offset(px, py))
+            drawCircle(pc, radius = 5.dp.toPx(), center = Offset(px, py))
+            drawCircle(Tl.bg, radius = 5.dp.toPx(), center = Offset(px, py), style = Stroke(2.dp.toPx()))
+            // The card: time, then the P&L in its colour, beside the line (left of it near the right edge).
+            val t1 = measurer.measure(hhmm(p.minute) + " IST", axisStyle.copy(color = Tl.muted, fontSize = 11.sp))
+            val t2 = measurer.measure(inr(p.net, sign = true), axisStyle.copy(color = pc, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
+            val pad = 10.dp.toPx(); val w = max(t1.size.width, t2.size.width) + pad * 2 + 4.dp.toPx(); val h = t1.size.height + t2.size.height + pad * 1.6f
+            val cx = if (px + 12.dp.toPx() + w <= size.width) px + 12.dp.toPx() else px - 12.dp.toPx() - w
+            val cy = (py - h / 2f).coerceIn(top, bottom - h)
+            drawRoundRect(Tl.raised.copy(alpha = 0.96f), Offset(cx, cy), androidx.compose.ui.geometry.Size(w, h), androidx.compose.ui.geometry.CornerRadius(10.dp.toPx()))
+            drawRoundRect(Tl.lineHi, Offset(cx, cy), androidx.compose.ui.geometry.Size(w, h), androidx.compose.ui.geometry.CornerRadius(10.dp.toPx()), style = Stroke(1f))
+            drawRoundRect(pc, Offset(cx, cy + pad * 0.8f), androidx.compose.ui.geometry.Size(3.dp.toPx(), h - pad * 1.6f), androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+            drawText(t1, topLeft = Offset(cx + pad + 4.dp.toPx(), cy + pad * 0.8f))
+            drawText(t2, topLeft = Offset(cx + pad + 4.dp.toPx(), cy + pad * 0.8f + t1.size.height))
+        }
     }
 }
 

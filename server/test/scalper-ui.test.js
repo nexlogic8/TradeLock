@@ -42,7 +42,7 @@ test('Power Scalper renders the three-chart workspace, chain and one-tap order t
   assert.match(view,/data-underlying="BANKNIFTY" aria-pressed="false" class="">BANK NIFTY</);
   assert.match(view,/data-underlying="SENSEX" aria-pressed="false" class="">SENSEX</);
   // The market switch: NIFTY pressed; MCX carries its class (amber) and opens Crude Oil Mini first.
-  assert.match(view,/data-underlying="CRUDEOILM" aria-pressed="false" title="[^"]*" class="sc-mcx">MCX</);
+  assert.match(view,/data-underlying="CRUDEOILM" aria-pressed="false" title="[^"]*" class="sc-mcx">Commodity</, 'the Equity | Commodity switch opens MCX commodity options');
   assert.match(view,/id="sc-fullscreen"[^>]*>.*<span class="sc-fs-text"><span class="sc-fs-long">Full screen<span class="sc-fs-trade"> · trade<\/span><\/span><span class="sc-fs-short">Trade<\/span><\/span><\/button>/);
   assert.match(view,/class="panel scalper-chain side-chain/);
   assert.match(view,/data-side-panel="positions" aria-pressed="false">Positions</);
